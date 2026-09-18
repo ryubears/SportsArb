@@ -1,5 +1,5 @@
 """
-Small helpers shared by the venue clients.
+Helper functions shared by the venue clients.
 """
 
 import json
