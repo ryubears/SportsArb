@@ -1,0 +1,2 @@
+# Third-party packages needed to run the code. Install with: pip install -r requirements.txt
+# Currently empty: everything uses the Python standard library.
