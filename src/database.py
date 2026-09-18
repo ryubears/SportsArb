@@ -36,6 +36,20 @@ CREATE TABLE IF NOT EXISTS contracts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_contracts_sport ON contracts (sport, venue);
+
+CREATE TABLE IF NOT EXISTS bets (
+    venue        TEXT NOT NULL,
+    contract_id  TEXT NOT NULL,
+    kind         TEXT NOT NULL,   -- 'champion', 'game_winner', 'spread', 'total', and so on.
+    season       INTEGER,         -- The year the season ends.
+    game_date    TEXT,            -- YYYY-MM-DD in US Eastern time, for game kinds only.
+    team_a       TEXT,            -- Away team code for game kinds.
+    team_b       TEXT,            -- Home team code for game kinds.
+    subject      TEXT,            -- The team the contract is about, when there is one.
+    line         REAL,            -- Spread margin, total points, or wins threshold.
+    polarity     TEXT NOT NULL,   -- 'yes' or 'no', see models.Bet.
+    PRIMARY KEY (venue, contract_id)
+);
 """
 
 
@@ -101,5 +115,38 @@ def load_contracts(conn, sport=None, venue=None):
         params.append(sport)
     if venue:
         sql += " AND venue = ?"
+        params.append(venue)
+    return [dict(r) for r in conn.execute(sql, params)]
+
+
+def replace_bets(conn, sport, bets):
+    """
+    Drop every bet belonging to the sport's contracts, then insert the new ones.
+    """
+    conn.execute("""
+        DELETE FROM bets WHERE (venue, contract_id) IN
+            (SELECT venue, contract_id FROM contracts WHERE sport = ?)
+    """, (sport,))
+    conn.executemany("""
+        INSERT INTO bets (venue, contract_id, kind, season, game_date,
+                                 team_a, team_b, subject, line, polarity)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+    """, [(b.venue, b.contract_id, b.kind, b.season, b.game_date,
+           b.team_a, b.team_b, b.subject, b.line, b.polarity) for b in bets])
+    conn.commit()
+
+
+def load_bets(conn, sport, venue=None):
+    """
+    Return bet rows as dicts for one sport, joined with a few contract columns.
+    """
+    sql = """
+        SELECT b.*, c.title, c.outcome, c.event_id, c.series_id, c.close_time, c.start_time
+        FROM bets b JOIN contracts c USING (venue, contract_id)
+        WHERE c.sport = ?
+    """
+    params = [sport]
+    if venue:
+        sql += " AND b.venue = ?"
         params.append(venue)
     return [dict(r) for r in conn.execute(sql, params)]

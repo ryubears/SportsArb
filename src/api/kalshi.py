@@ -31,12 +31,12 @@ def paged(path, params, key):
             return items
 
 
-def fetch_series(prefixes):
+def fetch_series(prefixes, tickers=()):
     """
-    Sports series whose ticker starts with one of the prefixes.
+    Sports series whose ticker starts with one of the prefixes, or is listed exactly in tickers.
     """
     all_series = paged("/series", {"category": "Sports", "limit": 200}, "series")
-    return [s for s in all_series if s["ticker"].startswith(tuple(prefixes))]
+    return [s for s in all_series if s["ticker"].startswith(tuple(prefixes)) or s["ticker"] in tickers]
 
 
 def fetch_events(series_ticker):
@@ -49,12 +49,26 @@ def fetch_events(series_ticker):
     }, "events")
 
 
-def contracts(sport, prefixes):
+def strict_line(m):
+    """
+    The market's line, restated so Yes always means strictly more than the line.
+    Kalshi marks 'at least N' markets as greater_or_equal with a whole number
+    strike, and at least N is the same as more than N minus a half.
+    """
+    line = float_or_none(m.get("floor_strike"))
+    if line is None:
+        line = float_or_none(m.get("cap_strike"))
+    if line is not None and m.get("strike_type") == "greater_or_equal":
+        line -= 0.5
+    return line
+
+
+def contracts(sport, prefixes, tickers=()):
     """
     One Contract per Kalshi market, meaning its Yes side.
     """
     result = []
-    for series in fetch_series(prefixes):
+    for series in fetch_series(prefixes, tickers):
         fee_info = {
             "fee_type": series.get("fee_type"),
             "fee_multiplier": series.get("fee_multiplier"),
@@ -64,9 +78,7 @@ def contracts(sport, prefixes):
                 if m.get("status") not in (None, "open", "active"):
                     continue
                 rules = " ".join(filter(None, [m.get("rules_primary"), m.get("rules_secondary")])) or None
-                line = float_or_none(m.get("floor_strike"))
-                if line is None:
-                    line = float_or_none(m.get("cap_strike"))
+                line = strict_line(m)
                 result.append(Contract(
                     venue="kalshi",
                     contract_id=m["ticker"],

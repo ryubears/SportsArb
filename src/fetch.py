@@ -17,6 +17,7 @@ SPORTS = {
     "nfl": {
         "polymarket_tags": ["nfl"],
         "kalshi_series_prefixes": ["KXNFL"],
+        "kalshi_series_tickers": ["KXSB"],   # The Super Bowl winner series does not use the NFL prefix.
     },
 }
 
@@ -29,7 +30,7 @@ def fetch_contracts(venue, sport):
     if venue == "polymarket":
         return polymarket.contracts(sport, config["polymarket_tags"])
     if venue == "kalshi":
-        return kalshi.contracts(sport, config["kalshi_series_prefixes"])
+        return kalshi.contracts(sport, config["kalshi_series_prefixes"], config["kalshi_series_tickers"])
     raise ValueError(f"unknown venue {venue}")
 
 
