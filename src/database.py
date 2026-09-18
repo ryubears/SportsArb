@@ -50,6 +50,24 @@ CREATE TABLE IF NOT EXISTS bets (
     polarity     TEXT NOT NULL,   -- 'yes' or 'no', see models.Bet.
     PRIMARY KEY (venue, contract_id)
 );
+
+CREATE TABLE IF NOT EXISTS pairs (
+    polymarket_id        TEXT NOT NULL,
+    kalshi_id            TEXT NOT NULL,
+    kind                 TEXT NOT NULL,
+    season               INTEGER,
+    game_date            TEXT,
+    team_a               TEXT,
+    team_b               TEXT,
+    subject              TEXT,
+    line                 REAL,
+    polymarket_polarity  TEXT NOT NULL,
+    kalshi_polarity      TEXT NOT NULL,
+    close_gap_days       REAL,            -- Kalshi close time minus Polymarket close time.
+    flags                TEXT NOT NULL,   -- JSON list of things to check before trusting the pair.
+    matched_at           TEXT NOT NULL,
+    PRIMARY KEY (polymarket_id, kalshi_id)
+);
 """
 
 
@@ -150,3 +168,34 @@ def load_bets(conn, sport, venue=None):
         sql += " AND b.venue = ?"
         params.append(venue)
     return [dict(r) for r in conn.execute(sql, params)]
+
+
+def replace_pairs(conn, sport, pairs, matched_at):
+    """
+    Drop every pair belonging to the sport's contracts, then insert the new ones.
+    """
+    conn.execute("""
+        DELETE FROM pairs WHERE polymarket_id IN
+            (SELECT contract_id FROM contracts WHERE venue = 'polymarket' AND sport = ?)
+    """, (sport,))
+    conn.executemany("""
+        INSERT INTO pairs (polymarket_id, kalshi_id, kind, season, game_date, team_a, team_b,
+                           subject, line, polymarket_polarity, kalshi_polarity,
+                           close_gap_days, flags, matched_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, [(p.polymarket_id, p.kalshi_id, p.kind, p.season, p.game_date, p.team_a, p.team_b,
+           p.subject, p.line, p.polymarket_polarity, p.kalshi_polarity,
+           p.close_gap_days, json.dumps(p.flags), matched_at) for p in pairs])
+    conn.commit()
+
+
+def load_pairs(conn, sport):
+    """
+    Return pair rows as dicts for one sport.
+    """
+    sql = """
+        SELECT p.* FROM pairs p JOIN contracts c
+            ON c.venue = 'polymarket' AND c.contract_id = p.polymarket_id
+        WHERE c.sport = ?
+    """
+    return [dict(r) for r in conn.execute(sql, (sport,))]

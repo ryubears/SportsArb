@@ -44,3 +44,23 @@ class Bet:
     subject: str | None     # The team the contract is about, when there is one.
     line: float | None      # Spread margin, total points, or wins threshold.
     polarity: str           # 'yes' pays when the bet's statement is true, 'no' pays when it is false.
+
+
+@dataclass
+class Pair:
+    """
+    One Polymarket contract and one Kalshi contract that describe the same bet.
+    """
+    kind: str
+    season: int | None
+    game_date: str | None
+    team_a: str | None
+    team_b: str | None
+    subject: str | None
+    line: float | None
+    polymarket_id: str
+    kalshi_id: str
+    polymarket_polarity: str    # 'yes' or 'no', see Bet.
+    kalshi_polarity: str
+    close_gap_days: float | None    # Kalshi close time minus Polymarket close time.
+    flags: list[str]                # Things a human should check before trusting the pair.
