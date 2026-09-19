@@ -34,14 +34,18 @@ def kalshi_fee(price, contracts, fee_info, maker=False):
     """
     Fee in dollars for buying contracts at price on Kalshi, rounded up to the cent.
     """
-    multiplier = (fee_info or {}).get("fee_multiplier") or 1
+    multiplier = (fee_info or {}).get("fee_multiplier")
+    if multiplier is None:
+        multiplier = 1
     if maker:
         if (fee_info or {}).get("fee_type") != "quadratic_with_maker_fees":
             return 0.0
         rate = KALSHI_MAKER_RATE
     else:
         rate = KALSHI_TAKER_RATE
-    return math.ceil(multiplier * rate * contracts * price * (1 - price) * 100) / 100
+    cents = multiplier * rate * contracts * price * (1 - price) * 100
+    # Drop floating point residue first, so an exact number of cents is not pushed up by one.
+    return math.ceil(round(cents, 6)) / 100
 
 
 def fee(venue, price, contracts, fee_info):
