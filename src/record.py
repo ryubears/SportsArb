@@ -54,6 +54,7 @@ class Recorder:
         self.latest = {}        # (venue, contract_id) maps to the newest Quote seen.
         self.written = {}       # (venue, contract_id) maps to the best levels last written to the database.
         self.updates = {"polymarket": 0, "kalshi": 0}
+        self.last_update = {"polymarket": None, "kalshi": None}     # Wall clock seconds of the newest update per venue.
         self.rows_written = 0
 
     def on_book(self, venue, contract_id, bids, asks):
@@ -61,6 +62,7 @@ class Recorder:
         Remember the newest book for a contract. Called by the venue streams.
         """
         self.updates[venue] += 1
+        self.last_update[venue] = time.time()
         self.latest[(venue, contract_id)] = Quote(venue, contract_id, now_iso(), bids[:LEVELS], asks[:LEVELS])
 
     def flush(self):
@@ -80,10 +82,12 @@ class Recorder:
 
     def status(self):
         """
-        One line with what has happened so far.
+        One line with what has happened so far, including how long each venue has been quiet.
         """
-        return (f"tracking {len(self.latest)} books, updates "
-                f"polymarket {self.updates['polymarket']} kalshi {self.updates['kalshi']}, rows written {self.rows_written}")
+        quiet = {v: f"{time.time() - t:.0f}s ago" if t else "never" for v, t in self.last_update.items()}
+        return (f"tracking {len(self.latest)} books, updates polymarket {self.updates['polymarket']} "
+                f"(last {quiet['polymarket']}) kalshi {self.updates['kalshi']} (last {quiet['kalshi']}), "
+                f"rows written {self.rows_written}")
 
 
 async def run(conn, sport, seconds):

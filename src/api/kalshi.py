@@ -25,6 +25,7 @@ BASE = "https://api.elections.kalshi.com/trade-api/v2"
 SLEEP = 0.12   # Seconds between calls, to stay under the public rate limit.
 WS_URL = "wss://api.elections.kalshi.com/trade-api/ws/v2"
 WS_PATH = "/trade-api/ws/v2"
+STALE_SECONDS = 300     # A connection that sends nothing for this long is treated as dead.
 DATA = Path(__file__).resolve().parent.parent.parent / "data"
 KEY_ID_FILE = DATA / "kalshi_key_id.txt"
 PRIVATE_KEY_FILE = DATA / "kalshi_private_key.pem"
@@ -180,7 +181,9 @@ async def stream_books(tickers, on_book, log=print):
             async with websockets.connect(WS_URL, additional_headers=ws_headers(), open_timeout=20, max_size=None) as ws:
                 await ws.send(json.dumps({"id": 1, "cmd": "subscribe",
                                           "params": {"channels": ["orderbook_delta"], "market_tickers": tickers}}))
-                async for raw in ws:
+                while True:
+                    # Kalshi sends nothing while books are idle, so the limit is generous.
+                    raw = await asyncio.wait_for(ws.recv(), timeout=STALE_SECONDS)
                     m = json.loads(raw)
                     seq = m.get("seq")
                     if seq is not None:
@@ -191,6 +194,8 @@ async def stream_books(tickers, on_book, log=print):
                     if m.get("type") == "error":
                         log(f"kalshi stream error {m.get('msg')}")
                     apply_message(m, books, on_book)
-        except (websockets.ConnectionClosed, OSError, asyncio.TimeoutError) as e:
+        except asyncio.TimeoutError:
+            log(f"kalshi stream silent for {STALE_SECONDS}s, reconnecting")
+        except (websockets.ConnectionClosed, OSError) as e:
             log(f"kalshi stream dropped ({type(e).__name__}), reconnecting")
         await asyncio.sleep(3)
