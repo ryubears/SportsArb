@@ -1,0 +1,50 @@
+"""
+Refresh the catalog. Fetch both venues, classify the contracts into bets,
+and pair them across venues, in one call.
+
+The recorder runs this on a timer so new games enter the pairs table and
+fee schedule changes land in the fee history while it is recording. The
+same steps are available one at a time as fetch.py, classify.py, and
+match.py, which also print their full reports.
+
+Run with:
+    python3 src/pipeline.py --sport nfl
+"""
+
+import argparse
+import classify
+import fetch
+import match
+from db import database
+from util.timeutil import now_iso
+
+VENUES = ("polymarket", "kalshi")
+
+
+def refresh(sport, log=print, db_path=None):
+    """
+    Run fetch, classify, and match for a sport with a fresh database connection.
+    Returns a one line summary. Safe to call from a worker thread.
+    """
+    with database.connect(db_path) as conn:
+        parts = []
+        for venue in VENUES:
+            contracts = fetch.fetch_contracts(venue, sport)
+            fee_changes = database.upsert_contracts(conn, contracts, now_iso())
+            parts.append(f"{venue} {len(contracts)} contracts, {fee_changes} fee changes")
+            log(f"fetched {parts[-1]}")
+        bets, _ = classify.classify_all(database.load_contracts(conn, sport=sport))
+        database.replace_bets(conn, sport, bets)
+        pairs, _ = match.match(database.load_bets(conn, sport))
+        database.replace_pairs(conn, sport, pairs, now_iso())
+        parts.append(f"{len(bets)} bets, {len(pairs)} pairs")
+    return ", ".join(parts)
+
+
+# MAIN
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description="Fetch, classify, and match in one go.")
+    ap.add_argument("--sport", default="nfl", choices=sorted(fetch.SPORTS))
+    args = ap.parse_args()
+    print(refresh(args.sport))

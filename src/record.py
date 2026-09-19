@@ -8,12 +8,16 @@ since the last row. Each row still carries the top five levels. Quiet
 contracts produce nothing, busy ones produce at most one row per second.
 
 Only futures and games within GAME_WINDOW_DAYS of kickoff are recorded.
-The target list is loaded once at start, so restart the recorder when new
-games enter the window.
+Every CATALOG_MINUTES the recorder refreshes the catalog in a background
+thread, fetch then classify then match. Contracts that are new to the
+pairs table get a connection of their own, so the connections carrying
+live games are never interrupted. Contracts that closed keep their dead
+subscription until the next start, but their updates are ignored. Fee
+schedule changes reach the fee history through the same refresh.
 
 Run with:
     python3 src/record.py --sport nfl
-    python3 src/record.py --sport nfl --seconds 120
+    python3 src/record.py --sport nfl --seconds 120 --catalog-minutes 0
 
 For a long run on a laptop, stop the Mac from sleeping while it runs:
     caffeinate -i -s python3 src/record.py --sport nfl
@@ -21,6 +25,7 @@ For a long run on a laptop, stop the Mac from sleeping while it runs:
 
 import argparse
 import asyncio
+import pipeline
 import sys
 import time
 from api import kalshi, polymarket
@@ -35,6 +40,9 @@ LEVELS = 5              # Price levels kept per side.
 FLUSH_SECONDS = 1.0     # How often changed books are written.
 STATUS_SECONDS = 60     # How often a status line is printed.
 GAME_WINDOW_DAYS = 7    # Games further out than this are not recorded.
+CATALOG_MINUTES = 60    # How often the catalog is refreshed and subscriptions updated. Zero disables it.
+
+STREAMERS = {"polymarket": polymarket.stream_books, "kalshi": kalshi.stream_books}
 
 
 def log(message):
@@ -42,6 +50,14 @@ def log(message):
     Print a message with the current UTC time in front.
     """
     print(f"{now_iso()[11:19]} {message}")
+
+
+def load_targets(conn, sport):
+    """
+    The contracts to record right now, as {venue: [contract_id, ...]}.
+    """
+    now = now_iso()
+    return database.load_recording_targets(conn, sport, now, shift(now, days=GAME_WINDOW_DAYS))
 
 
 class Recorder:
@@ -64,6 +80,14 @@ class Recorder:
         self.updates[venue] += 1
         self.last_update[venue] = time.time()
         self.latest[(venue, contract_id)] = Quote(venue, contract_id, now_iso(), bids[:LEVELS], asks[:LEVELS])
+
+    def forget(self, venue, contract_ids):
+        """
+        Drop contracts that are no longer recorded.
+        """
+        for contract_id in contract_ids:
+            self.latest.pop((venue, contract_id), None)
+            self.written.pop((venue, contract_id), None)
 
     def flush(self):
         """
@@ -90,19 +114,78 @@ class Recorder:
                 f"rows written {self.rows_written}")
 
 
-async def run(conn, sport, seconds):
+class Streams:
     """
-    Start both streams and the flush timer. Stops after the given seconds, or never when zero.
+    The websocket tasks feeding the recorder. Connections are only ever added.
+    New contracts get a new task, and contracts that are no longer wanted are
+    ignored rather than unsubscribed, so a live game's connection never drops.
     """
-    now = now_iso()
-    targets = database.load_recording_targets(conn, sport, now, shift(now, days=GAME_WINDOW_DAYS))
-    log(f"recording {len(targets['polymarket'])} polymarket and {len(targets['kalshi'])} kalshi contracts")
+
+    def __init__(self, recorder, streamers=STREAMERS):
+        self.recorder = recorder
+        self.streamers = streamers
+        self.tasks = []
+        self.subscribed = {venue: set() for venue in streamers}    # Every contract any task streams.
+        self.wanted = {venue: set() for venue in streamers}        # The contracts the recorder should keep.
+
+    def start(self, venue, contract_ids):
+        """
+        Start one more task streaming these contracts into the recorder.
+        """
+        def callback(contract_id, bids, asks):
+            if contract_id in self.wanted[venue]:
+                self.recorder.on_book(venue, contract_id, bids, asks)
+        self.tasks.append(asyncio.create_task(self.streamers[venue](list(contract_ids), callback, log)))
+        self.subscribed[venue] |= set(contract_ids)
+        self.wanted[venue] |= set(contract_ids)
+
+    def update(self, targets):
+        """
+        Subscribe to contracts not yet streamed and stop keeping the ones that
+        left the target list. Returns a summary of the changes.
+        """
+        changes = []
+        for venue, contract_ids in targets.items():
+            new = set(contract_ids) - self.subscribed[venue]
+            dropped = self.wanted[venue] - set(contract_ids)
+            self.wanted[venue] = set(contract_ids)
+            self.recorder.forget(venue, dropped)
+            if new:
+                self.start(venue, new)
+            if new or dropped:
+                changes.append(f"{venue} +{len(new)} -{len(dropped)}")
+        return ", ".join(changes) or "no changes"
+
+    async def stop_all(self):
+        """
+        Cancel every task and wait for them to finish.
+        """
+        for task in self.tasks:
+            task.cancel()
+        for task in self.tasks:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        self.tasks = []
+
+
+async def run(conn, sport, seconds, catalog_minutes):
+    """
+    Refresh the catalog, start both streams and the flush timer, and keep the
+    catalog fresh on a timer. Stops after the given seconds, or never when zero.
+    """
     recorder = Recorder(conn)
-    streams = asyncio.gather(
-        polymarket.stream_books(targets["polymarket"], lambda cid, b, a: recorder.on_book("polymarket", cid, b, a), log),
-        kalshi.stream_books(targets["kalshi"], lambda cid, b, a: recorder.on_book("kalshi", cid, b, a), log),
-    )
-    started, last_status = time.time(), time.time()
+    streams = Streams(recorder)
+    if catalog_minutes:
+        log("refreshing catalog before starting")
+        log(await asyncio.to_thread(pipeline.refresh, sport, log))
+    targets = load_targets(conn, sport)
+    log(f"recording {len(targets['polymarket'])} polymarket and {len(targets['kalshi'])} kalshi contracts")
+    for venue, contract_ids in targets.items():
+        streams.start(venue, contract_ids)
+    started = last_status = last_catalog = time.time()
+    refresh = None      # The background catalog refresh while one is running.
     try:
         while not seconds or time.time() - started < seconds:
             await asyncio.sleep(FLUSH_SECONDS)
@@ -110,12 +193,16 @@ async def run(conn, sport, seconds):
             if time.time() - last_status >= STATUS_SECONDS:
                 log(recorder.status())
                 last_status = time.time()
+            if catalog_minutes and refresh is None and time.time() - last_catalog >= catalog_minutes * 60:
+                refresh = asyncio.create_task(asyncio.to_thread(pipeline.refresh, sport, log))
+            if refresh is not None and refresh.done():
+                log(f"catalog refreshed, {refresh.result()}")
+                log(f"subscriptions {streams.update(load_targets(conn, sport))}")
+                refresh, last_catalog = None, time.time()
     finally:
-        streams.cancel()
-        try:
-            await streams
-        except asyncio.CancelledError:
-            pass
+        if refresh is not None:
+            refresh.cancel()
+        await streams.stop_all()
         recorder.flush()
         log(recorder.status())
 
@@ -126,9 +213,11 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Record live order books for paired contracts.")
     ap.add_argument("--sport", default="nfl")
     ap.add_argument("--seconds", type=int, default=0, help="stop after this many seconds, 0 means run forever")
+    ap.add_argument("--catalog-minutes", type=int, default=CATALOG_MINUTES,
+                    help="minutes between catalog refreshes, 0 means never refresh")
     args = ap.parse_args()
     with database.connect() as conn:
         try:
-            asyncio.run(run(conn, args.sport, args.seconds))
+            asyncio.run(run(conn, args.sport, args.seconds, args.catalog_minutes))
         except KeyboardInterrupt:
             print("stopped")

@@ -4,11 +4,18 @@ Tests for the arbitrage scanner's pricing and episode detection.
 
 import pytest
 import scan
-from db.models import Quote
+from db.models import FeeRecord, Quote
 
 NO_FEES = {"polymarket": {"feesEnabled": False}, "kalshi": {"fee_type": "quadratic", "fee_multiplier": 0}}
 REAL_FEES = {"polymarket": {"feesEnabled": True, "feeSchedule": {"rate": 0.05}},
              "kalshi": {"fee_type": "quadratic", "fee_multiplier": 1}}
+
+
+def histories(fee_infos, seen_at="2000-01-01T00:00:00+00:00"):
+    """
+    A one record fee history per venue, in force from long ago.
+    """
+    return {venue: [FeeRecord(venue, "x", seen_at, info)] for venue, info in fee_infos.items()}
 
 
 def pair(pm_polarity="yes", k_polarity="yes"):
@@ -69,6 +76,16 @@ def test_best_trade_opposite_polarity_buys_both_sides():
     assert edge == pytest.approx(1 - 0.45 - 0.54)
 
 
+def test_fee_at_picks_the_record_in_force():
+    history = [FeeRecord("polymarket", "x", "2026-09-18T00:00:00+00:00", {"a": 1}),
+               FeeRecord("polymarket", "x", "2026-09-19T16:00:00+00:00", {"a": 2})]
+    assert scan.fee_at(history, "2026-09-17T00:00:00+00:00") == {"a": 1}
+    assert scan.fee_at(history, "2026-09-19T12:00:00+00:00") == {"a": 1}
+    assert scan.fee_at(history, "2026-09-19T16:00:00+00:00") == {"a": 2}
+    assert scan.fee_at(history, "2026-09-20T00:00:00+00:00") == {"a": 2}
+    assert scan.fee_at([], "2026-09-20T00:00:00+00:00") == {}
+
+
 # EPISODES
 
 T0 = "2026-09-19T12:00:00+00:00"
@@ -79,7 +96,7 @@ def test_scan_pair_finds_one_episode_with_duration_and_return():
     k = [quote("kalshi", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]]),
          quote("kalshi", "2026-09-19T12:01:01+00:00", [[0.49, 100]], [[0.50, 100]])]
     close = "2026-09-29T12:00:01+00:00"
-    episodes = scan.scan_pair(pair(), pm, k, NO_FEES, None, close)
+    episodes = scan.scan_pair(pair(), pm, k, histories(NO_FEES), None, close)
     assert len(episodes) == 1
     o = episodes[0]
     assert (o.start_ts, o.end_ts, o.seconds) == ("2026-09-19T12:00:01+00:00", "2026-09-19T12:01:01+00:00", 60)
@@ -95,7 +112,7 @@ def test_scan_pair_marks_live_and_uses_kickoff_for_payout():
     pm = [quote("polymarket", T0, [[0.48, 100]], [[0.49, 100]])]
     k = [quote("kalshi", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]])]
     kickoff = "2026-09-19T11:00:00+00:00"
-    o = scan.scan_pair(pair(), pm, k, NO_FEES, kickoff, "2026-09-19T11:00:00+00:00")[0]
+    o = scan.scan_pair(pair(), pm, k, histories(NO_FEES), kickoff, "2026-09-19T11:00:00+00:00")[0]
     assert o.live == 1
     assert o.end_ts == "2026-09-19T12:00:01+00:00"
     assert o.days_held == pytest.approx((scan.GAME_HOURS - 1) / 24, rel=1e-3)
@@ -103,7 +120,20 @@ def test_scan_pair_marks_live_and_uses_kickoff_for_payout():
 
 def test_scan_pair_ignores_time_before_both_books_exist():
     pm = [quote("polymarket", T0, [[0.48, 100]], [[0.49, 100]])]
-    assert scan.scan_pair(pair(), pm, [], NO_FEES, None, None) == []
+    assert scan.scan_pair(pair(), pm, [], histories(NO_FEES), None, None) == []
+
+
+def test_scan_pair_applies_the_fee_in_force_at_each_quote():
+    # Polymarket fees switch off at 12:00:30, between the two Kalshi quotes.
+    pm = [quote("polymarket", T0, [[0.48, 100]], [[0.49, 100]])]
+    k = [quote("kalshi", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]]),
+         quote("kalshi", "2026-09-19T12:01:01+00:00", [[0.53, 100]], [[0.54, 100]])]
+    fee_histories = histories(NO_FEES)
+    fee_histories["polymarket"] = [FeeRecord("polymarket", "pm", T0, REAL_FEES["polymarket"]),
+                                   FeeRecord("polymarket", "pm", "2026-09-19T12:00:30+00:00", NO_FEES["polymarket"])]
+    o = scan.scan_pair(pair(), pm, k, fee_histories, None, "2026-09-29T12:00:00+00:00")[0]
+    assert o.peak_ts == "2026-09-19T12:01:01+00:00"
+    assert o.peak_edge == pytest.approx(0.04)
 
 
 def test_label():

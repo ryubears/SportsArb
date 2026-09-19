@@ -19,7 +19,6 @@ import fees
 from collections import defaultdict
 from db import database
 from db.models import Opportunity
-from util import jsonutil
 from util.timeutil import seconds_between, shift
 
 GAME_HOURS = 4          # A game pays out about this long after kickoff.
@@ -80,6 +79,20 @@ def fill(leg_a, leg_b, venue_a, venue_b, fee_infos):
         if leg_b[j][1] <= 0:
             j += 1
     return (top_edge if top_edge is not None else -1.0), size, profit
+
+
+def fee_at(history, ts):
+    """
+    The fee schedule in force at a time, from the contract's fee history.
+    Before the first record the first record is used, since it is the
+    earliest schedule ever observed. An empty history means no fee.
+    """
+    current = {}
+    for record in history:
+        if record.seen_at > ts and current:
+            break
+        current = record.fee_info
+    return current
 
 
 def best_trade(pair, quotes, fee_infos):
@@ -150,9 +163,10 @@ def finish(pair, peak, start_ts, end_ts, start_time, close_time):
     )
 
 
-def scan_pair(pair, pm_quotes, k_quotes, fee_infos, start_time, close_time):
+def scan_pair(pair, pm_quotes, k_quotes, fee_histories, start_time, close_time):
     """
     Replay one pair's quotes and return its episodes as Opportunities.
+    fee_histories maps each venue to that contract's list of FeeRecords.
     """
     events = sorted(pm_quotes + k_quotes, key=lambda q: q.ts)
     latest = {}
@@ -162,6 +176,7 @@ def scan_pair(pair, pm_quotes, k_quotes, fee_infos, start_time, close_time):
         latest[quote.venue] = quote
         if len(latest) < 2 or not all(q.bids and q.asks for q in latest.values()):
             continue
+        fee_infos = {venue: fee_at(history, quote.ts) for venue, history in fee_histories.items()}
         trade, edge, size, profit = best_trade(pair, latest, fee_infos)
         if edge > 0:
             if peak is None:
@@ -182,15 +197,16 @@ def scan(conn, since=None):
     """
     pairs = [dict(r) for r in conn.execute("SELECT * FROM pairs")]
     contracts = {(r["venue"], r["contract_id"]): dict(r) for r in conn.execute(
-        "SELECT venue, contract_id, fee_info, start_time, close_time FROM contracts")}
-    pm_quotes = database.load_quotes(conn, "polymarket", {p["polymarket_id"] for p in pairs}, since)
-    k_quotes = database.load_quotes(conn, "kalshi", {p["kalshi_id"] for p in pairs}, since)
+        "SELECT venue, contract_id, start_time, close_time FROM contracts")}
+    pm_ids, k_ids = {p["polymarket_id"] for p in pairs}, {p["kalshi_id"] for p in pairs}
+    pm_quotes, k_quotes = database.load_quotes(conn, "polymarket", pm_ids, since), database.load_quotes(conn, "kalshi", k_ids, since)
+    pm_fees, k_fees = database.load_fee_history(conn, "polymarket", pm_ids), database.load_fee_history(conn, "kalshi", k_ids)
     opportunities = []
     for pair in pairs:
-        pm, k = contracts[("polymarket", pair["polymarket_id"])], contracts[("kalshi", pair["kalshi_id"])]
-        fee_infos = {"polymarket": jsonutil.parse(pm["fee_info"], {}), "kalshi": jsonutil.parse(k["fee_info"], {})}
+        pm = contracts[("polymarket", pair["polymarket_id"])]
+        fee_histories = {"polymarket": pm_fees[pair["polymarket_id"]], "kalshi": k_fees[pair["kalshi_id"]]}
         opportunities.extend(scan_pair(pair, pm_quotes[pair["polymarket_id"]], k_quotes[pair["kalshi_id"]],
-                                       fee_infos, pm["start_time"], pm["close_time"]))
+                                       fee_histories, pm["start_time"], pm["close_time"]))
     return opportunities
 
 

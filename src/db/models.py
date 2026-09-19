@@ -6,6 +6,18 @@ from dataclasses import dataclass
 
 
 @dataclass
+class FeeRecord:
+    """
+    The fee schedule a contract carried from a moment on. A new record is
+    written each time a fetch sees the schedule change.
+    """
+    venue: str
+    contract_id: str
+    seen_at: str            # The fetch time that first showed this schedule, ISO 8601 UTC.
+    fee_info: dict
+
+
+@dataclass
 class Contract:
     """
     One tradable Yes side outcome, described the same way for every venue.

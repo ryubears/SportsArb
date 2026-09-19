@@ -15,6 +15,15 @@ def contract(venue, contract_id, **fields):
     return c
 
 
+def test_fee_history_records_only_changes(tmp_path):
+    conn = database.connect(tmp_path / "t.sqlite")
+    database.upsert_contracts(conn, [contract("polymarket", "A", fee_info={"rate": 0.05})], "2026-01-01T00:00:00+00:00")
+    database.upsert_contracts(conn, [contract("polymarket", "A", fee_info={"rate": 0.05})], "2026-01-02T00:00:00+00:00")
+    database.upsert_contracts(conn, [contract("polymarket", "A", fee_info={"rate": 0})], "2026-01-03T00:00:00+00:00")
+    history = database.load_fee_history(conn, "polymarket", ["A"])["A"]
+    assert [(r.seen_at[:10], r.fee_info) for r in history] == [("2026-01-01", {"rate": 0.05}), ("2026-01-03", {"rate": 0})]
+
+
 def test_contracts_upsert_keeps_first_seen(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
     database.upsert_contracts(conn, [contract("kalshi", "A")], "2026-01-01T00:00:00+00:00")
@@ -52,3 +61,9 @@ def test_opportunities_are_rebuilt_each_time(tmp_path):
     database.replace_opportunities(conn, [o, o])
     database.replace_opportunities(conn, [o])
     assert conn.execute("SELECT COUNT(*) FROM opportunities").fetchone()[0] == 1
+
+
+def test_upsert_returns_fee_change_count(tmp_path):
+    conn = database.connect(tmp_path / "t.sqlite")
+    assert database.upsert_contracts(conn, [contract("kalshi", "A")], "2026-01-01T00:00:00+00:00") == 1
+    assert database.upsert_contracts(conn, [contract("kalshi", "A")], "2026-01-02T00:00:00+00:00") == 0

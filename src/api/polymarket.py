@@ -10,6 +10,7 @@ Polymarket's field names and message formats.
 
 import asyncio
 import json
+import time
 import websockets
 from api.helper import get_json, float_or_none
 from db.models import Contract
@@ -20,7 +21,7 @@ GAMMA = "https://gamma-api.polymarket.com"
 WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 WS_CHUNK = 500          # Tokens per connection. Above this the feed stops sending snapshots.
 WS_PING_SECONDS = 10    # The feed drops idle connections unless it hears a PING.
-STALE_SECONDS = 60      # A connection that sends nothing for this long is dead, even if still open.
+STALE_SECONDS = 120     # A connection that sends no book data for this long is dead, even if it still answers pings.
 
 
 # QUERY
@@ -154,12 +155,17 @@ async def stream_chunk(token_ids, on_book, log):
             async with websockets.connect(WS_URL, open_timeout=20, max_size=None) as ws:
                 await ws.send(json.dumps({"assets_ids": token_ids, "type": "market"}))
                 pinger = asyncio.create_task(send_pings(ws))
+                last_data = time.time()
                 try:
                     while True:
-                        # Every healthy connection answers the ping, so silence means it is dead.
-                        raw = await asyncio.wait_for(ws.recv(), timeout=STALE_SECONDS)
+                        # Only book data counts. A stalled feed can keep answering pings.
+                        remaining = STALE_SECONDS - (time.time() - last_data)
+                        if remaining <= 0:
+                            raise asyncio.TimeoutError
+                        raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
                         if raw == "PONG":
                             continue
+                        last_data = time.time()
                         messages = json.loads(raw)
                         for m in messages if isinstance(messages, list) else [messages]:
                             apply_message(m, books, wanted, on_book)

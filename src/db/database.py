@@ -4,7 +4,8 @@ SQLite storage for SportsArb.
 One database file holds every table, which makes it easy to open in any
 SQLite browser. The tables follow the pipeline in order.
 
-    contracts      what each venue lists, as fetched by fetch.py
+    fee_history    each contract's fee schedule over time, written by fetch.py
+    contracts      what each venue lists, also by fetch.py
     bets           each contract restated in venue neutral terms, by classify.py
     pairs          one Polymarket and one Kalshi contract for the same bet, by match.py
     quotes         order book snapshots for paired contracts, by record.py
@@ -12,13 +13,21 @@ SQLite browser. The tables follow the pipeline in order.
 """
 
 import sqlite3
-from db.models import Quote
+from db.models import FeeRecord, Quote
 from pathlib import Path
 from util import jsonutil
 
 DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "sportsarb.sqlite"
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS fee_history (
+    venue        TEXT NOT NULL,
+    contract_id  TEXT NOT NULL,
+    seen_at      TEXT NOT NULL,   -- The fetch time that first showed this schedule, ISO 8601 UTC.
+    fee_info     TEXT NOT NULL,   -- JSON, same shape as contracts.fee_info.
+    PRIMARY KEY (venue, contract_id, seen_at)
+);
+
 CREATE TABLE IF NOT EXISTS contracts (
     venue        TEXT NOT NULL,   -- Either 'polymarket' or 'kalshi'.
     contract_id  TEXT NOT NULL,   -- Polymarket outcome token id, or Kalshi market ticker.
@@ -104,13 +113,14 @@ CREATE TABLE IF NOT EXISTS opportunities (
 """
 
 
-def connect(db_path=DB_PATH):
+def connect(db_path=None):
     """
-    Open the database, creating the file and tables if needed.
+    Open the database, creating the file and tables if needed. Uses DB_PATH unless a path is given.
     """
-    db_path = Path(db_path)
+    db_path = Path(db_path or DB_PATH)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    # A long busy timeout lets the recorder and the hourly catalog job share the file.
+    conn = sqlite3.connect(db_path, timeout=30)
     conn.row_factory = sqlite3.Row
     # Write ahead logging lets readers query while the recorder writes.
     conn.execute("PRAGMA journal_mode=WAL")
@@ -118,10 +128,52 @@ def connect(db_path=DB_PATH):
     return conn
 
 
+def record_fee_changes(conn, contracts, fetched_at):
+    """
+    Append a fee history row for each contract whose fee_info differs from what is stored.
+    Returns how many rows were added.
+    """
+    stored = {}
+    for c in contracts:
+        row = conn.execute("SELECT fee_info FROM contracts WHERE venue = ? AND contract_id = ?",
+                           (c.venue, c.contract_id)).fetchone()
+        stored[(c.venue, c.contract_id)] = row[0] if row else None
+    changed = [FeeRecord(c.venue, c.contract_id, fetched_at, c.fee_info)
+               for c in contracts if jsonutil.dump(c.fee_info) != stored[(c.venue, c.contract_id)]]
+    insert_fee_records(conn, changed)
+    return len(changed)
+
+
+def insert_fee_records(conn, records):
+    """
+    Append FeeRecords.
+    """
+    conn.executemany(
+        "INSERT OR REPLACE INTO fee_history (venue, contract_id, seen_at, fee_info) VALUES (?,?,?,?)",
+        [(r.venue, r.contract_id, r.seen_at, jsonutil.dump(r.fee_info)) for r in records],
+    )
+    conn.commit()
+
+
+def load_fee_history(conn, venue, contract_ids):
+    """
+    Return {contract_id: [FeeRecord, ...]} in time order for the given contracts.
+    """
+    out = {cid: [] for cid in contract_ids}
+    for cid, seen_at, fee_info in conn.execute(
+            "SELECT contract_id, seen_at, fee_info FROM fee_history WHERE venue = ? ORDER BY seen_at", (venue,)):
+        if cid in out:
+            out[cid].append(FeeRecord(venue, cid, seen_at, jsonutil.parse(fee_info, {})))
+    return out
+
+
 def upsert_contracts(conn, contracts, fetched_at):
     """
     Insert new contracts or refresh existing ones. first_seen is kept as is.
+    A fee history row is added for every contract whose fee schedule is new or
+    changed, and the number of such rows is returned.
     """
+    fee_changes = record_fee_changes(conn, contracts, fetched_at)
     rows = []
     for c in contracts:
         rows.append((
@@ -152,6 +204,7 @@ def upsert_contracts(conn, contracts, fetched_at):
             last_seen = excluded.last_seen
     """, rows)
     conn.commit()
+    return fee_changes
 
 
 def load_contracts(conn, sport=None, venue=None):
