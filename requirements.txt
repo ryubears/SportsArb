@@ -1,2 +1,3 @@
-# Third-party packages needed to run the code. Install with: pip install -r requirements.txt
-# Currently empty: everything uses the Python standard library.
+# Third-party packages needed to run the code. Install with: pip3 install --break-system-packages -r requirements.txt
+websockets
+cryptography

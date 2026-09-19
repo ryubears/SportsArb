@@ -5,11 +5,16 @@ Reads the public metadata API and turns every open sports market into
 Contracts. This is the only file that knows Polymarket's field names.
 """
 
+import asyncio
 import json
+import websockets
 from api.helper import get_json, iso, float_or_none
 from models import Contract
 
 GAMMA = "https://gamma-api.polymarket.com"
+WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
+WS_CHUNK = 500          # Tokens per connection. Above this the feed stops sending snapshots.
+WS_PING_SECONDS = 10    # The feed drops idle connections unless it hears a PING.
 
 
 def fetch_events(tag_slug, page_size=100):
@@ -76,3 +81,91 @@ def contracts(sport, tags):
                         raw=m,
                     ))
     return result
+
+
+# STREAMING
+
+def sorted_levels(levels, reverse):
+    """
+    Turn a {price: size} dict into a list of [price, size] with the best price first.
+    """
+    return [[p, s] for p, s in sorted(levels.items(), reverse=reverse) if s > 0]
+
+
+async def stream_books(token_ids, on_book, log=print):
+    """
+    Keep a live order book for every token and call on_book(token_id, bids, asks)
+    after each change. Bids and asks are lists of [price, size], best first.
+    Runs forever, reconnecting when a connection drops.
+    """
+    chunks = [token_ids[i:i + WS_CHUNK] for i in range(0, len(token_ids), WS_CHUNK)]
+    await asyncio.gather(*(stream_chunk(chunk, on_book, log) for chunk in chunks))
+
+
+async def stream_chunk(token_ids, on_book, log):
+    """
+    One connection for up to WS_CHUNK tokens.
+    """
+    wanted = set(token_ids)
+    while True:
+        books = {}
+        try:
+            async with websockets.connect(WS_URL, open_timeout=20, max_size=None) as ws:
+                await ws.send(json.dumps({"assets_ids": token_ids, "type": "market"}))
+                pinger = asyncio.create_task(send_pings(ws))
+                try:
+                    async for raw in ws:
+                        if raw == "PONG":
+                            continue
+                        messages = json.loads(raw)
+                        for m in messages if isinstance(messages, list) else [messages]:
+                            apply_message(m, books, wanted, on_book)
+                finally:
+                    pinger.cancel()
+        except (websockets.ConnectionClosed, OSError, asyncio.TimeoutError) as e:
+            log(f"polymarket stream dropped ({type(e).__name__}), reconnecting")
+            await asyncio.sleep(3)
+
+
+async def send_pings(ws):
+    """
+    Send the text PING the feed expects, forever.
+    """
+    while True:
+        await asyncio.sleep(WS_PING_SECONDS)
+        await ws.send("PING")
+
+
+def apply_message(m, books, wanted, on_book):
+    """
+    Update the local books from one feed message and report each changed token.
+    """
+    kind = m.get("event_type")
+    if kind == "book":
+        token = m["asset_id"]
+        if token not in wanted:
+            return
+        books[token] = {
+            "bids": {float(x["price"]): float(x["size"]) for x in m["bids"]},
+            "asks": {float(x["price"]): float(x["size"]) for x in m["asks"]},
+        }
+        emit(token, books, on_book)
+    elif kind == "price_change":
+        changed = set()
+        for change in m.get("price_changes", []):
+            token = change["asset_id"]
+            if token not in wanted or token not in books:
+                continue
+            side = "bids" if change["side"] == "BUY" else "asks"
+            books[token][side][float(change["price"])] = float(change["size"])
+            changed.add(token)
+        for token in changed:
+            emit(token, books, on_book)
+
+
+def emit(token, books, on_book):
+    """
+    Hand the sorted book for one token to the callback.
+    """
+    b = books[token]
+    on_book(token, sorted_levels(b["bids"], reverse=True), sorted_levels(b["asks"], reverse=False))

@@ -68,6 +68,15 @@ CREATE TABLE IF NOT EXISTS pairs (
     matched_at           TEXT NOT NULL,
     PRIMARY KEY (polymarket_id, kalshi_id)
 );
+
+CREATE TABLE IF NOT EXISTS quotes (
+    venue        TEXT NOT NULL,
+    contract_id  TEXT NOT NULL,
+    ts           TEXT NOT NULL,   -- Our clock, ISO 8601 UTC, when the book changed.
+    bids         TEXT NOT NULL,   -- JSON list of [price, size] for the Yes side, best first.
+    asks         TEXT NOT NULL,   -- JSON list of [price, size] for the Yes side, best first.
+    PRIMARY KEY (venue, contract_id, ts)
+);
 """
 
 
@@ -79,6 +88,8 @@ def connect(db_path=DB_PATH):
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    # Write ahead logging lets readers query while the recorder writes.
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
     return conn
 
@@ -199,3 +210,29 @@ def load_pairs(conn, sport):
         WHERE c.sport = ?
     """
     return [dict(r) for r in conn.execute(sql, (sport,))]
+
+
+def insert_quotes(conn, rows):
+    """
+    Append quote rows. Each row is (venue, contract_id, ts, bids, asks) with bids and asks as JSON text.
+    """
+    conn.executemany("INSERT OR REPLACE INTO quotes (venue, contract_id, ts, bids, asks) VALUES (?,?,?,?,?)", rows)
+    conn.commit()
+
+
+def load_recording_targets(conn, sport, now, horizon):
+    """
+    Return {venue: [contract_id, ...]} for every paired contract that is still
+    open and is either a future or a game starting before the horizon.
+    """
+    targets = {}
+    for venue, column in (("polymarket", "polymarket_id"), ("kalshi", "kalshi_id")):
+        rows = conn.execute(f"""
+            SELECT c.contract_id FROM contracts c
+            JOIN bets b ON b.venue = c.venue AND b.contract_id = c.contract_id
+            WHERE c.venue = ? AND c.sport = ? AND (c.close_time IS NULL OR c.close_time > ?)
+              AND (b.game_date IS NULL OR b.game_date <= ?)
+              AND c.contract_id IN (SELECT {column} FROM pairs)
+        """, (venue, sport, now, horizon[:10]))
+        targets[venue] = [r[0] for r in rows]
+    return targets
