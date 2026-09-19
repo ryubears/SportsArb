@@ -10,7 +10,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "sportsarb.sqlite"
+DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "sportsarb.sqlite"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS contracts (
@@ -76,6 +76,25 @@ CREATE TABLE IF NOT EXISTS quotes (
     bids         TEXT NOT NULL,   -- JSON list of [price, size] for the Yes side, best first.
     asks         TEXT NOT NULL,   -- JSON list of [price, size] for the Yes side, best first.
     PRIMARY KEY (venue, contract_id, ts)
+);
+
+CREATE TABLE IF NOT EXISTS opportunities (
+    polymarket_id  TEXT NOT NULL,
+    kalshi_id      TEXT NOT NULL,
+    kind           TEXT NOT NULL,
+    label          TEXT NOT NULL,   -- Short human readable name of the bet.
+    trade          TEXT NOT NULL,   -- Which two legs to buy.
+    start_ts       TEXT NOT NULL,   -- When the net edge first went positive.
+    end_ts         TEXT NOT NULL,   -- When it went back to zero, or the last quote seen.
+    seconds        REAL NOT NULL,
+    peak_ts        TEXT NOT NULL,
+    peak_edge      REAL NOT NULL,   -- Net dollars per contract at the top of book, at the peak.
+    peak_size      REAL NOT NULL,   -- Contracts fillable at a positive net edge, at the peak.
+    peak_profit    REAL NOT NULL,   -- Net dollars from filling peak_size, at the peak.
+    live           INTEGER NOT NULL,   -- 1 when the game had started, 0 otherwise.
+    days_held      REAL,            -- From the peak until the bet pays out, assuming it is held to resolution.
+    return_pct     REAL NOT NULL,   -- Net edge over the capital tied up, as a percent.
+    annual_pct     REAL             -- return_pct scaled to a year over days_held, without compounding.
 );
 """
 
@@ -236,3 +255,34 @@ def load_recording_targets(conn, sport, now, horizon):
         """, (venue, sport, now, horizon[:10]))
         targets[venue] = [r[0] for r in rows]
     return targets
+
+
+def replace_opportunities(conn, rows):
+    """
+    Rebuild the table and insert the new list. Scans are deterministic, so dropping is safe.
+    """
+    conn.execute("DROP TABLE IF EXISTS opportunities")
+    conn.executescript(SCHEMA)
+    conn.executemany("""
+        INSERT INTO opportunities (polymarket_id, kalshi_id, kind, label, trade, start_ts, end_ts, seconds,
+                                   peak_ts, peak_edge, peak_size, peak_profit, live, days_held, return_pct, annual_pct)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, rows)
+    conn.commit()
+
+
+def load_quotes(conn, venue, contract_ids, since=None):
+    """
+    Return {contract_id: [(ts, bids, asks), ...]} in time order, with bids and asks still as JSON text.
+    """
+    out = {cid: [] for cid in contract_ids}
+    sql = "SELECT contract_id, ts, bids, asks FROM quotes WHERE venue = ?"
+    params = [venue]
+    if since:
+        sql += " AND ts >= ?"
+        params.append(since)
+    sql += " ORDER BY ts"
+    for cid, ts, bids, asks in conn.execute(sql, params):
+        if cid in out:
+            out[cid].append((ts, bids, asks))
+    return out

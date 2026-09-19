@@ -10,12 +10,12 @@ Run with:
 """
 
 import argparse
-import database
 import json
 import re
 from collections import Counter
 from datetime import datetime
-from models import Bet
+from db import database
+from db.models import Bet
 from pathlib import Path
 from zoneinfo import ZoneInfo
 

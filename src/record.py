@@ -21,13 +21,13 @@ For a long run on a laptop, stop the Mac from sleeping while it runs:
 
 import argparse
 import asyncio
-import database
 import json
 import sys
 import time
 from api import kalshi, polymarket
 from api.helper import now_iso
 from datetime import datetime, timedelta, timezone
+from db import database
 
 # Print immediately even when output goes to a file.
 sys.stdout.reconfigure(line_buffering=True)

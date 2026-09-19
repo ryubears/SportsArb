@@ -14,7 +14,7 @@ import websockets
 from api.helper import get_json, iso, float_or_none
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
-from models import Contract
+from db.models import Contract
 from pathlib import Path
 
 BASE = "https://api.elections.kalshi.com/trade-api/v2"

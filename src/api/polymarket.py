@@ -9,7 +9,7 @@ import asyncio
 import json
 import websockets
 from api.helper import get_json, iso, float_or_none
-from models import Contract
+from db.models import Contract
 
 GAMMA = "https://gamma-api.polymarket.com"
 WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"

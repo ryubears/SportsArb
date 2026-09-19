@@ -10,11 +10,11 @@ Run with:
 """
 
 import argparse
-import database
 from collections import Counter, defaultdict
 from datetime import datetime
 from api.helper import now_iso
-from models import Pair
+from db import database
+from db.models import Pair
 
 IDENTITY = ("kind", "season", "game_date", "team_a", "team_b", "subject", "line")
 
