@@ -1,14 +1,20 @@
 """
 SQLite storage for SportsArb.
 
-One database file holds everything. Contracts from each venue now,
-matched pairs and recorded quotes later. One file is easy to open
-in any SQLite browser.
+One database file holds every table, which makes it easy to open in any
+SQLite browser. The tables follow the pipeline in order.
+
+    contracts      what each venue lists, as fetched by fetch.py
+    bets           each contract restated in venue neutral terms, by classify.py
+    pairs          one Polymarket and one Kalshi contract for the same bet, by match.py
+    quotes         order book snapshots for paired contracts, by record.py
+    opportunities  stretches where a pair could be traded for a profit, by scan.py
 """
 
-import json
 import sqlite3
+from db.models import Quote
 from pathlib import Path
+from util import jsonutil
 
 DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "sportsarb.sqlite"
 
@@ -29,7 +35,6 @@ CREATE TABLE IF NOT EXISTS contracts (
     start_time   TEXT,            -- Game start in ISO 8601 UTC, when known.
     close_time   TEXT,            -- When trading stops, ISO 8601 UTC.
     fee_info     TEXT,            -- JSON describing the venue's fee model for this contract.
-    raw_json     TEXT NOT NULL,   -- The venue's untouched market payload.
     first_seen   TEXT NOT NULL,
     last_seen    TEXT NOT NULL,
     PRIMARY KEY (venue, contract_id)
@@ -122,16 +127,14 @@ def upsert_contracts(conn, contracts, fetched_at):
         rows.append((
             c.venue, c.contract_id, c.market_id, c.event_id, c.series_id, c.sport,
             c.event_title, c.title, c.outcome, c.market_type, c.line, c.rules,
-            c.start_time, c.close_time,
-            json.dumps(c.fee_info) if c.fee_info is not None else None,
-            json.dumps(c.raw), fetched_at, fetched_at,
+            c.start_time, c.close_time, jsonutil.dump(c.fee_info), fetched_at, fetched_at,
         ))
     conn.executemany("""
         INSERT INTO contracts (
             venue, contract_id, market_id, event_id, series_id, sport,
             event_title, title, outcome, market_type, line, rules,
-            start_time, close_time, fee_info, raw_json, first_seen, last_seen
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            start_time, close_time, fee_info, first_seen, last_seen
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT (venue, contract_id) DO UPDATE SET
             market_id = excluded.market_id,
             event_id = excluded.event_id,
@@ -146,7 +149,6 @@ def upsert_contracts(conn, contracts, fetched_at):
             start_time = excluded.start_time,
             close_time = excluded.close_time,
             fee_info = excluded.fee_info,
-            raw_json = excluded.raw_json,
             last_seen = excluded.last_seen
     """, rows)
     conn.commit()
@@ -177,7 +179,7 @@ def replace_bets(conn, sport, bets):
     """, (sport,))
     conn.executemany("""
         INSERT INTO bets (venue, contract_id, kind, season, game_date,
-                                 team_a, team_b, subject, line, polarity)
+                          team_a, team_b, subject, line, polarity)
         VALUES (?,?,?,?,?,?,?,?,?,?)
     """, [(b.venue, b.contract_id, b.kind, b.season, b.game_date,
            b.team_a, b.team_b, b.subject, b.line, b.polarity) for b in bets])
@@ -215,7 +217,7 @@ def replace_pairs(conn, sport, pairs, matched_at):
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, [(p.polymarket_id, p.kalshi_id, p.kind, p.season, p.game_date, p.team_a, p.team_b,
            p.subject, p.line, p.polymarket_polarity, p.kalshi_polarity,
-           p.close_gap_days, json.dumps(p.flags), matched_at) for p in pairs])
+           p.close_gap_days, jsonutil.dump(p.flags), matched_at) for p in pairs])
     conn.commit()
 
 
@@ -231,12 +233,32 @@ def load_pairs(conn, sport):
     return [dict(r) for r in conn.execute(sql, (sport,))]
 
 
-def insert_quotes(conn, rows):
+def insert_quotes(conn, quotes):
     """
-    Append quote rows. Each row is (venue, contract_id, ts, bids, asks) with bids and asks as JSON text.
+    Append Quotes. Bids and asks are stored as JSON text.
     """
-    conn.executemany("INSERT OR REPLACE INTO quotes (venue, contract_id, ts, bids, asks) VALUES (?,?,?,?,?)", rows)
+    conn.executemany(
+        "INSERT OR REPLACE INTO quotes (venue, contract_id, ts, bids, asks) VALUES (?,?,?,?,?)",
+        [(q.venue, q.contract_id, q.ts, jsonutil.dump(q.bids), jsonutil.dump(q.asks)) for q in quotes],
+    )
     conn.commit()
+
+
+def load_quotes(conn, venue, contract_ids, since=None):
+    """
+    Return {contract_id: [Quote, ...]} in time order for the given contracts.
+    """
+    out = {cid: [] for cid in contract_ids}
+    sql = "SELECT contract_id, ts, bids, asks FROM quotes WHERE venue = ?"
+    params = [venue]
+    if since:
+        sql += " AND ts >= ?"
+        params.append(since)
+    sql += " ORDER BY ts"
+    for cid, ts, bids, asks in conn.execute(sql, params):
+        if cid in out:
+            out[cid].append(Quote(venue, cid, ts, jsonutil.parse(bids), jsonutil.parse(asks)))
+    return out
 
 
 def load_recording_targets(conn, sport, now, horizon):
@@ -257,9 +279,9 @@ def load_recording_targets(conn, sport, now, horizon):
     return targets
 
 
-def replace_opportunities(conn, rows):
+def replace_opportunities(conn, opportunities):
     """
-    Rebuild the table and insert the new list. Scans are deterministic, so dropping is safe.
+    Rebuild the table and insert the new Opportunities. Scans are deterministic, so dropping is safe.
     """
     conn.execute("DROP TABLE IF EXISTS opportunities")
     conn.executescript(SCHEMA)
@@ -267,22 +289,7 @@ def replace_opportunities(conn, rows):
         INSERT INTO opportunities (polymarket_id, kalshi_id, kind, label, trade, start_ts, end_ts, seconds,
                                    peak_ts, peak_edge, peak_size, peak_profit, live, days_held, return_pct, annual_pct)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    """, rows)
+    """, [(o.polymarket_id, o.kalshi_id, o.kind, o.label, o.trade, o.start_ts, o.end_ts, o.seconds,
+           o.peak_ts, o.peak_edge, o.peak_size, o.peak_profit, o.live, o.days_held, o.return_pct, o.annual_pct)
+          for o in opportunities])
     conn.commit()
-
-
-def load_quotes(conn, venue, contract_ids, since=None):
-    """
-    Return {contract_id: [(ts, bids, asks), ...]} in time order, with bids and asks still as JSON text.
-    """
-    out = {cid: [] for cid in contract_ids}
-    sql = "SELECT contract_id, ts, bids, asks FROM quotes WHERE venue = ?"
-    params = [venue]
-    if since:
-        sql += " AND ts >= ?"
-        params.append(since)
-    sql += " ORDER BY ts"
-    for cid, ts, bids, asks in conn.execute(sql, params):
-        if cid in out:
-            out[cid].append((ts, bids, asks))
-    return out

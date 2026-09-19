@@ -2,7 +2,7 @@
 Data classes shared across the project.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -25,7 +25,6 @@ class Contract:
     start_time: str | None
     close_time: str | None
     fee_info: dict | None
-    raw: dict = field(repr=False)
 
 
 @dataclass
@@ -64,3 +63,38 @@ class Pair:
     kalshi_polarity: str
     close_gap_days: float | None    # Kalshi close time minus Polymarket close time.
     flags: list[str]                # Things a human should check before trusting the pair.
+
+
+@dataclass
+class Quote:
+    """
+    One contract's order book at one moment, seen from the Yes side.
+    """
+    venue: str
+    contract_id: str
+    ts: str                 # Our clock, ISO 8601 UTC, when the book changed.
+    bids: list              # [[price, size], ...] best first.
+    asks: list              # [[price, size], ...] best first.
+
+
+@dataclass
+class Opportunity:
+    """
+    A stretch of time when one pair could be traded for a profit after fees.
+    """
+    polymarket_id: str
+    kalshi_id: str
+    kind: str
+    label: str              # Short human readable name of the bet.
+    trade: str              # Which two legs to buy.
+    start_ts: str           # When the net edge first went positive.
+    end_ts: str             # When it went back to zero, or the last quote seen.
+    seconds: float
+    peak_ts: str
+    peak_edge: float        # Net dollars per contract at the top of book, at the peak.
+    peak_size: float        # Contracts fillable at a positive net edge, at the peak.
+    peak_profit: float      # Net dollars from filling peak_size, at the peak.
+    live: int               # 1 when the game had started, 0 otherwise.
+    days_held: float | None     # From the peak until the bet pays out, if held to resolution.
+    return_pct: float       # Net edge over the capital tied up, as a percent.
+    annual_pct: float | None    # return_pct scaled to a year over days_held, without compounding.

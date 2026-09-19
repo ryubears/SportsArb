@@ -10,16 +10,15 @@ Run with:
 """
 
 import argparse
-import json
 import re
 from collections import Counter
 from datetime import datetime
 from db import database
 from db.models import Bet
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from util import jsonutil
+from util.timeutil import eastern_date
 
-EASTERN = ZoneInfo("America/New_York")
 ALIAS_FILE = Path(__file__).resolve().parent / "aliases.json"
 
 
@@ -30,7 +29,7 @@ def load_aliases():
     Build two lookups from the alias file. Names are matched inside free
     text. Codes are matched only against slug and ticker pieces.
     """
-    data = json.loads(ALIAS_FILE.read_text())
+    data = jsonutil.read_file(ALIAS_FILE)
     names, codes = {}, {}
     for team, entry in data.items():
         for n in entry["names"]:
@@ -111,29 +110,6 @@ def season_from_date(game_date):
     """
     year, month = int(game_date[:4]), int(game_date[5:7])
     return year + 1 if month >= 8 else year
-
-
-def eastern_date(iso_time):
-    """
-    Calendar date in US Eastern time for an ISO timestamp, as YYYY-MM-DD.
-    """
-    return datetime.fromisoformat(iso_time).astimezone(EASTERN).strftime("%Y-%m-%d")
-
-
-KALSHI_DATE = re.compile(r"^(\d{2})([A-Z]{3})(\d{2})([A-Z]+)$")
-
-
-def kalshi_game(tail):
-    """
-    Parse a Kalshi game event tail such as '26SEP20CARATL' into (date, away, home).
-    """
-    m = KALSHI_DATE.match(tail)
-    if not m:
-        return None, None, None
-    yy, mon, dd, pair = m.groups()
-    date = datetime.strptime(f"20{yy} {mon} {dd}", "%Y %b %d").strftime("%Y-%m-%d")
-    away, home = split_codes(pair)
-    return date, away, home
 
 
 # POLYMARKET
@@ -243,6 +219,7 @@ def classify_polymarket(row):
 
 # KALSHI
 
+KALSHI_DATE = re.compile(r"^(\d{2})([A-Z]{3})(\d{2})([A-Z]+)$")
 FUTURE_SERIES = {
     "KXSB": "champion",
     "KXNFLAFCCHAMP": "conf_champion",
@@ -254,6 +231,19 @@ FUTURE_SERIES = {
 DIVISION_SERIES = re.compile(r"^KXNFL(AFC|NFC)(EAST|WEST|NORTH|SOUTH)$")
 GAME_SERIES = {"KXNFLGAME": "game_winner", "KXNFLSPREAD": "spread", "KXNFLTOTAL": "total"}
 EVENT_TAIL = re.compile(r"^([A-Z]*)(\d{2})([A-Z]*)$")
+
+
+def kalshi_game(tail):
+    """
+    Parse a Kalshi game event tail such as '26SEP20CARATL' into (date, away, home).
+    """
+    m = KALSHI_DATE.match(tail)
+    if not m:
+        return None, None, None
+    yy, mon, dd, pair = m.groups()
+    date = datetime.strptime(f"20{yy} {mon} {dd}", "%Y %b %d").strftime("%Y-%m-%d")
+    away, home = split_codes(pair)
+    return date, away, home
 
 
 def classify_kalshi(row):

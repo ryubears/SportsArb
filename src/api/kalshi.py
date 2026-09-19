@@ -1,9 +1,12 @@
 """
-Kalshi client.
+Kalshi API client.
 
-Walks sports series to events to markets on the public API and turns
-every open market into a Contract. This is the only file that knows
-Kalshi's field names.
+Two jobs. The query half walks sports series to events to markets on the
+public API and turns every open market into a Contract. The streaming
+half opens the websocket with a signed API key, subscribes to order book
+updates, and keeps a live book for each ticker restated from the Yes side
+so it matches Polymarket's shape. This is the only file that knows
+Kalshi's field names and message formats.
 """
 
 import asyncio
@@ -11,11 +14,12 @@ import base64
 import json
 import time
 import websockets
-from api.helper import get_json, iso, float_or_none
+from api.helper import get_json, float_or_none
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from db.models import Contract
 from pathlib import Path
+from util.timeutil import iso
 
 BASE = "https://api.elections.kalshi.com/trade-api/v2"
 SLEEP = 0.12   # Seconds between calls, to stay under the public rate limit.
@@ -25,6 +29,8 @@ DATA = Path(__file__).resolve().parent.parent.parent / "data"
 KEY_ID_FILE = DATA / "kalshi_key_id.txt"
 PRIVATE_KEY_FILE = DATA / "kalshi_private_key.pem"
 
+
+# QUERY
 
 def paged(path, params, key):
     """
@@ -107,7 +113,6 @@ def contracts(sport, prefixes, tickers=()):
                     start_time=None,
                     close_time=iso(m.get("close_time")),
                     fee_info=fee_info,
-                    raw=m,
                 ))
     return result
 
@@ -133,6 +138,32 @@ def ws_headers():
         "KALSHI-ACCESS-TIMESTAMP": ts,
         "KALSHI-ACCESS-SIGNATURE": base64.b64encode(signature).decode(),
     }
+
+
+def apply_message(m, books, on_book):
+    """
+    Update the local books from one feed message and report the changed ticker.
+    """
+    kind, body = m.get("type"), m.get("msg") or {}
+    ticker = body.get("market_ticker")
+    if kind == "orderbook_snapshot":
+        books[ticker] = {
+            "yes": {float(p): float(s) for p, s in body.get("yes_dollars_fp") or []},
+            "no": {float(p): float(s) for p, s in body.get("no_dollars_fp") or []},
+        }
+    elif kind == "orderbook_delta" and ticker in books:
+        side = books[ticker][body["side"]]
+        price = float(body["price_dollars"])
+        # Round to cents so summing many deltas does not leave floating point residue.
+        side[price] = round(side.get(price, 0.0) + float(body["delta_fp"]), 2)
+        if side[price] <= 0:
+            del side[price]
+    else:
+        return
+    b = books[ticker]
+    bids = [[p, s] for p, s in sorted(b["yes"].items(), reverse=True) if s > 0]
+    asks = [[round(1 - p, 4), s] for p, s in sorted(b["no"].items(), reverse=True) if s > 0]
+    on_book(ticker, bids, asks)
 
 
 async def stream_books(tickers, on_book, log=print):
@@ -163,29 +194,3 @@ async def stream_books(tickers, on_book, log=print):
         except (websockets.ConnectionClosed, OSError, asyncio.TimeoutError) as e:
             log(f"kalshi stream dropped ({type(e).__name__}), reconnecting")
         await asyncio.sleep(3)
-
-
-def apply_message(m, books, on_book):
-    """
-    Update the local books from one feed message and report the changed ticker.
-    """
-    kind, body = m.get("type"), m.get("msg") or {}
-    ticker = body.get("market_ticker")
-    if kind == "orderbook_snapshot":
-        books[ticker] = {
-            "yes": {float(p): float(s) for p, s in body.get("yes_dollars_fp") or []},
-            "no": {float(p): float(s) for p, s in body.get("no_dollars_fp") or []},
-        }
-    elif kind == "orderbook_delta" and ticker in books:
-        side = books[ticker][body["side"]]
-        price = float(body["price_dollars"])
-        # Round to cents so summing many deltas does not leave floating point residue.
-        side[price] = round(side.get(price, 0.0) + float(body["delta_fp"]), 2)
-        if side[price] <= 0:
-            del side[price]
-    else:
-        return
-    b = books[ticker]
-    bids = [[p, s] for p, s in sorted(b["yes"].items(), reverse=True) if s > 0]
-    asks = [[round(1 - p, 4), s] for p, s in sorted(b["no"].items(), reverse=True) if s > 0]
-    on_book(ticker, bids, asks)

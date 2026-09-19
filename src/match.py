@@ -11,10 +11,9 @@ Run with:
 
 import argparse
 from collections import Counter, defaultdict
-from datetime import datetime
-from api.helper import now_iso
 from db import database
 from db.models import Pair
+from util.timeutil import days_between, now_iso
 
 IDENTITY = ("kind", "season", "game_date", "team_a", "team_b", "subject", "line")
 
@@ -46,8 +45,7 @@ def close_gap_days(polymarket_bet, kalshi_bet):
     a, b = polymarket_bet["close_time"], kalshi_bet["close_time"]
     if not a or not b:
         return None
-    gap = datetime.fromisoformat(b) - datetime.fromisoformat(a)
-    return round(gap.total_seconds() / 86400, 2)
+    return round(days_between(a, b), 2)
 
 
 def make_pair(polymarket_bet, kalshi_bet):
@@ -77,6 +75,16 @@ def make_pair(polymarket_bet, kalshi_bet):
     )
 
 
+def twins_removed(pairs):
+    """
+    Polymarket lists both outcomes of a spread or total as separate tokens, and
+    both pair with the same Kalshi contract. The No token's book mirrors the Yes
+    token's, so the two pairs describe one trade. Keep the Yes side only.
+    """
+    has_yes = {p.kalshi_id for p in pairs if p.polymarket_polarity == "yes"}
+    return [p for p in pairs if p.polymarket_polarity == "yes" or p.kalshi_id not in has_yes]
+
+
 def match(bets):
     """
     Group bets by identity and pair every Polymarket bet with every Kalshi bet in its group.
@@ -93,7 +101,7 @@ def match(bets):
                     pairs.append(make_pair(p, k))
         else:
             unmatched.extend(sides["polymarket"] + sides["kalshi"])
-    return pairs, unmatched
+    return twins_removed(pairs), unmatched
 
 
 def report(pairs, unmatched):

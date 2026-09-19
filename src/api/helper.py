@@ -7,7 +7,6 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
 
 USER_AGENT = "SportsArb research (github.com/ryubears/SportsArb)"
 
@@ -29,26 +28,6 @@ def get_json(url, params=None, retries=3):
             time.sleep(1.5 * (attempt + 1))
 
 
-def iso(value):
-    """
-    Turn the venues' assorted timestamp strings into ISO 8601 UTC, or None.
-    """
-    if not value:
-        return None
-    s = str(value).strip().replace(" ", "T")
-    if s.endswith("Z"):
-        s = s[:-1] + "+00:00"
-    if s.endswith("+00"):
-        s = s + ":00"
-    try:
-        dt = datetime.fromisoformat(s)
-    except ValueError:
-        return str(value)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).isoformat()
-
-
 def float_or_none(value):
     """
     Convert to float, or return None when the value is missing or not numeric.
@@ -57,10 +36,3 @@ def float_or_none(value):
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
-def now_iso():
-    """
-    Current UTC time as an ISO 8601 string.
-    """
-    return datetime.now(timezone.utc).isoformat()

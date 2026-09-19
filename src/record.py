@@ -21,13 +21,12 @@ For a long run on a laptop, stop the Mac from sleeping while it runs:
 
 import argparse
 import asyncio
-import json
 import sys
 import time
 from api import kalshi, polymarket
-from api.helper import now_iso
-from datetime import datetime, timedelta, timezone
 from db import database
+from db.models import Quote
+from util.timeutil import now_iso, shift
 
 # Print immediately even when output goes to a file.
 sys.stdout.reconfigure(line_buffering=True)
@@ -52,7 +51,7 @@ class Recorder:
 
     def __init__(self, conn):
         self.conn = conn
-        self.latest = {}        # (venue, contract_id) maps to (top, ts) for the newest book seen.
+        self.latest = {}        # (venue, contract_id) maps to the newest Quote seen.
         self.written = {}       # (venue, contract_id) maps to the best levels last written to the database.
         self.updates = {"polymarket": 0, "kalshi": 0}
         self.rows_written = 0
@@ -62,22 +61,22 @@ class Recorder:
         Remember the newest book for a contract. Called by the venue streams.
         """
         self.updates[venue] += 1
-        self.latest[(venue, contract_id)] = ((bids[:LEVELS], asks[:LEVELS]), now_iso())
+        self.latest[(venue, contract_id)] = Quote(venue, contract_id, now_iso(), bids[:LEVELS], asks[:LEVELS])
 
     def flush(self):
         """
         Write one row for every contract whose best bid or ask changed since its last row.
         """
-        rows = []
-        for key, (top, ts) in list(self.latest.items()):
-            best = (top[0][:1], top[1][:1])
+        quotes = []
+        for key, quote in list(self.latest.items()):
+            best = (quote.bids[:1], quote.asks[:1])
             if self.written.get(key) == best:
                 continue
-            rows.append((key[0], key[1], ts, json.dumps(top[0]), json.dumps(top[1])))
+            quotes.append(quote)
             self.written[key] = best
-        if rows:
-            database.insert_quotes(self.conn, rows)
-            self.rows_written += len(rows)
+        if quotes:
+            database.insert_quotes(self.conn, quotes)
+            self.rows_written += len(quotes)
 
     def status(self):
         """
@@ -91,8 +90,8 @@ async def run(conn, sport, seconds):
     """
     Start both streams and the flush timer. Stops after the given seconds, or never when zero.
     """
-    horizon = (datetime.now(timezone.utc) + timedelta(days=GAME_WINDOW_DAYS)).isoformat()
-    targets = database.load_recording_targets(conn, sport, now_iso(), horizon)
+    now = now_iso()
+    targets = database.load_recording_targets(conn, sport, now, shift(now, days=GAME_WINDOW_DAYS))
     log(f"recording {len(targets['polymarket'])} polymarket and {len(targets['kalshi'])} kalshi contracts")
     recorder = Recorder(conn)
     streams = asyncio.gather(
