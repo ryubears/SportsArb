@@ -3,7 +3,7 @@ Tests for the venue stream frames and book handling that need no network.
 """
 
 import pytest
-from api import bookstream, kalshi, polymarket
+from api import bookstream, kalshi, polymarket, polymarket_us
 
 
 def test_polymarket_subscribe_frames_split_at_the_snapshot_limit():
@@ -66,3 +66,13 @@ def test_polymarket_pong_does_not_count_as_data():
     stream = polymarket.PolymarketBookStream(["t"], lambda *args: None)
     assert stream.handle("PONG") is False
     assert stream.handle('{"event_type": "price_change", "price_changes": []}') is True
+
+
+def test_polymarket_us_stream_replaces_the_book_from_each_message():
+    seen = []
+    stream = polymarket_us.PolymarketUSBookStream(["s"], lambda slug, bids, asks: seen.append((slug, bids, asks)))
+    stream.reset()
+    assert stream.handle('{"requestId": "md-1", "subscriptionType": "SUBSCRIPTION_TYPE_MARKET_DATA"}') is False
+    stream.handle('{"marketData": {"marketSlug": "s", "bids": [{"px": {"value": "0.30"}, "qty": "5"}, {"px": {"value": "0.31"}, "qty": "2"}], "offers": [{"px": {"value": "0.33"}, "qty": "1"}]}}')
+    stream.handle('{"marketData": {"marketSlug": "other", "bids": [], "offers": []}}')
+    assert seen == [("s", [[0.31, 2.0], [0.30, 5.0]], [[0.33, 1.0]])]

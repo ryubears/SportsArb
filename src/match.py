@@ -1,9 +1,10 @@
 """
-Pair bets across venues.
+Group bets that describe the same thing into bet groups.
 
 Two bets are the same when kind, season, game date, teams, subject, and
-line all agree. Polarity is kept on the pair so the scanner knows whether
-a Yes on one venue lines up with a Yes or a No on the other.
+line all agree. Every contract with that identity, on any venue, joins one
+BetGroup. The scanner then looks across a group's members for the cheapest
+way to hold yes and the cheapest way to hold no.
 
 Run with:
     python3 src/match.py --sport nfl
@@ -12,18 +13,21 @@ Run with:
 import argparse
 from collections import Counter, defaultdict
 from db import database
-from db.models import Pair
+from db.models import Bet, BetGroup
 from util.timeutil import days_between, now_iso
 
 IDENTITY = ("kind", "season", "game_date", "team_a", "team_b", "subject", "line")
 
-# Flag a pair when the venues stop trading more than this many days apart.
+# Flag a group when its members stop trading more than this many days apart.
 CLOSE_GAP_LIMIT_DAYS = 60
 
-# Known rule differences by kind, from reading both venues' rules text.
-# Every pair of that kind carries the note so nobody has to reread the rules.
+# Venues that list a mirror contract for the other outcome of the same book.
+MIRRORED_VENUES = {"polymarket"}
+
+# Known rule differences by kind, from reading the venues' rules text.
+# Every group of that kind carries the note so nobody has to reread the rules.
 KIND_NOTES = {
-    "game_winner": "Ties pay half on both venues. If the game does not start within 48 hours, Kalshi settles at a fair price while Polymarket waits for the game.",
+    "game_winner": "Ties pay half on every venue. If the game does not start within 48 hours, Kalshi settles at a fair price while Polymarket waits for the game.",
     "spread": "If the game does not start within 48 hours, Kalshi settles at a fair price. Polymarket waits, and pays 50-50 only if the game is cancelled.",
     "total": "If the game does not start within 48 hours, Kalshi settles at a fair price. Polymarket waits, and pays 50-50 only if the game is cancelled.",
     "champion": "Polymarket resolves to Other if no champion is crowned by March 31 of the season end year.",
@@ -38,97 +42,99 @@ def identity(bet):
     return tuple(bet[f] for f in IDENTITY)
 
 
-def close_gap_days(polymarket_bet, kalshi_bet):
+def label(bet):
     """
-    Kalshi close time minus Polymarket close time, in days. None if either is missing.
+    The identity in words, for example 'spread 2026-09-20 CAR@ATL ATL 4.5'.
     """
-    a, b = polymarket_bet["close_time"], kalshi_bet["close_time"]
-    if not a or not b:
-        return None
-    return round(days_between(a, b), 2)
+    parts = [bet["kind"], str(bet["game_date"] or bet["season"])]
+    if bet["team_a"]:
+        parts.append(f"{bet['team_a']}@{bet['team_b']}")
+    if bet["subject"]:
+        parts.append(bet["subject"])
+    if bet["line"] is not None:
+        parts.append(str(bet["line"]))
+    return " ".join(parts)
 
 
-def make_pair(polymarket_bet, kalshi_bet):
+def without_mirrors(rows):
     """
-    Build a Pair from two bets that share an identity, with flags for a reviewer.
+    A mirrored venue lists both outcomes of one book as separate contracts.
+    The No side's book mirrors the Yes side's, so keep the Yes side only.
     """
-    gap = close_gap_days(polymarket_bet, kalshi_bet)
-    flags = []
-    if gap is not None and abs(gap) > CLOSE_GAP_LIMIT_DAYS:
-        flags.append(f"close times {gap:.0f} days apart")
-    if polymarket_bet["kind"] in KIND_NOTES:
-        flags.append(KIND_NOTES[polymarket_bet["kind"]])
-    return Pair(
-        kind=polymarket_bet["kind"],
-        season=polymarket_bet["season"],
-        game_date=polymarket_bet["game_date"],
-        team_a=polymarket_bet["team_a"],
-        team_b=polymarket_bet["team_b"],
-        subject=polymarket_bet["subject"],
-        line=polymarket_bet["line"],
-        polymarket_id=polymarket_bet["contract_id"],
-        kalshi_id=kalshi_bet["contract_id"],
-        polymarket_polarity=polymarket_bet["polarity"],
-        kalshi_polarity=kalshi_bet["polarity"],
-        close_gap_days=gap,
-        flags=flags,
-    )
+    has_yes = {r["venue"] for r in rows if r["venue"] in MIRRORED_VENUES and r["polarity"] == "yes"}
+    return [r for r in rows if not (r["venue"] in has_yes and r["polarity"] == "no")]
 
 
-def twins_removed(pairs):
+def flags(rows):
     """
-    Polymarket lists both outcomes of a spread or total as separate tokens, and
-    both pair with the same Kalshi contract. The No token's book mirrors the Yes
-    token's, so the two pairs describe one trade. Keep the Yes side only.
+    Things a reviewer should check about a group, from its members' close times and kind.
     """
-    has_yes = {p.kalshi_id for p in pairs if p.polymarket_polarity == "yes"}
-    return [p for p in pairs if p.polymarket_polarity == "yes" or p.kalshi_id not in has_yes]
+    found = []
+    closes = sorted(r["close_time"] for r in rows if r["close_time"])
+    if len(closes) > 1 and abs(days_between(closes[0], closes[-1])) > CLOSE_GAP_LIMIT_DAYS:
+        found.append(f"close times {days_between(closes[0], closes[-1]):.0f} days apart")
+    if rows[0]["kind"] in KIND_NOTES:
+        found.append(KIND_NOTES[rows[0]["kind"]])
+    return found
+
+
+def make_group(rows):
+    """
+    Build a BetGroup from bet rows that share an identity.
+    """
+    first = rows[0]
+    members = [Bet(r["venue"], r["contract_id"], r["kind"], r["season"], r["game_date"], r["team_a"], r["team_b"],
+                   r["subject"], r["line"], r["polarity"], label(first)) for r in rows]
+    return BetGroup(label=label(first), kind=first["kind"], season=first["season"], game_date=first["game_date"],
+                    team_a=first["team_a"], team_b=first["team_b"], subject=first["subject"], line=first["line"],
+                    members=members, flags=flags(rows))
 
 
 def match(bets):
     """
-    Group bets by identity and pair every Polymarket bet with every Kalshi bet in its group.
-    Returns the pairs and the bets that found no partner on the other venue.
+    Group bet rows by identity. Returns the groups that span at least two
+    venues, and the bets that were left out because their group has one venue.
     """
-    groups = defaultdict(lambda: {"polymarket": [], "kalshi": []})
+    by_identity = defaultdict(list)
     for bet in bets:
-        groups[identity(bet)][bet["venue"]].append(bet)
-    pairs, unmatched = [], []
-    for sides in groups.values():
-        if sides["polymarket"] and sides["kalshi"]:
-            for p in sides["polymarket"]:
-                for k in sides["kalshi"]:
-                    pairs.append(make_pair(p, k))
+        by_identity[identity(bet)].append(bet)
+    groups, unmatched = [], []
+    for rows in by_identity.values():
+        rows = without_mirrors(rows)
+        if len({r["venue"] for r in rows}) >= 2:
+            groups.append(make_group(rows))
         else:
-            unmatched.extend(sides["polymarket"] + sides["kalshi"])
-    return twins_removed(pairs), unmatched
+            unmatched.extend(rows)
+    return groups, unmatched
 
 
-def report(pairs, unmatched):
+def report(groups, unmatched):
     """
-    Print pairs per kind, how many carry a close time flag, and unmatched bets per venue and kind.
+    Print groups per kind and venue set, how many carry a close time flag, and unmatched bets per venue and kind.
     """
-    counts = Counter(p.kind for p in pairs)
-    flagged = Counter(p.kind for p in pairs if any(f.startswith("close times") for f in p.flags))
-    opposite = Counter(p.kind for p in pairs if p.polymarket_polarity != p.kalshi_polarity)
-    print(f"{'kind':18s} {'pairs':>6s} {'opposite':>9s} {'close flag':>11s}")
-    for kind, n in sorted(counts.items()):
-        print(f"  {kind:16s} {n:6d} {opposite[kind]:9d} {flagged[kind]:11d}")
-    print(f"total pairs {len(pairs)}")
+    counts = Counter((g.kind, " + ".join(g.venues)) for g in groups)
+    flagged = Counter((g.kind, " + ".join(g.venues)) for g in groups if any(f.startswith("close times") for f in g.flags))
+    members = Counter()
+    for g in groups:
+        members[(g.kind, " + ".join(g.venues))] += len(g.members)
+    print(f"{'kind':18s} {'venues':40s} {'groups':>6s} {'contracts':>9s} {'close flag':>11s}")
+    for key, n in sorted(counts.items()):
+        print(f"  {key[0]:16s} {key[1]:40s} {n:6d} {members[key]:9d} {flagged[key]:11d}")
+    print(f"total groups {len(groups)} with {sum(len(g.members) for g in groups)} contracts")
     left = Counter((b["venue"], b["kind"]) for b in unmatched)
-    print("unmatched bets")
+    print("bets on a single venue only")
     for (venue, kind), n in sorted(left.items()):
-        print(f"  {venue:10s} {kind:18s} {n:6d}")
+        print(f"  {venue:14s} {kind:18s} {n:6d}")
 
 
 # MAIN
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Pair classified bets across venues.")
+    ap = argparse.ArgumentParser(description="Group classified bets across venues.")
     ap.add_argument("--sport", default="nfl")
     args = ap.parse_args()
     with database.connect() as conn:
         bets = database.load_bets(conn, args.sport)
-        pairs, unmatched = match(bets)
-        database.replace_pairs(conn, args.sport, pairs, now_iso())
-    report(pairs, unmatched)
+        groups, unmatched = match(bets)
+        database.replace_groups(conn, args.sport, groups, now_iso())
+    report(groups, unmatched)

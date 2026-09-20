@@ -9,7 +9,7 @@ contracts produce nothing, busy ones produce at most one row per second.
 
 Only futures and games within GAME_WINDOW_DAYS of kickoff are recorded.
 Every CATALOG_MINUTES the recorder refreshes the catalog in a background
-thread, fetch then classify then match, then adds the new pairs to the
+thread, fetch then classify then match, then adds the new groups' contracts to the
 live connections and removes the closed ones, without reconnecting. Fee
 schedule changes reach the fee history through the same refresh.
 
@@ -26,7 +26,7 @@ import asyncio
 import pipeline
 import sys
 import time
-from api import kalshi, polymarket
+from api import kalshi, polymarket, polymarket_us
 from db import database
 from db.models import Quote
 from util.timeutil import now_iso, shift
@@ -40,7 +40,8 @@ STATUS_SECONDS = 60     # How often a status line is printed.
 GAME_WINDOW_DAYS = 7    # Games further out than this are not recorded.
 CATALOG_MINUTES = 60    # How often the catalog is refreshed and subscriptions updated. Zero disables it.
 
-STREAMS = {"polymarket": polymarket.PolymarketBookStream, "kalshi": kalshi.KalshiBookStream}
+STREAMS = {"polymarket": polymarket.PolymarketBookStream, "kalshi": kalshi.KalshiBookStream,
+           "polymarket_us": polymarket_us.PolymarketUSBookStream}
 
 
 def log(message):
@@ -55,7 +56,7 @@ def load_targets(conn, sport):
     The contracts to record right now, as {venue: [contract_id, ...]}.
     """
     now = now_iso()
-    return database.load_recording_targets(conn, sport, now, shift(now, days=GAME_WINDOW_DAYS))
+    return database.load_recording_targets(conn, sport, now, shift(now, days=GAME_WINDOW_DAYS), list(STREAMS))
 
 
 class Recorder:
@@ -67,8 +68,8 @@ class Recorder:
         self.conn = conn
         self.latest = {}        # (venue, contract_id) maps to the newest Quote seen.
         self.written = {}       # (venue, contract_id) maps to the best levels last written to the database.
-        self.updates = {"polymarket": 0, "kalshi": 0}
-        self.last_update = {"polymarket": None, "kalshi": None}     # Wall clock seconds of the newest update per venue.
+        self.updates = {venue: 0 for venue in STREAMS}
+        self.last_update = {venue: None for venue in STREAMS}       # Wall clock seconds of the newest update per venue.
         self.rows_written = 0
 
     def on_book(self, venue, contract_id, bids, asks):
@@ -106,10 +107,11 @@ class Recorder:
         """
         One line with what has happened so far, including how long each venue has been quiet.
         """
-        quiet = {v: f"{time.time() - t:.0f}s ago" if t else "never" for v, t in self.last_update.items()}
-        return (f"tracking {len(self.latest)} books, updates polymarket {self.updates['polymarket']} "
-                f"(last {quiet['polymarket']}) kalshi {self.updates['kalshi']} (last {quiet['kalshi']}), "
-                f"rows written {self.rows_written}")
+        parts = []
+        for venue, n in self.updates.items():
+            t = self.last_update[venue]
+            parts.append(f"{venue} {n} (last {f'{time.time() - t:.0f}s ago' if t else 'never'})")
+        return f"tracking {len(self.latest)} books, updates {', '.join(parts)}, rows written {self.rows_written}"
 
 
 class Streams:
@@ -185,7 +187,7 @@ async def run(conn, sport, seconds, catalog_seconds):
         except Exception as e:
             log(f"catalog refresh failed ({e!r}), starting with the stored catalog")
     targets = load_targets(conn, sport)
-    log(f"recording {len(targets['polymarket'])} polymarket and {len(targets['kalshi'])} kalshi contracts")
+    log("recording " + ", ".join(f"{len(ids)} {venue}" for venue, ids in targets.items()) + " contracts")
     for venue, contract_ids in targets.items():
         streams.start(venue, contract_ids)
     started = last_status = last_catalog = time.time()

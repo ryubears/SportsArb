@@ -1,13 +1,14 @@
 """
-Find cross venue arbitrage episodes in the recorded quotes.
+Find arbitrage episodes in the recorded quotes.
 
-For every pair the scanner replays both venues' quotes in time order and,
-after each change, prices the two ways of locking in a dollar. An episode
-is a stretch where the best net edge stays above zero after fees. Each
-episode is stored as an Opportunity with its duration, its peak edge, how
-many contracts could have been filled at the peak by walking the recorded
-depth, and the return on the capital tied up, annualized as if the trade
-were held until the bet pays out.
+For every bet group the scanner replays its members' quotes in time order.
+After each change it finds the cheapest way to hold yes and the cheapest
+way to hold no across all members, on any venues, and prices buying both.
+An episode is a stretch where that net edge stays above zero after fees.
+Each episode is stored as an Opportunity with its two legs, its duration,
+its peak edge, how many contracts could have been filled at the peak by
+walking the recorded depth, and the return on the capital tied up,
+annualized as if the trade were held until the bet pays out.
 
 Run with:
     python3 src/scan.py
@@ -23,30 +24,19 @@ from util.timeutil import seconds_between, shift
 
 GAME_HOURS = 4          # A game pays out about this long after kickoff.
 TARGET_ANNUAL_PCT = 10  # The return an opportunity must beat to be worth the risk.
-
-# Each trade names its two legs as a venue and which side of that venue's book to walk.
-# Walking 'ask' means buying the contract at its asks.
-# Walking 'bid' means buying the opposite outcome, which costs one minus the bid.
-# Every trade pays exactly one dollar at settlement because the two legs cover both outcomes.
-TRADES = {
-    "same": [
-        ("buy PM yes, buy K no", ("polymarket", "ask"), ("kalshi", "bid")),
-        ("buy K yes, buy PM no", ("kalshi", "ask"), ("polymarket", "bid")),
-    ],
-    "opposite": [
-        ("buy both yes", ("polymarket", "ask"), ("kalshi", "ask")),
-        ("buy both no", ("polymarket", "bid"), ("kalshi", "bid")),
-    ],
-}
+SHORT_NAMES = {"polymarket": "PM", "kalshi": "K", "polymarket_us": "PMUS"}
 
 
 # PRICING
 
-def ladder(quote, side):
+def ladder(quote, polarity, side):
     """
-    Cost per contract and size for each level of one leg, cheapest first.
+    Cost per contract and size for each level of holding one side of the
+    bet through this contract, cheapest first. Holding the side the contract
+    pays on means buying it at its asks. Holding the other side means buying
+    the opposite outcome, which costs one minus the bid.
     """
-    if side == "ask":
+    if side == polarity:
         return [(price, size) for price, size in quote.asks]
     return [(round(1 - price, 4), size) for price, size in quote.bids]
 
@@ -81,49 +71,48 @@ def fill(leg_a, leg_b, venue_a, venue_b, fee_infos):
     return (top_edge if top_edge is not None else -1.0), size, profit
 
 
-def fee_at(history, ts):
+def cheapest(members, quotes, side, fee_infos):
     """
-    The fee schedule in force at a time, from the contract's fee history.
-    Before the first record the first record is used, since it is the
-    earliest schedule ever observed. An empty history means no fee.
+    The member offering the lowest fee inclusive cost at the top of book to
+    hold one side of the bet. Returns (member, cost) or (None, None).
     """
-    current = {}
-    for record in history:
-        if record.seen_at > ts and current:
-            break
-        current = record.fee_info
-    return current
+    best, best_cost = None, None
+    for m in members:
+        levels = ladder(quotes[(m["venue"], m["contract_id"])], m["polarity"], side)
+        if not levels:
+            continue
+        cost = levels[0][0] + fees.fee(m["venue"], levels[0][0], 1, fee_infos[(m["venue"], m["contract_id"])])
+        if best_cost is None or cost < best_cost:
+            best, best_cost = m, cost
+    return best, best_cost
 
 
-def best_trade(pair, quotes, fee_infos):
+def best_trade(members, quotes, fee_infos):
     """
-    The most profitable trade for a pair given both venues' current quotes.
-    Returns (trade name, edge at top, size, profit).
+    The cheapest yes leg and the cheapest no leg across a group's members,
+    priced together. Returns (yes member, no member, edge at top, size, profit),
+    or None when a side has no quotes.
     """
-    relation = "same" if pair["polymarket_polarity"] == pair["kalshi_polarity"] else "opposite"
-    best = None
-    for name, (venue_a, side_a), (venue_b, side_b) in TRADES[relation]:
-        edge, size, profit = fill(ladder(quotes[venue_a], side_a), ladder(quotes[venue_b], side_b),
-                                  venue_a, venue_b, fee_infos)
-        if best is None or edge > best[1]:
-            best = (name, edge, size, profit)
-    return best
+    yes, _ = cheapest(members, quotes, "yes", fee_infos)
+    no, _ = cheapest(members, quotes, "no", fee_infos)
+    if yes is None or no is None:
+        return None
+    yes_key, no_key = (yes["venue"], yes["contract_id"]), (no["venue"], no["contract_id"])
+    edge, size, profit = fill(ladder(quotes[yes_key], yes["polarity"], "yes"), ladder(quotes[no_key], no["polarity"], "no"),
+                              yes["venue"], no["venue"], {yes["venue"]: fee_infos[yes_key], no["venue"]: fee_infos[no_key]})
+    return yes, no, edge, size, profit
 
 
 # EPISODES
 
-def label(pair):
+def trade_words(yes, no):
     """
-    Short human readable name, for example 'spread 2026-09-20 IND@KC KC 5.5'.
+    The two legs in words, for example 'yes: K buy, no: PMUS buy other side'.
     """
-    parts = [pair["kind"], str(pair["game_date"] or pair["season"])]
-    if pair["team_a"]:
-        parts.append(f"{pair['team_a']}@{pair['team_b']}")
-    if pair["subject"]:
-        parts.append(pair["subject"])
-    if pair["line"] is not None:
-        parts.append(str(pair["line"]))
-    return " ".join(parts)
+    def leg(member, side):
+        action = "buy" if member["polarity"] == side else "buy other side"
+        return f"{side}: {SHORT_NAMES.get(member['venue'], member['venue'])} {action}"
+    return f"{leg(yes, 'yes')}, {leg(no, 'no')}"
 
 
 def resolution_time(start_time, close_time):
@@ -135,20 +124,24 @@ def resolution_time(start_time, close_time):
     return close_time
 
 
-def finish(pair, peak, start_ts, end_ts, start_time, close_time):
+def finish(group, peak, start_ts, end_ts):
     """
     Turn an in progress episode into an Opportunity. peak holds the best moment seen so far.
     """
+    start_time = next((m["start_time"] for m in group["members"] if m["start_time"]), None)
+    close_time = next((m["close_time"] for m in group["members"] if m["close_time"]), None)
     live = 1 if start_time and peak["ts"] >= start_time else 0
     pays_at = resolution_time(start_time, close_time)
     days_held = max(seconds_between(peak["ts"], pays_at) / 86400, 1 / 24) if pays_at else None
     return_pct = 100 * peak["edge"] / (1 - peak["edge"])
     return Opportunity(
-        polymarket_id=pair["polymarket_id"],
-        kalshi_id=pair["kalshi_id"],
-        kind=pair["kind"],
-        label=label(pair),
-        trade=peak["trade"],
+        label=group["label"],
+        kind=group["kind"],
+        trade=trade_words(peak["yes"], peak["no"]),
+        yes_venue=peak["yes"]["venue"],
+        yes_contract=peak["yes"]["contract_id"],
+        no_venue=peak["no"]["venue"],
+        no_contract=peak["no"]["contract_id"],
         start_ts=start_ts,
         end_ts=end_ts,
         seconds=seconds_between(start_ts, end_ts),
@@ -163,50 +156,67 @@ def finish(pair, peak, start_ts, end_ts, start_time, close_time):
     )
 
 
-def scan_pair(pair, pm_quotes, k_quotes, fee_histories, start_time, close_time):
+def scan_group(group, quotes_by_contract, fee_histories):
     """
-    Replay one pair's quotes and return its episodes as Opportunities.
-    fee_histories maps each venue to that contract's list of FeeRecords.
+    Replay one group's quotes and return its episodes as Opportunities.
+    quotes_by_contract and fee_histories are keyed by (venue, contract_id).
     """
-    events = sorted(pm_quotes + k_quotes, key=lambda q: q.ts)
+    events = sorted((q for key in quotes_by_contract for q in quotes_by_contract[key]), key=lambda q: q.ts)
     latest = {}
     episodes = []
     start_ts, peak = None, None
     for quote in events:
-        latest[quote.venue] = quote
-        if len(latest) < 2 or not all(q.bids and q.asks for q in latest.values()):
+        latest[(quote.venue, quote.contract_id)] = quote
+        members = [m for m in group["members"] if (m["venue"], m["contract_id"]) in latest]
+        if len(members) < 2:
             continue
-        fee_infos = {venue: fee_at(history, quote.ts) for venue, history in fee_histories.items()}
-        trade, edge, size, profit = best_trade(pair, latest, fee_infos)
+        fee_infos = {key: fee_at(fee_histories[key], quote.ts) for key in latest}
+        result = best_trade(members, latest, fee_infos)
+        if result is None:
+            continue
+        yes, no, edge, size, profit = result
         if edge > 0:
             if peak is None:
-                start_ts, peak = quote.ts, {"trade": trade, "ts": quote.ts, "edge": edge, "size": size, "profit": profit}
-            elif edge > peak["edge"]:
-                peak = {"trade": trade, "ts": quote.ts, "edge": edge, "size": size, "profit": profit}
+                start_ts = quote.ts
+            if peak is None or edge > peak["edge"]:
+                peak = {"yes": yes, "no": no, "ts": quote.ts, "edge": edge, "size": size, "profit": profit}
         elif peak is not None:
-            episodes.append(finish(pair, peak, start_ts, quote.ts, start_time, close_time))
+            episodes.append(finish(group, peak, start_ts, quote.ts))
             start_ts, peak = None, None
     if peak is not None:
-        episodes.append(finish(pair, peak, start_ts, events[-1].ts, start_time, close_time))
+        episodes.append(finish(group, peak, start_ts, events[-1].ts))
     return episodes
 
 
-def scan(conn, since=None):
+def fee_at(history, ts):
     """
-    Scan every pair and return its Opportunities.
+    The fee schedule in force at a time, from the contract's fee history.
+    Before the first record the first record is used, since it is the
+    earliest schedule ever observed. An empty history means no fee.
     """
-    pairs = [dict(r) for r in conn.execute("SELECT * FROM pairs")]
-    contracts = {(r["venue"], r["contract_id"]): dict(r) for r in conn.execute(
-        "SELECT venue, contract_id, start_time, close_time FROM contracts")}
-    pm_ids, k_ids = {p["polymarket_id"] for p in pairs}, {p["kalshi_id"] for p in pairs}
-    pm_quotes, k_quotes = database.load_quotes(conn, "polymarket", pm_ids, since), database.load_quotes(conn, "kalshi", k_ids, since)
-    pm_fees, k_fees = database.load_fee_history(conn, "polymarket", pm_ids), database.load_fee_history(conn, "kalshi", k_ids)
+    current = {}
+    for record in history:
+        if record.seen_at > ts and current:
+            break
+        current = record.fee_info
+    return current
+
+
+def scan(conn, sport="nfl", since=None):
+    """
+    Scan every bet group and return its Opportunities.
+    """
+    groups = database.load_groups(conn, sport)
+    ids = defaultdict(set)
+    for g in groups.values():
+        for m in g["members"]:
+            ids[m["venue"]].add(m["contract_id"])
+    quotes = {venue: database.load_quotes(conn, venue, wanted, since) for venue, wanted in ids.items()}
+    histories = {venue: database.load_fee_history(conn, venue, wanted) for venue, wanted in ids.items()}
     opportunities = []
-    for pair in pairs:
-        pm = contracts[("polymarket", pair["polymarket_id"])]
-        fee_histories = {"polymarket": pm_fees[pair["polymarket_id"]], "kalshi": k_fees[pair["kalshi_id"]]}
-        opportunities.extend(scan_pair(pair, pm_quotes[pair["polymarket_id"]], k_quotes[pair["kalshi_id"]],
-                                       fee_histories, pm["start_time"], pm["close_time"]))
+    for g in groups.values():
+        keys = [(m["venue"], m["contract_id"]) for m in g["members"]]
+        opportunities.extend(scan_group(g, {k: quotes[k[0]][k[1]] for k in keys}, {k: histories[k[0]][k[1]] for k in keys}))
     return opportunities
 
 
@@ -229,7 +239,7 @@ def report(opportunities):
     print(f"\nepisodes beating {TARGET_ANNUAL_PCT}% annualized when held to resolution, by profit at peak")
     good = [o for o in opportunities if o.annual_pct is not None and o.annual_pct >= TARGET_ANNUAL_PCT]
     for o in sorted(good, key=lambda o: -o.peak_profit)[:15]:
-        print(f"  {o.label:42s} {o.trade:22s} net {100 * o.peak_edge:4.1f}c x {o.peak_size:6.0f} = {o.peak_profit:7.2f}$ "
+        print(f"  {o.label:42s} {o.trade:40s} net {100 * o.peak_edge:4.1f}c x {o.peak_size:6.0f} = {o.peak_profit:7.2f}$ "
               f"return {o.return_pct:4.2f}% over {o.days_held:5.1f}d = {o.annual_pct:7.0f}%/yr, "
               f"lasted {o.seconds:6.0f}s {'live' if o.live else ''}")
 
@@ -237,10 +247,11 @@ def report(opportunities):
 # MAIN
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Scan recorded quotes for cross venue arbitrage episodes.")
+    ap = argparse.ArgumentParser(description="Scan recorded quotes for arbitrage episodes.")
+    ap.add_argument("--sport", default="nfl")
     ap.add_argument("--since", help="only use quotes at or after this ISO timestamp")
     args = ap.parse_args()
     with database.connect() as conn:
-        opportunities = scan(conn, args.since)
+        opportunities = scan(conn, args.sport, args.since)
         database.replace_opportunities(conn, opportunities)
     report(opportunities)

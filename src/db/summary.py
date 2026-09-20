@@ -2,7 +2,7 @@
 Print a summary of everything in the database.
 
 Row counts and time ranges for each table, recording health for the
-recent window, pairs by kind, and the opportunities found so far. Reads
+recent window, bet groups by kind, and the opportunities found so far. Reads
 only, so it is safe to run while the recorder is writing.
 
 This script opens the database file directly rather than importing the
@@ -78,12 +78,13 @@ def print_contracts(conn, now):
           f"{changed:,} contracts with a schedule change, latest {short_time(latest)}")
 
 
-def print_pairs(conn):
+def print_groups(conn):
     body = query_rows(conn, """
-        SELECT kind, COUNT(*), SUM(polymarket_polarity <> kalshi_polarity), SUM(game_date IS NOT NULL)
-        FROM pairs GROUP BY kind ORDER BY kind""")
-    print_table("pairs", ("kind", "pairs", "opposite", "games"), body)
-    print(f"  total {first_value(conn, 'SELECT COUNT(*) FROM pairs'):,}, last matched {short_time(first_value(conn, 'SELECT MAX(matched_at) FROM pairs'))}")
+        SELECT kind, venues, COUNT(*), SUM(contracts), SUM(game_date IS NOT NULL)
+        FROM bet_groups WHERE venue_count >= 2 GROUP BY kind, venues ORDER BY kind, venues""")
+    print_table("bet groups", ("kind", "venues", "groups", "contracts", "games"), body)
+    print(f"  total {first_value(conn, 'SELECT COUNT(*) FROM bet_groups WHERE venue_count >= 2'):,}, "
+          f"last matched {short_time(first_value(conn, 'SELECT MAX(matched_at) FROM bet_groups'))}")
 
 
 def print_quotes(conn, now, hours):
@@ -150,6 +151,6 @@ if __name__ == "__main__":
     conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=30)
     print_storage(conn)
     print_contracts(conn, now)
-    print_pairs(conn)
+    print_groups(conn)
     print_quotes(conn, now, args.hours)
     print_opportunities(conn)

@@ -46,3 +46,9 @@ def test_kalshi_maker_fee_only_on_series_that_charge_it():
 def test_fee_dispatches_by_venue():
     assert fees.fee("polymarket", 0.5, 100, PM_SPORTS) == 1.25
     assert fees.fee("kalshi", 0.5, 100, KALSHI_SPORTS) == 1.75
+
+
+def test_polymarket_us_rounds_half_to_even():
+    assert fees.polymarket_us_fee(0.5, 100, {"feeCoefficient": 0.0695}) == 1.74
+    assert fees.polymarket_us_fee(0.5, 100, {}) == 1.74
+    assert fees.fee("polymarket_us", 0.5, 100, {"feeCoefficient": 0.0695}) == 1.74

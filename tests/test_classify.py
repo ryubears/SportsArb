@@ -85,7 +85,8 @@ def test_polymarket_moneyline():
 def test_polymarket_game_date_uses_eastern_time():
     bet = classify.classify_polymarket(pm_row(market_type="moneyline", title="Patriots vs. Bears", outcome="Bears",
                                               event_id="nfl-ne-chi-2026-10-23", start_time="2026-10-23T00:15:00+00:00"))
-    assert (bet.game_date, bet.team_a, bet.team_b, bet.subject) == ("2026-10-22", "NE", "CHI", "CHI")
+    # Winners are stated as the away team winning, so the home outcome is polarity no.
+    assert (bet.game_date, bet.team_a, bet.team_b, bet.subject, bet.polarity) == ("2026-10-22", "NE", "CHI", "NE", "no")
 
 
 def test_polymarket_spread_favorite_and_underdog_sides():
@@ -154,14 +155,14 @@ def test_kalshi_game_kinds():
     winner = classify.classify_kalshi(k_row("KXNFLGAME", "KXNFLGAME-26SEP20CARATL", "KXNFLGAME-26SEP20CARATL-ATL"))
     spread = classify.classify_kalshi(k_row("KXNFLSPREAD", "KXNFLSPREAD-26SEP20CARATL", "KXNFLSPREAD-26SEP20CARATL-ATL5", line=4.5))
     total = classify.classify_kalshi(k_row("KXNFLTOTAL", "KXNFLTOTAL-26SEP20CARATL", "KXNFLTOTAL-26SEP20CARATL-27", line=26.5))
-    assert bet_fields(winner) == ("game_winner", 2027, "2026-09-20", "CAR", "ATL", "ATL", None, "yes")
+    assert bet_fields(winner) == ("game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, "no")
     assert bet_fields(spread) == ("spread", 2027, "2026-09-20", "CAR", "ATL", "ATL", 4.5, "yes")
     assert bet_fields(total) == ("total", 2027, "2026-09-20", "CAR", "ATL", None, 26.5, "yes")
 
 
 def test_kalshi_game_with_two_letter_codes():
     bet = classify.classify_kalshi(k_row("KXNFLGAME", "KXNFLGAME-26SEP24ATLGB", "KXNFLGAME-26SEP24ATLGB-GB"))
-    assert (bet.game_date, bet.team_a, bet.team_b, bet.subject) == ("2026-09-24", "ATL", "GB", "GB")
+    assert (bet.game_date, bet.team_a, bet.team_b, bet.subject, bet.polarity) == ("2026-09-24", "ATL", "GB", "ATL", "no")
 
 
 def test_kalshi_futures():
@@ -173,6 +174,58 @@ def test_kalshi_futures():
     assert bet_fields(division) == ("division_champion", 2027, None, None, None, "BUF", None, "yes")
     assert bet_fields(seed) == ("conf_top_seed", 2027, None, None, None, "BUF", None, "yes")
     assert bet_fields(wins) == ("season_wins", 2027, None, None, None, "BUF", 9.5, "yes")
+
+
+# POLYMARKET US
+
+def us_row(event, slug, market_type=None, line=None, start_time="2026-09-20T17:00:00+00:00"):
+    return {"venue": "polymarket_us", "contract_id": slug, "event_id": event, "market_type": market_type,
+            "line": line, "start_time": start_time, "title": "", "outcome": ""}
+
+
+def test_polymarket_us_game_kinds():
+    winner = classify.classify_polymarket_us(us_row("nfl-phi-ten-2026-09-20", "aec-nfl-phi-ten-2026-09-20", "football_team_full_game_winner"))
+    total = classify.classify_polymarket_us(us_row("nfl-phi-ten-2026-09-20", "tsc-nfl-phi-ten-2026-09-20-total-45pt5", "football_team_full_game_total", 45.5))
+    assert bet_fields(winner) == ("game_winner", 2027, "2026-09-20", "PHI", "TEN", "PHI", None, "yes")
+    assert bet_fields(total) == ("total", 2027, "2026-09-20", "PHI", "TEN", None, 45.5, "yes")
+
+
+def test_polymarket_us_spread_line_is_the_away_handicap():
+    favored = classify.classify_polymarket_us(us_row("nfl-phi-ten-2026-09-20", "asc-nfl-phi-ten-2026-09-20-neg-1pt5", "football_team_full_game_spread", -1.5))
+    underdog = classify.classify_polymarket_us(us_row("nfl-phi-ten-2026-09-20", "asc-nfl-phi-ten-2026-09-20-pos-17pt5", "football_team_full_game_spread", 17.5))
+    assert bet_fields(favored) == ("spread", 2027, "2026-09-20", "PHI", "TEN", "PHI", 1.5, "yes")
+    assert bet_fields(underdog) == ("spread", 2027, "2026-09-20", "PHI", "TEN", "TEN", 17.5, "no")
+
+
+def test_polymarket_us_futures():
+    division = classify.classify_polymarket_us(us_row("nfl-afceast-2027-01-10-w", "tec-nfl-afceast-2027-01-10-w-buf", "futures", start_time=None))
+    champion = classify.classify_polymarket_us(us_row("nfl-champ-2027-02-14-w", "tec-nfl-champ-2027-02-14-w-buf", "futures", start_time=None))
+    seed = classify.classify_polymarket_us(us_row("nfl-afc1seed-2027-01-10", "tec-nfl-afc1seed-2027-01-10-buf", "futures", start_time=None))
+    assert bet_fields(division) == ("division_champion", 2027, None, None, None, "BUF", None, "yes")
+    assert bet_fields(champion) == ("champion", 2027, None, None, None, "BUF", None, "yes")
+    assert bet_fields(seed) == ("conf_top_seed", 2027, None, None, None, "BUF", None, "yes")
+
+
+def test_polymarket_us_futures_with_glued_suffixes_and_qualifier():
+    champion = classify.classify_polymarket_us(us_row("nfl-champ-2027-02-14-w", "tec-nfl-champ-2027-02-14-w-bufbil", "futures", start_time=None))
+    packers = classify.classify_polymarket_us(us_row("nfl-champ-2027-02-14-w", "tec-nfl-champ-2027-02-14-w-gbpac", "futures", start_time=None))
+    qualifier = classify.classify_polymarket_us(us_row("nfl-afc-2027-01-24-champq", "tec-nfl-afc-2027-01-24-champq-kc", "futures", start_time=None))
+    assert (champion.kind, champion.subject) == ("champion", "BUF")
+    assert (packers.kind, packers.subject) == ("champion", "GB")
+    assert bet_fields(qualifier) == ("reach_conf_final", 2027, None, None, None, "KC", None, "yes")
+
+
+def test_glued_codes_cover_every_odd_team_name():
+    assert classify.glued_code("San Francisco 49ers") == "saners"
+    assert classify.glued_code("Kansas City Chiefs") == "kanchi"
+    assert classify.glued_code("Los Angeles Chargers") == "loscha"
+    assert [classify.us_team_suffix(s) for s in ("kanchi", "loscha", "losram", "grepac", "saners", "tambuc", "bufbil", "kc", "gb")] == \
+        ["KC", "LAC", "LAR", "GB", "SF", "TB", "BUF", "KC", "GB"]
+
+
+def test_polymarket_us_skips_props_and_awards():
+    assert classify.classify_polymarket_us(us_row("nfl-phi-ten-2026-09-20", "x", "football_player_touchdowns", 0.5)) is None
+    assert classify.classify_polymarket_us(us_row("nfl-mvp-2027-02-11-w", "tec-nfl-mvp-2027-02-11-w-abc", "futures", start_time=None)) is None
 
 
 def test_kalshi_skips_unknown_series_and_missing_lines():

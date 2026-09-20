@@ -1,8 +1,8 @@
 """
-Refresh the catalog. Fetch both venues, classify the contracts into bets,
-and pair them across venues, in one call.
+Refresh the catalog. Fetch every venue, classify the contracts into bets,
+and group them across venues, in one call.
 
-The recorder runs this on a timer so new games enter the pairs table and
+The recorder runs this on a timer so new games enter the bet groups and
 fee schedule changes land in the fee history while it is recording. The
 same steps are available one at a time as fetch.py, classify.py, and
 match.py, which also print their full reports.
@@ -18,8 +18,6 @@ import match
 from db import database
 from util.timeutil import now_iso
 
-VENUES = ("polymarket", "kalshi")
-
 
 def refresh(sport, log=print, db_path=None):
     """
@@ -28,16 +26,16 @@ def refresh(sport, log=print, db_path=None):
     """
     with database.connect(db_path) as conn:
         parts = []
-        for venue in VENUES:
+        for venue in fetch.VENUES:
             contracts = fetch.fetch_contracts(venue, sport)
             fee_changes = database.upsert_contracts(conn, contracts, now_iso())
             parts.append(f"{venue} {len(contracts)} contracts, {fee_changes} fee changes")
             log(f"fetched {parts[-1]}")
         bets, _ = classify.classify_all(database.load_contracts(conn, sport=sport))
         database.replace_bets(conn, sport, bets)
-        pairs, _ = match.match(database.load_bets(conn, sport))
-        database.replace_pairs(conn, sport, pairs, now_iso())
-        parts.append(f"{len(bets)} bets, {len(pairs)} pairs")
+        groups, _ = match.match(database.load_bets(conn, sport))
+        database.replace_groups(conn, sport, groups, now_iso())
+        parts.append(f"{len(bets)} bets, {len(groups)} groups")
     return ", ".join(parts)
 
 

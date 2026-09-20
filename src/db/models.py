@@ -55,13 +55,17 @@ class Bet:
     subject: str | None     # The team the contract is about, when there is one.
     line: float | None      # Spread margin, total points, or wins threshold.
     polarity: str           # 'yes' pays when the bet's statement is true, 'no' pays when it is false.
+    group_label: str | None = None    # The BetGroup this bet belongs to, set by match.py.
 
 
 @dataclass
-class Pair:
+class BetGroup:
     """
-    One Polymarket contract and one Kalshi contract that describe the same bet.
+    Every contract, on any venue, that describes one bet. The label is the
+    bet's identity in words and serves as its key. Members are Bets, and a
+    group is only worth recording when its members span two or more venues.
     """
+    label: str              # For example 'spread 2026-09-20 CAR@ATL ATL 4.5'.
     kind: str
     season: int | None
     game_date: str | None
@@ -69,12 +73,12 @@ class Pair:
     team_b: str | None
     subject: str | None
     line: float | None
-    polymarket_id: str
-    kalshi_id: str
-    polymarket_polarity: str    # 'yes' or 'no', see Bet.
-    kalshi_polarity: str
-    close_gap_days: float | None    # Kalshi close time minus Polymarket close time.
-    flags: list[str]                # Things a human should check before trusting the pair.
+    members: list           # Bets, one per contract, mirrors excluded.
+    flags: list[str]        # Things a human should check before trusting the group.
+
+    @property
+    def venues(self):
+        return sorted({m.venue for m in self.members})
 
 
 @dataclass
@@ -92,13 +96,16 @@ class Quote:
 @dataclass
 class Opportunity:
     """
-    A stretch of time when one pair could be traded for a profit after fees.
+    A stretch of time when one bet group could be traded for a profit after
+    fees, by buying yes exposure on one contract and no exposure on another.
     """
-    polymarket_id: str
-    kalshi_id: str
+    label: str              # The bet group's label.
     kind: str
-    label: str              # Short human readable name of the bet.
-    trade: str              # Which two legs to buy.
+    trade: str              # The two legs in words.
+    yes_venue: str          # Where the yes exposure was cheapest at the peak.
+    yes_contract: str
+    no_venue: str           # Where the no exposure was cheapest at the peak.
+    no_contract: str
     start_ts: str           # When the net edge first went positive.
     end_ts: str             # When it went back to zero, or the last quote seen.
     seconds: float
