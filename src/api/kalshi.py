@@ -3,10 +3,11 @@ Kalshi API client.
 
 Two jobs. The query half walks sports series to events to markets on the
 public API and turns every open market into a Contract. The streaming
-half opens the websocket with a signed API key, subscribes to order book
+half opens one websocket with a signed API key, subscribes to order book
 updates, and keeps a live book for each ticker restated from the Yes side
-so it matches Polymarket's shape. This is the only file that knows
-Kalshi's field names and message formats.
+so it matches Polymarket's shape. Tickers can be added and removed while
+the connection runs. This is the only file that knows Kalshi's field
+names and message formats.
 """
 
 import asyncio
@@ -141,61 +142,130 @@ def ws_headers():
     }
 
 
-def apply_message(m, books, on_book):
+def update_frame(message_id, sid, tickers, action):
     """
-    Update the local books from one feed message and report the changed ticker.
+    The command that adds or removes tickers on a live subscription. action is
+    'add_markets' or 'delete_markets'.
     """
-    kind, body = m.get("type"), m.get("msg") or {}
-    ticker = body.get("market_ticker")
-    if kind == "orderbook_snapshot":
-        books[ticker] = {
-            "yes": {float(p): float(s) for p, s in body.get("yes_dollars_fp") or []},
-            "no": {float(p): float(s) for p, s in body.get("no_dollars_fp") or []},
-        }
-    elif kind == "orderbook_delta" and ticker in books:
-        side = books[ticker][body["side"]]
-        price = float(body["price_dollars"])
-        # Round to cents so summing many deltas does not leave floating point residue.
-        side[price] = round(side.get(price, 0.0) + float(body["delta_fp"]), 2)
-        if side[price] <= 0:
-            del side[price]
-    else:
-        return
-    b = books[ticker]
-    bids = [[p, s] for p, s in sorted(b["yes"].items(), reverse=True) if s > 0]
-    asks = [[round(1 - p, 4), s] for p, s in sorted(b["no"].items(), reverse=True) if s > 0]
-    on_book(ticker, bids, asks)
+    return {"id": message_id, "cmd": "update_subscription",
+            "params": {"sids": [sid], "market_tickers": tickers, "action": action}}
 
 
-async def stream_books(tickers, on_book, log=print):
+class BookStream:
     """
-    Keep a live order book for every ticker and call on_book(ticker, bids, asks)
-    after each change. Books are given from the Yes side, best first, so they
-    look the same as Polymarket's. A resting No order at price p is a Yes ask
-    at 1 minus p. Runs forever, reconnecting when a connection drops or a
-    sequence number is skipped.
+    One websocket connection carrying every wanted ticker. Keeps a live book
+    per ticker and calls on_book(ticker, bids, asks) after each change. Books
+    are given from the Yes side, best first, so they look the same as
+    Polymarket's. A resting No order at price p is a Yes ask at 1 minus p.
+    Runs forever once started, reconnecting when the connection drops, goes
+    silent, or skips a sequence number.
     """
-    while True:
-        books, last_seq = {}, None
-        try:
-            async with websockets.connect(WS_URL, additional_headers=ws_headers(), open_timeout=20, max_size=None) as ws:
-                await ws.send(json.dumps({"id": 1, "cmd": "subscribe",
-                                          "params": {"channels": ["orderbook_delta"], "market_tickers": tickers}}))
-                while True:
-                    # Kalshi sends nothing while books are idle, so the limit is generous.
-                    raw = await asyncio.wait_for(ws.recv(), timeout=STALE_SECONDS)
-                    m = json.loads(raw)
-                    seq = m.get("seq")
-                    if seq is not None:
-                        if last_seq is not None and seq != last_seq + 1:
-                            log(f"kalshi stream skipped from seq {last_seq} to {seq}, reconnecting")
-                            break
-                        last_seq = seq
-                    if m.get("type") == "error":
-                        log(f"kalshi stream error {m.get('msg')}")
-                    apply_message(m, books, on_book)
-        except asyncio.TimeoutError:
-            log(f"kalshi stream silent for {STALE_SECONDS}s, reconnecting")
-        except (websockets.ConnectionClosed, OSError) as e:
-            log(f"kalshi stream dropped ({type(e).__name__}), reconnecting")
-        await asyncio.sleep(3)
+
+    def __init__(self, tickers, on_book, log=print):
+        self.wanted = set(tickers)
+        self.on_book = on_book
+        self.log = log
+        self.books = {}
+        self.commands = asyncio.Queue()     # Pending ("add_markets" or "delete_markets", [tickers]).
+        self.sid = None                     # The live subscription id, needed for update commands.
+        self.subscribed = asyncio.Event()   # Set once the subscribe acknowledgement arrives.
+
+    def add(self, tickers):
+        """
+        Start streaming more tickers. Takes effect on the live connection.
+        """
+        new = set(tickers) - self.wanted
+        self.wanted |= new
+        if new:
+            self.commands.put_nowait(("add_markets", sorted(new)))
+
+    def remove(self, tickers):
+        """
+        Stop streaming tickers and forget their books.
+        """
+        gone = set(tickers) & self.wanted
+        self.wanted -= gone
+        for ticker in gone:
+            self.books.pop(ticker, None)
+        if gone:
+            self.commands.put_nowait(("delete_markets", sorted(gone)))
+
+    def apply(self, m):
+        """
+        Update the local books from one feed message and report the changed ticker.
+        """
+        kind, body = m.get("type"), m.get("msg") or {}
+        ticker = body.get("market_ticker")
+        if kind == "subscribed":
+            self.sid = body.get("sid")
+            self.subscribed.set()
+            return
+        if kind == "orderbook_snapshot" and ticker in self.wanted:
+            self.books[ticker] = {
+                "yes": {float(p): float(s) for p, s in body.get("yes_dollars_fp") or []},
+                "no": {float(p): float(s) for p, s in body.get("no_dollars_fp") or []},
+            }
+        elif kind == "orderbook_delta" and ticker in self.books:
+            side = self.books[ticker][body["side"]]
+            price = float(body["price_dollars"])
+            # Round to cents so summing many deltas does not leave floating point residue.
+            side[price] = round(side.get(price, 0.0) + float(body["delta_fp"]), 2)
+            if side[price] <= 0:
+                del side[price]
+        else:
+            if kind == "error":
+                self.log(f"kalshi stream error {body}")
+            return
+        b = self.books[ticker]
+        bids = [[p, s] for p, s in sorted(b["yes"].items(), reverse=True) if s > 0]
+        asks = [[round(1 - p, 4), s] for p, s in sorted(b["no"].items(), reverse=True) if s > 0]
+        self.on_book(ticker, bids, asks)
+
+    async def send_commands(self, ws):
+        """
+        Forward queued update commands to the live subscription, forever.
+        """
+        message_id = 2
+        while True:
+            action, tickers = await self.commands.get()
+            await self.subscribed.wait()
+            await ws.send(json.dumps(update_frame(message_id, self.sid, tickers, action)))
+            message_id += 1
+
+    async def run(self):
+        """
+        Connect, subscribe to every wanted ticker, and process messages until
+        the connection fails, then reconnect. Pending commands are dropped on
+        connect because the fresh subscription already covers the wanted set.
+        """
+        while True:
+            while not self.wanted:
+                await asyncio.sleep(1)
+            self.books, self.sid, last_seq = {}, None, None
+            self.subscribed.clear()
+            while not self.commands.empty():
+                self.commands.get_nowait()
+            try:
+                async with websockets.connect(WS_URL, additional_headers=ws_headers(), open_timeout=20, max_size=None) as ws:
+                    await ws.send(json.dumps({"id": 1, "cmd": "subscribe",
+                                              "params": {"channels": ["orderbook_delta"], "market_tickers": sorted(self.wanted)}}))
+                    sender = asyncio.create_task(self.send_commands(ws))
+                    try:
+                        while True:
+                            # Kalshi sends nothing while books are idle, so the limit is generous.
+                            raw = await asyncio.wait_for(ws.recv(), timeout=STALE_SECONDS)
+                            m = json.loads(raw)
+                            seq = m.get("seq")
+                            if seq is not None:
+                                if last_seq is not None and seq != last_seq + 1:
+                                    self.log(f"kalshi stream skipped from seq {last_seq} to {seq}, reconnecting")
+                                    break
+                                last_seq = seq
+                            self.apply(m)
+                    finally:
+                        sender.cancel()
+            except asyncio.TimeoutError:
+                self.log(f"kalshi stream silent for {STALE_SECONDS}s, reconnecting")
+            except (websockets.ConnectionClosed, OSError) as e:
+                self.log(f"kalshi stream dropped ({type(e).__name__}), reconnecting")
+            await asyncio.sleep(3)

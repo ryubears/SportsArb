@@ -1,11 +1,37 @@
 """
-Tests for the recorder's write rules.
+Tests for the recorder's write rules, its stream management, and its refresh loop.
 """
 
 import asyncio
 import record
 from db import database
 
+
+class FakeStream:
+    """
+    A stand in for a venue BookStream that records what it was asked to do and never connects.
+    """
+    instances = []
+
+    def __init__(self, contract_ids, on_book, log):
+        self.wanted = set(contract_ids)
+        self.on_book = on_book
+        self.added, self.removed = [], []
+        FakeStream.instances.append(self)
+
+    def add(self, contract_ids):
+        self.wanted |= set(contract_ids)
+        self.added.append(sorted(contract_ids))
+
+    def remove(self, contract_ids):
+        self.wanted -= set(contract_ids)
+        self.removed.append(sorted(contract_ids))
+
+    async def run(self):
+        await asyncio.sleep(3600)
+
+
+# WRITE RULES
 
 def test_flush_writes_only_when_the_best_level_changes(tmp_path):
     conn = database.connect(tmp_path / "test.sqlite")
@@ -27,19 +53,6 @@ def test_books_are_trimmed_to_the_kept_levels(tmp_path):
     assert len(r.latest[("polymarket", "T")].bids) == record.LEVELS
 
 
-def test_run_survives_a_failing_refresh(tmp_path, monkeypatch, capsys):
-    def broken_refresh(sport, log=print, db_path=None):
-        raise RuntimeError("kalshi is down")
-    monkeypatch.setattr(record.pipeline, "refresh", broken_refresh)
-    for venue in record.STREAMERS:
-        monkeypatch.setitem(record.STREAMERS, venue, fake_streamer([]))
-    conn = database.connect(tmp_path / "test.sqlite")
-    asyncio.run(record.run(conn, "nfl", seconds=3, catalog_seconds=1))
-    out = capsys.readouterr().out
-    assert "catalog refresh failed (RuntimeError('kalshi is down')), starting with the stored catalog" in out
-    assert "catalog refresh failed (RuntimeError('kalshi is down')), keeping current subscriptions" in out
-
-
 def test_status_reports_time_since_each_venue_updated(tmp_path):
     r = record.Recorder(database.connect(tmp_path / "test.sqlite"))
     assert "last never" in r.status()
@@ -47,35 +60,40 @@ def test_status_reports_time_since_each_venue_updated(tmp_path):
     assert "kalshi 1 (last 0s ago)" in r.status()
 
 
-def fake_streamer(started):
-    """
-    A stand in for a venue stream that records what it was asked to subscribe to and then waits forever.
-    """
-    async def stream(contract_ids, on_book, log):
-        started.append(list(contract_ids))
-        await asyncio.sleep(3600)
-    return stream
+# STREAMS
 
-
-def test_streams_add_new_contracts_without_touching_existing_connections(tmp_path):
+def test_streams_change_subscriptions_in_place(tmp_path):
     async def scenario():
+        FakeStream.instances.clear()
         r = record.Recorder(database.connect(tmp_path / "test.sqlite"))
-        started = {"polymarket": [], "kalshi": []}
-        streams = record.Streams(r, {v: fake_streamer(started[v]) for v in started})
+        streams = record.Streams(r, {"polymarket": FakeStream, "kalshi": FakeStream})
         streams.start("polymarket", ["a", "b"])
         streams.start("kalshi", ["k1"])
         await asyncio.sleep(0)
         summary = streams.update({"polymarket": ["a", "c"], "kalshi": ["k1"]})
-        await asyncio.sleep(0)
-        # The dropped contract is still streamed but no longer kept.
-        callback = streams.tasks[0].get_coro().cr_frame.f_locals["on_book"]
-        callback("b", [[0.5, 1]], [[0.6, 1]])
-        callback("a", [[0.5, 1]], [[0.6, 1]])
+        pm = streams.streams["polymarket"]
+        pm.on_book("b", [[0.5, 1]], [[0.6, 1]])    # A late update for the removed contract.
+        pm.on_book("a", [[0.5, 1]], [[0.6, 1]])
         await streams.stop_all()
-        return summary, started, r.latest
-    summary, started, latest = asyncio.run(scenario())
+        return summary, pm, r.latest
+    summary, pm, latest = asyncio.run(scenario())
     assert summary == "polymarket +1 -1"
-    assert started["polymarket"] == [["a", "b"], ["c"]]
-    assert started["kalshi"] == [["k1"]]
+    assert len(FakeStream.instances) == 2                 # No connection was replaced.
+    assert (pm.added, pm.removed, pm.wanted) == ([["c"]], [["b"]], {"a", "c"})
     assert ("polymarket", "b") not in latest
     assert ("polymarket", "a") in latest
+
+
+# REFRESH LOOP
+
+def test_run_survives_a_failing_refresh(tmp_path, monkeypatch, capsys):
+    def broken_refresh(sport, log=print, db_path=None):
+        raise RuntimeError("kalshi is down")
+    monkeypatch.setattr(record.pipeline, "refresh", broken_refresh)
+    for venue in record.STREAMS:
+        monkeypatch.setitem(record.STREAMS, venue, FakeStream)
+    conn = database.connect(tmp_path / "test.sqlite")
+    asyncio.run(record.run(conn, "nfl", seconds=3, catalog_seconds=1))
+    out = capsys.readouterr().out
+    assert "catalog refresh failed (RuntimeError('kalshi is down')), starting with the stored catalog" in out
+    assert "catalog refresh failed (RuntimeError('kalshi is down')), keeping current subscriptions" in out

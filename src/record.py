@@ -9,10 +9,8 @@ contracts produce nothing, busy ones produce at most one row per second.
 
 Only futures and games within GAME_WINDOW_DAYS of kickoff are recorded.
 Every CATALOG_MINUTES the recorder refreshes the catalog in a background
-thread, fetch then classify then match. Contracts that are new to the
-pairs table get a connection of their own, so the connections carrying
-live games are never interrupted. Contracts that closed keep their dead
-subscription until the next start, but their updates are ignored. Fee
+thread, fetch then classify then match, then adds the new pairs to the
+live connections and removes the closed ones, without reconnecting. Fee
 schedule changes reach the fee history through the same refresh.
 
 Run with:
@@ -42,7 +40,7 @@ STATUS_SECONDS = 60     # How often a status line is printed.
 GAME_WINDOW_DAYS = 7    # Games further out than this are not recorded.
 CATALOG_MINUTES = 60    # How often the catalog is refreshed and subscriptions updated. Zero disables it.
 
-STREAMERS = {"polymarket": polymarket.stream_books, "kalshi": kalshi.stream_books}
+STREAMS = {"polymarket": polymarket.BookStream, "kalshi": kalshi.BookStream}
 
 
 def log(message):
@@ -116,58 +114,59 @@ class Recorder:
 
 class Streams:
     """
-    The websocket tasks feeding the recorder. Connections are only ever added.
-    New contracts get a new task, and contracts that are no longer wanted are
-    ignored rather than unsubscribed, so a live game's connection never drops.
+    One BookStream per venue, each on its own long lived connection. Changes
+    to the wanted contracts are applied to the live connections in place.
     """
 
-    def __init__(self, recorder, streamers=STREAMERS):
+    def __init__(self, recorder, stream_classes=STREAMS):
         self.recorder = recorder
-        self.streamers = streamers
-        self.tasks = []
-        self.subscribed = {venue: set() for venue in streamers}    # Every contract any task streams.
-        self.wanted = {venue: set() for venue in streamers}        # The contracts the recorder should keep.
+        self.stream_classes = stream_classes
+        self.streams = {}
+        self.tasks = {}
+
+    def on_book(self, venue, contract_id, bids, asks):
+        """
+        Pass a book update to the recorder, unless the contract was removed and the feed has not caught up.
+        """
+        if contract_id in self.streams[venue].wanted:
+            self.recorder.on_book(venue, contract_id, bids, asks)
 
     def start(self, venue, contract_ids):
         """
-        Start one more task streaming these contracts into the recorder.
+        Open a venue's connection for these contracts.
         """
-        def callback(contract_id, bids, asks):
-            if contract_id in self.wanted[venue]:
-                self.recorder.on_book(venue, contract_id, bids, asks)
-        self.tasks.append(asyncio.create_task(self.streamers[venue](list(contract_ids), callback, log)))
-        self.subscribed[venue] |= set(contract_ids)
-        self.wanted[venue] |= set(contract_ids)
+        stream = self.stream_classes[venue](list(contract_ids), lambda cid, b, a: self.on_book(venue, cid, b, a), log)
+        self.streams[venue] = stream
+        self.tasks[venue] = asyncio.create_task(stream.run())
 
     def update(self, targets):
         """
-        Subscribe to contracts not yet streamed and stop keeping the ones that
-        left the target list. Returns a summary of the changes.
+        Add contracts that are new and remove the ones that left the target
+        list, on the live connections. Returns a summary of the changes.
         """
         changes = []
         for venue, contract_ids in targets.items():
-            new = set(contract_ids) - self.subscribed[venue]
-            dropped = self.wanted[venue] - set(contract_ids)
-            self.wanted[venue] = set(contract_ids)
-            self.recorder.forget(venue, dropped)
-            if new:
-                self.start(venue, new)
-            if new or dropped:
-                changes.append(f"{venue} +{len(new)} -{len(dropped)}")
+            stream = self.streams[venue]
+            new, gone = set(contract_ids) - stream.wanted, stream.wanted - set(contract_ids)
+            stream.add(new)
+            stream.remove(gone)
+            self.recorder.forget(venue, gone)
+            if new or gone:
+                changes.append(f"{venue} +{len(new)} -{len(gone)}")
         return ", ".join(changes) or "no changes"
 
     async def stop_all(self):
         """
-        Cancel every task and wait for them to finish.
+        Cancel every connection and wait for them to finish.
         """
-        for task in self.tasks:
+        for task in self.tasks.values():
             task.cancel()
-        for task in self.tasks:
+        for task in self.tasks.values():
             try:
                 await task
             except asyncio.CancelledError:
                 pass
-        self.tasks = []
+        self.tasks = {}
 
 
 async def run(conn, sport, seconds, catalog_seconds):
