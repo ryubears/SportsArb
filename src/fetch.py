@@ -11,8 +11,7 @@ import time
 from api import kalshi, polymarket, polymarket_us
 from db import database
 from util.timeutil import now_iso
-
-VENUES = ("polymarket", "kalshi", "polymarket_us")
+from venues import VENUES
 
 # How each of our sport keys maps onto the venues' own categories.
 SPORTS = {

@@ -21,6 +21,10 @@ def group(members):
     return {"label": "spread 2026-09-20 CAR@ATL ATL 4.5", "kind": "spread", "members": members}
 
 
+def in_scope(episodes, scope):
+    return [o for o in episodes if o.scope == scope]
+
+
 def quote(venue, contract_id, ts, bids, asks):
     return Quote(venue, contract_id, ts, bids, asks)
 
@@ -115,7 +119,8 @@ def test_scan_group_finds_one_episode_with_duration_and_return():
                                 quote("kalshi", "k", "2026-09-19T12:01:01+00:00", [[0.49, 100]], [[0.50, 100]])]}
     fees_ = histories({("polymarket", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES})
     episodes = scan.scan_group(g, quotes, fees_)
-    assert len(episodes) == 1
+    # Polymarket is not tradable, so the tradable scope has one member and no episode.
+    assert [o.scope for o in episodes] == ["all"]
     o = episodes[0]
     assert (o.start_ts, o.end_ts, o.seconds) == ("2026-09-19T12:00:01+00:00", "2026-09-19T12:01:01+00:00", 60)
     assert (o.yes_venue, o.no_venue) == ("polymarket", "kalshi")
@@ -133,7 +138,7 @@ def test_scan_group_marks_live_and_uses_kickoff_for_payout():
     g = group([member("kalshi", "k", start_time=kickoff), member("polymarket", "pm", start_time=kickoff)])
     quotes = {("polymarket", "pm"): [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
               ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]])]}
-    o = scan.scan_group(g, quotes, histories({("polymarket", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES}))[0]
+    o = in_scope(scan.scan_group(g, quotes, histories({("polymarket", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES})), "all")[0]
     assert o.live == 1
     assert o.end_ts == "2026-09-19T12:00:01+00:00"
     assert o.days_held == pytest.approx((scan.GAME_HOURS - 1) / 24, rel=1e-3)
@@ -147,9 +152,32 @@ def test_scan_group_applies_the_fee_in_force_at_each_quote():
     fees_ = histories({("kalshi", "k"): NO_K_FEES})
     fees_[("polymarket", "pm")] = [FeeRecord("polymarket", "pm", T0, PM_FEES),
                                    FeeRecord("polymarket", "pm", "2026-09-19T12:00:30+00:00", NO_PM_FEES)]
-    o = scan.scan_group(g, quotes, fees_)[0]
+    o = in_scope(scan.scan_group(g, quotes, fees_), "all")[0]
     assert o.peak_ts == "2026-09-19T12:01:01+00:00"
     assert o.peak_edge == pytest.approx(0.04)
+
+
+def test_scan_group_reports_both_scopes_when_tradable_venues_cross():
+    g = group([member("kalshi", "k"), member("polymarket_us", "us"), member("polymarket", "pm")])
+    quotes = {("kalshi", "k"): [quote("kalshi", "k", T0, [[0.53, 100]], [[0.54, 100]])],
+              ("polymarket_us", "us"): [quote("polymarket_us", "us", "2026-09-19T12:00:01+00:00", [[0.44, 100]], [[0.45, 100]])],
+              ("polymarket", "pm"): [quote("polymarket", "pm", "2026-09-19T12:00:02+00:00", [[0.40, 100]], [[0.41, 100]])]}
+    fees_ = histories({("kalshi", "k"): NO_K_FEES, ("polymarket_us", "us"): {"feeCoefficient": 0}, ("polymarket", "pm"): NO_PM_FEES})
+    episodes = scan.scan_group(g, quotes, fees_)
+    tradable, everything = in_scope(episodes, "tradable")[0], in_scope(episodes, "all")[0]
+    assert (tradable.yes_venue, tradable.no_venue) == ("polymarket_us", "kalshi")
+    assert tradable.peak_edge == pytest.approx(1 - 0.45 - 0.47)
+    # Once Polymarket quotes, its cheaper yes improves the all venues edge but not the tradable one.
+    assert (everything.yes_venue, everything.no_venue) == ("polymarket", "kalshi")
+    assert everything.peak_edge == pytest.approx(1 - 0.41 - 0.47)
+
+
+def test_scan_group_holds_until_the_slower_leg_pays():
+    g = group([member("kalshi", "k", close_time="2026-10-19T12:00:00+00:00"), member("polymarket", "pm", close_time="2026-09-29T12:00:00+00:00")])
+    quotes = {("polymarket", "pm"): [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
+              ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]])]}
+    o = in_scope(scan.scan_group(g, quotes, histories({("polymarket", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES})), "all")[0]
+    assert o.days_held == pytest.approx(30, rel=1e-4)
 
 
 def test_scan_group_ignores_time_before_two_members_have_quotes():

@@ -62,6 +62,7 @@ class ScriptedStream(bookstream.BookStream):
         self.connections = list(connections)
         self.used = []
         self.resets = 0
+        self.handled = []
 
     def connect(self):
         if not self.connections:
@@ -82,6 +83,7 @@ class ScriptedStream(bookstream.BookStream):
         if raw == "gap":
             raise bookstream.Reconnect("skipped a message")
         self.books[raw] = True
+        self.handled.append(raw)
         return True
 
     def reset(self):
@@ -117,6 +119,26 @@ def test_loop_subscribes_and_reconnects_on_silence_gap_and_drop(monkeypatch):
                            "scripted stream dropped (ConnectionResetError), reconnecting"]
     assert stream.resets >= 4
     assert stream.books == {}                                            # Cleared before the last connection.
+
+
+class RefusingConnection:
+    """
+    A connection whose handshake is rejected, as a venue does when it refuses a client.
+    """
+
+    async def __aenter__(self):
+        raise ValueError("server rejected WebSocket connection: HTTP 403")
+
+    async def __aexit__(self, *args):
+        return False
+
+
+def test_loop_survives_a_rejected_handshake(monkeypatch):
+    monkeypatch.setattr(bookstream, "RECONNECT_SECONDS", 0)
+    stream = ScriptedStream(["x"], [RefusingConnection(), FakeConnection(["a"], then="hang")])
+    run_until_connections_used(stream)
+    assert stream.logs[0] == "scripted stream failed (ValueError: server rejected WebSocket connection: HTTP 403), reconnecting"
+    assert stream.handled == ["a"]                                       # The next connection was used normally.
 
 
 def test_keepalive_replies_do_not_reset_the_stale_clock(monkeypatch):

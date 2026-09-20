@@ -70,6 +70,16 @@ def fetch_events(series_ticker):
     }, "events")
 
 
+def close_time(m):
+    """
+    When the contract stops trading, or settles if the venue expects that
+    sooner. Kalshi's close_time on futures can be a placeholder years out,
+    while expected_expiration_time carries the real settlement date.
+    """
+    times = [t for t in (iso(m.get("close_time")), iso(m.get("expected_expiration_time"))) if t]
+    return min(times) if times else None
+
+
 def strict_line(m):
     """
     The market's line, restated so Yes always means strictly more than the line.
@@ -114,7 +124,7 @@ def contracts(sport, prefixes, tickers=()):
                     line=line,
                     rules=rules,
                     start_time=None,
-                    close_time=iso(m.get("close_time")),
+                    close_time=close_time(m),
                     fee_info=fee_info,
                 ))
     return result

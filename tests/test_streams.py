@@ -36,6 +36,12 @@ def test_polymarket_stream_applies_snapshot_and_change():
     assert len(seen) == 2
 
 
+def test_kalshi_close_time_takes_the_earlier_of_close_and_expected_expiration():
+    assert kalshi.close_time({"close_time": "2029-02-13T23:30:00Z", "expected_expiration_time": "2027-02-14T23:30:00Z"}) == "2027-02-14T23:30:00+00:00"
+    assert kalshi.close_time({"close_time": "2026-09-24T00:15:00Z"}) == "2026-09-24T00:15:00+00:00"
+    assert kalshi.close_time({}) is None
+
+
 def test_kalshi_update_frame():
     frame = kalshi.update_frame(7, 3, ["A", "B"], "add_markets")
     assert frame == {"id": 7, "cmd": "update_subscription", "params": {"sids": [3], "market_tickers": ["A", "B"], "action": "add_markets"}}

@@ -28,6 +28,7 @@ API = "https://api.polymarket.us/v1"            # Signed requests for books and 
 WS_URL = "wss://api.polymarket.us/v1/ws/markets"
 WS_PATH = "/v1/ws/markets"
 WS_CHUNK = 100          # Market slugs per subscription, the documented maximum.
+WS_DEBOUNCE = True      # Ask the feed to batch updates. Cuts bandwidth by a third, and the recorder writes once a second anyway.
 STALE_SECONDS = 300     # The feed sends nothing while books are idle, so the limit is generous.
 DATA = Path(__file__).resolve().parent.parent.parent / "data"
 KEY_ID_FILE = DATA / "polymarket_us_key_id.txt"
@@ -111,8 +112,9 @@ class PolymarketUSBookStream(BookStream):
     """
     The signed markets websocket. Each message carries a market's whole
     book, so the local copy is replaced rather than patched. Subscriptions
-    are sent in groups of WS_CHUNK slugs. The feed documents no
-    unsubscribe, so removed slugs are simply ignored until the next connect.
+    are sent in groups of WS_CHUNK slugs, batched when WS_DEBOUNCE is set.
+    The feed documents no unsubscribe, so removed slugs are simply ignored
+    until the next connect.
     """
 
     name = "polymarket_us"
@@ -139,7 +141,8 @@ class PolymarketUSBookStream(BookStream):
             self.request_id += 1
             await ws.send(json.dumps({"subscribe": {"requestId": f"md-{self.request_id}",
                                                     "subscriptionType": "SUBSCRIPTION_TYPE_MARKET_DATA",
-                                                    "marketSlugs": slugs[i:i + WS_CHUNK]}}))
+                                                    "marketSlugs": slugs[i:i + WS_CHUNK],
+                                                    "responsesDebounced": WS_DEBOUNCE}}))
 
     def handle(self, raw):
         m = json.loads(raw)

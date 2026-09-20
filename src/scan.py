@@ -4,7 +4,9 @@ Find arbitrage episodes in the recorded quotes.
 For every bet group the scanner replays its members' quotes in time order.
 After each change it finds the cheapest way to hold yes and the cheapest
 way to hold no across all members, on any venues, and prices buying both.
-An episode is a stretch where that net edge stays above zero after fees.
+It does the same over the members on tradable venues only, so every
+episode carries a scope, 'all' or 'tradable'. An episode is a stretch
+where that net edge stays above zero after fees.
 Each episode is stored as an Opportunity with its two legs, its duration,
 its peak edge, how many contracts could have been filled at the peak by
 walking the recorded depth, and the return on the capital tied up,
@@ -21,10 +23,10 @@ from collections import defaultdict
 from db import database
 from db.models import Opportunity
 from util.timeutil import seconds_between, shift
+from venues import SHORT_NAMES, is_tradable
 
 GAME_HOURS = 4          # A game pays out about this long after kickoff.
 TARGET_ANNUAL_PCT = 10  # The return an opportunity must beat to be worth the risk.
-SHORT_NAMES = {"polymarket": "PM", "kalshi": "K", "polymarket_us": "PMUS"}
 
 
 # PRICING
@@ -124,19 +126,21 @@ def resolution_time(start_time, close_time):
     return close_time
 
 
-def finish(group, peak, start_ts, end_ts):
+def finish(group, scope, peak, start_ts, end_ts):
     """
     Turn an in progress episode into an Opportunity. peak holds the best moment seen so far.
     """
     start_time = next((m["start_time"] for m in group["members"] if m["start_time"]), None)
-    close_time = next((m["close_time"] for m in group["members"] if m["close_time"]), None)
     live = 1 if start_time and peak["ts"] >= start_time else 0
-    pays_at = resolution_time(start_time, close_time)
+    # Capital is locked until the slower of the two legs pays, so the later resolution counts.
+    pays_at = max((t for t in (resolution_time(leg["start_time"], leg["close_time"]) for leg in (peak["yes"], peak["no"])) if t),
+                  default=None)
     days_held = max(seconds_between(peak["ts"], pays_at) / 86400, 1 / 24) if pays_at else None
     return_pct = 100 * peak["edge"] / (1 - peak["edge"])
     return Opportunity(
         label=group["label"],
         kind=group["kind"],
+        scope=scope,
         trade=trade_words(peak["yes"], peak["no"]),
         yes_venue=peak["yes"]["venue"],
         yes_contract=peak["yes"]["contract_id"],
@@ -158,33 +162,36 @@ def finish(group, peak, start_ts, end_ts):
 
 def scan_group(group, quotes_by_contract, fee_histories):
     """
-    Replay one group's quotes and return its episodes as Opportunities.
-    quotes_by_contract and fee_histories are keyed by (venue, contract_id).
+    Replay one group's quotes and return its episodes as Opportunities, in
+    both scopes. quotes_by_contract and fee_histories are keyed by (venue, contract_id).
     """
     events = sorted((q for key in quotes_by_contract for q in quotes_by_contract[key]), key=lambda q: q.ts)
+    scopes = {"all": group["members"], "tradable": [m for m in group["members"] if is_tradable(m["venue"])]}
     latest = {}
     episodes = []
-    start_ts, peak = None, None
+    open_ = {scope: None for scope in scopes}     # The in progress episode per scope, as (start_ts, peak).
     for quote in events:
         latest[(quote.venue, quote.contract_id)] = quote
-        members = [m for m in group["members"] if (m["venue"], m["contract_id"]) in latest]
-        if len(members) < 2:
-            continue
         fee_infos = {key: fee_at(fee_histories[key], quote.ts) for key in latest}
-        result = best_trade(members, latest, fee_infos)
-        if result is None:
-            continue
-        yes, no, edge, size, profit = result
-        if edge > 0:
-            if peak is None:
-                start_ts = quote.ts
-            if peak is None or edge > peak["edge"]:
+        for scope, candidates in scopes.items():
+            members = [m for m in candidates if (m["venue"], m["contract_id"]) in latest]
+            result = best_trade(members, latest, fee_infos) if len(members) >= 2 else None
+            if result is None:
+                continue
+            yes, no, edge, size, profit = result
+            current = open_[scope]
+            if edge > 0:
                 peak = {"yes": yes, "no": no, "ts": quote.ts, "edge": edge, "size": size, "profit": profit}
-        elif peak is not None:
-            episodes.append(finish(group, peak, start_ts, quote.ts))
-            start_ts, peak = None, None
-    if peak is not None:
-        episodes.append(finish(group, peak, start_ts, events[-1].ts))
+                if current is None:
+                    open_[scope] = (quote.ts, peak)
+                elif edge > current[1]["edge"]:
+                    open_[scope] = (current[0], peak)
+            elif current is not None:
+                episodes.append(finish(group, scope, current[1], current[0], quote.ts))
+                open_[scope] = None
+    for scope, current in open_.items():
+        if current is not None:
+            episodes.append(finish(group, scope, current[1], current[0], events[-1].ts))
     return episodes
 
 
@@ -224,24 +231,26 @@ def scan(conn, sport="nfl", since=None):
 
 def report(opportunities):
     """
-    Print episodes by kind, then the ones that beat the target return.
+    Print episodes by scope and kind, then the ones in each scope that beat the target return.
     """
-    by_kind = defaultdict(list)
-    for o in opportunities:
-        by_kind[o.kind].append(o)
-    print(f"{'kind':18s} {'episodes':>8s} {'live':>5s} {'median s':>9s} {'max edge':>9s} {'max profit':>11s} {'beat target':>12s}")
-    for kind, os in sorted(by_kind.items()):
-        secs = sorted(o.seconds for o in os)
-        beat = sum(1 for o in os if o.annual_pct is not None and o.annual_pct >= TARGET_ANNUAL_PCT)
-        print(f"  {kind:16s} {len(os):8d} {sum(o.live for o in os):5d} {secs[len(secs) // 2]:9.0f} "
-              f"{100 * max(o.peak_edge for o in os):8.1f}c {max(o.peak_profit for o in os):10.2f}$ {beat:12d}")
-    print(f"total episodes {len(opportunities)}")
-    print(f"\nepisodes beating {TARGET_ANNUAL_PCT}% annualized when held to resolution, by profit at peak")
-    good = [o for o in opportunities if o.annual_pct is not None and o.annual_pct >= TARGET_ANNUAL_PCT]
-    for o in sorted(good, key=lambda o: -o.peak_profit)[:15]:
-        print(f"  {o.label:42s} {o.trade:40s} net {100 * o.peak_edge:4.1f}c x {o.peak_size:6.0f} = {o.peak_profit:7.2f}$ "
-              f"return {o.return_pct:4.2f}% over {o.days_held:5.1f}d = {o.annual_pct:7.0f}%/yr, "
-              f"lasted {o.seconds:6.0f}s {'live' if o.live else ''}")
+    for scope in ("all", "tradable"):
+        scoped = [o for o in opportunities if o.scope == scope]
+        by_kind = defaultdict(list)
+        for o in scoped:
+            by_kind[o.kind].append(o)
+        print(f"\nscope {scope}: {'kind':18s} {'episodes':>8s} {'live':>5s} {'median s':>9s} {'max edge':>9s} {'max profit':>11s} {'beat target':>12s}")
+        for kind, os in sorted(by_kind.items()):
+            secs = sorted(o.seconds for o in os)
+            beat = sum(1 for o in os if o.annual_pct is not None and o.annual_pct >= TARGET_ANNUAL_PCT)
+            print(f"  {kind:16s} {len(os):8d} {sum(o.live for o in os):5d} {secs[len(secs) // 2]:9.0f} "
+                  f"{100 * max(o.peak_edge for o in os):8.1f}c {max(o.peak_profit for o in os):10.2f}$ {beat:12d}")
+        print(f"  total {len(scoped)} episodes")
+        good = [o for o in scoped if o.annual_pct is not None and o.annual_pct >= TARGET_ANNUAL_PCT]
+        print(f"  beating {TARGET_ANNUAL_PCT}% annualized when held to resolution, by profit at peak")
+        for o in sorted(good, key=lambda o: -o.peak_profit)[:10]:
+            print(f"    {o.label:42s} {o.trade:40s} net {100 * o.peak_edge:4.1f}c x {o.peak_size:6.0f} = {o.peak_profit:7.2f}$ "
+                  f"return {o.return_pct:4.2f}% over {o.days_held:5.1f}d = {o.annual_pct:7.0f}%/yr, "
+                  f"lasted {o.seconds:6.0f}s {'live' if o.live else ''}")
 
 
 # MAIN

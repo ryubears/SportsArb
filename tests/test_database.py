@@ -40,7 +40,7 @@ def test_bets_groups_quotes_and_targets(tmp_path):
     database.replace_bets(conn, "nfl", bets)
     assert {b["venue"] for b in database.load_bets(conn, "nfl")} == {"polymarket", "kalshi"}
 
-    g = BetGroup("champion 2027 BUF", "champion", 2027, None, None, None, "BUF", None, bets, ["note"])
+    g = BetGroup("champion 2027 BUF", "champion", 2027, None, None, None, "BUF", None, bets, ["note"], False)
     database.replace_groups(conn, "nfl", [g], "2026-01-01T00:00:00+00:00")
     groups = database.load_groups(conn, "nfl")
     assert list(groups) == ["champion 2027 BUF"]
@@ -62,7 +62,7 @@ def test_bets_groups_quotes_and_targets(tmp_path):
 
 def test_opportunities_are_rebuilt_each_time(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
-    o = Opportunity("label", "spread", "yes: K buy, no: PM buy", "kalshi", "k", "polymarket", "pm", "t0", "t1", 60, "t0", 0.02, 100, 2.0, 0, 10.0, 2.04, 74.5)
+    o = Opportunity("label", "spread", "all", "yes: K buy, no: PM buy", "kalshi", "k", "polymarket", "pm", "t0", "t1", 60, "t0", 0.02, 100, 2.0, 0, 10.0, 2.04, 74.5)
     database.replace_opportunities(conn, [o, o])
     database.replace_opportunities(conn, [o])
     assert conn.execute("SELECT COUNT(*) FROM opportunities").fetchone()[0] == 1
@@ -79,7 +79,7 @@ def test_replace_groups_clears_labels_of_groups_that_disappeared(tmp_path):
     database.upsert_contracts(conn, [contract("polymarket", "pm"), contract("kalshi", "k")], "2026-01-01T00:00:00+00:00")
     bets = [Bet(v, cid, "champion", 2027, None, None, None, "BUF", None, "yes") for v, cid in (("polymarket", "pm"), ("kalshi", "k"))]
     database.replace_bets(conn, "nfl", bets)
-    g = BetGroup("champion 2027 BUF", "champion", 2027, None, None, None, "BUF", None, bets, [])
+    g = BetGroup("champion 2027 BUF", "champion", 2027, None, None, None, "BUF", None, bets, [], False)
     database.replace_groups(conn, "nfl", [g], "2026-01-01T00:00:00+00:00")
     database.replace_groups(conn, "nfl", [], "2026-01-02T00:00:00+00:00")
     assert database.load_groups(conn, "nfl") == {}

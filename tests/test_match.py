@@ -38,6 +38,15 @@ def test_three_venues_share_one_group():
     groups, _ = match.match([bet("polymarket", "pm"), bet("kalshi", "k"), bet("polymarket_us", "us")])
     assert len(groups) == 1
     assert groups[0].venues == ["kalshi", "polymarket", "polymarket_us"]
+    assert groups[0].tradable is True
+
+
+def test_group_is_tradable_only_with_two_members_on_tradable_venues():
+    assert match.match([bet("polymarket", "pm"), bet("kalshi", "k")])[0][0].tradable is False
+    assert match.match([bet("polymarket_us", "us"), bet("kalshi", "k")])[0][0].tradable is True
+    game = dict(kind="game_winner", game_date="2026-09-20", team_a="CAR", team_b="ATL", subject="CAR")
+    groups, _ = match.match([bet("polymarket", "pm", **game), bet("kalshi", "k_car", **game), bet("kalshi", "k_atl", polarity="no", **game)])
+    assert groups[0].tradable is True     # Two Kalshi contracts can be traded against each other.
 
 
 def test_bets_on_a_single_venue_are_left_out():

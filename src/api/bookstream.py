@@ -152,4 +152,9 @@ class BookStream:
                 self.log(f"{self.name} stream {e}, reconnecting")
             except (websockets.ConnectionClosed, OSError) as e:
                 self.log(f"{self.name} stream dropped ({type(e).__name__}), reconnecting")
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                # A rejected handshake or a bad message must never end the stream for good.
+                self.log(f"{self.name} stream failed ({type(e).__name__}: {str(e)[:120]}), reconnecting")
             await asyncio.sleep(RECONNECT_SECONDS)
