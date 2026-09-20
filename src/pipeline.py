@@ -28,8 +28,8 @@ def refresh(sport, log=print, db_path=None):
         parts = []
         for venue in fetch.VENUES:
             contracts = fetch.fetch_contracts(venue, sport)
-            fee_changes = database.upsert_contracts(conn, contracts, now_iso())
-            parts.append(f"{venue} {len(contracts)} contracts, {fee_changes} fee changes")
+            fee_records = database.upsert_contracts(conn, contracts, now_iso())
+            parts.append(f"{venue} {len(contracts)} contracts, {fee_records} fee records")
             log(f"fetched {parts[-1]}")
         bets, _ = classify.classify_all(database.load_contracts(conn, sport=sport))
         database.replace_bets(conn, sport, bets)

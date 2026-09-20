@@ -143,7 +143,7 @@ def migrate(conn):
     conn.executescript(SCHEMA)
 
 
-def record_fee_changes(conn, contracts, fetched_at):
+def add_fee_records(conn, contracts, fetched_at):
     """
     Append a fee history row for each contract whose fee_info differs from what is stored.
     Returns how many rows were added.
@@ -188,7 +188,7 @@ def upsert_contracts(conn, contracts, fetched_at):
     A fee history row is added for every contract whose fee schedule is new or
     changed, and the number of such rows is returned.
     """
-    fee_changes = record_fee_changes(conn, contracts, fetched_at)
+    fee_records = add_fee_records(conn, contracts, fetched_at)
     rows = []
     for c in contracts:
         rows.append((
@@ -219,7 +219,7 @@ def upsert_contracts(conn, contracts, fetched_at):
             last_seen = excluded.last_seen
     """, rows)
     conn.commit()
-    return fee_changes
+    return fee_records
 
 
 def load_contracts(conn, sport=None, venue=None):
