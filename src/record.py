@@ -40,7 +40,7 @@ STATUS_SECONDS = 60     # How often a status line is printed.
 GAME_WINDOW_DAYS = 7    # Games further out than this are not recorded.
 CATALOG_MINUTES = 60    # How often the catalog is refreshed and subscriptions updated. Zero disables it.
 
-STREAMS = {"polymarket": polymarket.BookStream, "kalshi": kalshi.BookStream}
+STREAMS = {"polymarket": polymarket.PolymarketBookStream, "kalshi": kalshi.KalshiBookStream}
 
 
 def log(message):

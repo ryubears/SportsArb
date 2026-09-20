@@ -2,7 +2,8 @@
 Tests for the venue stream frames and book handling that need no network.
 """
 
-from api import kalshi, polymarket
+import pytest
+from api import bookstream, kalshi, polymarket
 
 
 def test_polymarket_subscribe_frames_split_at_the_snapshot_limit():
@@ -15,18 +16,18 @@ def test_polymarket_subscribe_frames_split_at_the_snapshot_limit():
 
 
 def test_polymarket_stream_queues_only_real_changes():
-    stream = polymarket.BookStream(["a", "b"], lambda *args: None)
+    stream = polymarket.PolymarketBookStream(["a", "b"], lambda *args: None)
     stream.add(["b", "c"])
     stream.remove(["a", "zzz"])
     assert stream.wanted == {"b", "c"}
-    assert stream.commands.get_nowait() == ("subscribe", ["c"])
-    assert stream.commands.get_nowait() == ("unsubscribe", ["a"])
+    assert stream.commands.get_nowait() == ("add", ["c"])
+    assert stream.commands.get_nowait() == ("remove", ["a"])
     assert stream.commands.empty()
 
 
 def test_polymarket_stream_applies_snapshot_and_change():
     seen = []
-    stream = polymarket.BookStream(["t"], lambda token, bids, asks: seen.append((token, bids, asks)))
+    stream = polymarket.PolymarketBookStream(["t"], lambda token, bids, asks: seen.append((token, bids, asks)))
     stream.apply({"event_type": "book", "asset_id": "t", "bids": [{"price": "0.48", "size": "10"}], "asks": [{"price": "0.50", "size": "5"}]})
     stream.apply({"event_type": "price_change", "price_changes": [{"asset_id": "t", "price": "0.49", "size": "7", "side": "BUY"},
                                                                   {"asset_id": "other", "price": "0.1", "size": "1", "side": "BUY"}]})
@@ -42,10 +43,26 @@ def test_kalshi_update_frame():
 
 def test_kalshi_stream_restates_no_side_as_yes_asks_and_tracks_sid():
     seen = []
-    stream = kalshi.BookStream(["T"], lambda ticker, bids, asks: seen.append((ticker, bids, asks)))
-    stream.apply({"type": "subscribed", "msg": {"channel": "orderbook_delta", "sid": 4}})
+    stream = kalshi.KalshiBookStream(["T"], lambda ticker, bids, asks: seen.append((ticker, bids, asks)))
+    stream.reset()
+    stream.handle('{"type": "subscribed", "msg": {"channel": "orderbook_delta", "sid": 4}}')
     assert stream.sid == 4 and stream.subscribed.is_set()
     stream.apply({"type": "orderbook_snapshot", "msg": {"market_ticker": "T", "yes_dollars_fp": [["0.48", "10"]], "no_dollars_fp": [["0.50", "5"]]}})
     stream.apply({"type": "orderbook_delta", "msg": {"market_ticker": "T", "price_dollars": "0.50", "delta_fp": "-5", "side": "no"}})
     assert seen[0] == ("T", [[0.48, 10.0]], [[0.5, 5.0]])
     assert seen[1] == ("T", [[0.48, 10.0]], [])
+
+
+def test_kalshi_stream_asks_to_reconnect_on_a_sequence_gap():
+    stream = kalshi.KalshiBookStream(["T"], lambda *args: None)
+    stream.reset()
+    stream.handle('{"type": "ok", "seq": 1, "msg": {}}')
+    stream.handle('{"type": "ok", "seq": 2, "msg": {}}')
+    with pytest.raises(bookstream.Reconnect):
+        stream.handle('{"type": "ok", "seq": 4, "msg": {}}')
+
+
+def test_polymarket_pong_does_not_count_as_data():
+    stream = polymarket.PolymarketBookStream(["t"], lambda *args: None)
+    assert stream.handle("PONG") is False
+    assert stream.handle('{"event_type": "price_change", "price_changes": []}') is True

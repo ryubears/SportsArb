@@ -11,8 +11,8 @@ Polymarket's field names and message formats.
 
 import asyncio
 import json
-import time
 import websockets
+from api.bookstream import BookStream
 from api.helper import get_json, float_or_none
 from db.models import Contract
 from util import jsonutil
@@ -113,49 +113,40 @@ def sorted_levels(levels, reverse):
     return [[p, s] for p, s in sorted(levels.items(), reverse=reverse) if s > 0]
 
 
-async def send_pings(ws):
+class PolymarketBookStream(BookStream):
     """
-    Send the text PING the feed expects, forever.
-    """
-    while True:
-        await asyncio.sleep(WS_PING_SECONDS)
-        await ws.send("PING")
-
-
-class BookStream:
-    """
-    One websocket connection carrying every wanted token. Keeps a live book
-    per token and calls on_book(token_id, bids, asks) after each change,
-    with bids and asks as lists of [price, size], best first. Runs forever
-    once started, reconnecting when the connection drops or goes silent.
+    Polymarket's public market channel. Books are kept as {price: size} per
+    side and reported as [price, size] lists, best first. Only book data
+    resets the stale clock, because a stalled feed can keep answering pings.
     """
 
-    def __init__(self, token_ids, on_book, log=print):
-        self.wanted = set(token_ids)
-        self.on_book = on_book
-        self.log = log
-        self.books = {}
-        self.commands = asyncio.Queue()     # Pending ("subscribe" or "unsubscribe", [token ids]) frames.
+    name = "polymarket"
+    stale_seconds = STALE_SECONDS
 
-    def add(self, token_ids):
-        """
-        Start streaming more tokens. Takes effect on the live connection.
-        """
-        new = set(token_ids) - self.wanted
-        self.wanted |= new
-        if new:
-            self.commands.put_nowait(("subscribe", sorted(new)))
+    def connect(self):
+        return websockets.connect(WS_URL, open_timeout=20, max_size=None)
 
-    def remove(self, token_ids):
-        """
-        Stop streaming tokens and forget their books.
-        """
-        gone = set(token_ids) & self.wanted
-        self.wanted -= gone
-        for token in gone:
-            self.books.pop(token, None)
-        if gone:
-            self.commands.put_nowait(("unsubscribe", sorted(gone)))
+    async def subscribe(self, ws):
+        for frame in subscribe_frames(sorted(self.wanted)):
+            await ws.send(json.dumps(frame))
+
+    async def send_command(self, ws, action, token_ids):
+        operation = "subscribe" if action == "add" else "unsubscribe"
+        for i in range(0, len(token_ids), WS_CHUNK):
+            await ws.send(json.dumps({"assets_ids": token_ids[i:i + WS_CHUNK], "operation": operation}))
+
+    async def keepalive(self, ws):
+        while True:
+            await asyncio.sleep(WS_PING_SECONDS)
+            await ws.send("PING")
+
+    def handle(self, raw):
+        if raw == "PONG":
+            return False
+        messages = json.loads(raw)
+        for m in messages if isinstance(messages, list) else [messages]:
+            self.apply(m)
+        return True
 
     def emit(self, token):
         """
@@ -189,52 +180,3 @@ class BookStream:
                 changed.add(token)
             for token in changed:
                 self.emit(token)
-
-    async def send_commands(self, ws):
-        """
-        Forward queued subscribe and unsubscribe frames to the connection, forever.
-        """
-        while True:
-            operation, token_ids = await self.commands.get()
-            for i in range(0, len(token_ids), WS_CHUNK):
-                await ws.send(json.dumps({"assets_ids": token_ids[i:i + WS_CHUNK], "operation": operation}))
-
-    async def run(self):
-        """
-        Connect, subscribe to every wanted token, and process messages until
-        the connection fails, then reconnect. Pending commands are dropped on
-        connect because the fresh subscription already covers the wanted set.
-        """
-        while True:
-            while not self.wanted:
-                await asyncio.sleep(1)
-            self.books = {}
-            while not self.commands.empty():
-                self.commands.get_nowait()
-            try:
-                async with websockets.connect(WS_URL, open_timeout=20, max_size=None) as ws:
-                    for frame in subscribe_frames(sorted(self.wanted)):
-                        await ws.send(json.dumps(frame))
-                    helpers = [asyncio.create_task(send_pings(ws)), asyncio.create_task(self.send_commands(ws))]
-                    last_data = time.time()
-                    try:
-                        while True:
-                            # Only book data counts. A stalled feed can keep answering pings.
-                            remaining = STALE_SECONDS - (time.time() - last_data)
-                            if remaining <= 0:
-                                raise asyncio.TimeoutError
-                            raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
-                            if raw == "PONG":
-                                continue
-                            last_data = time.time()
-                            messages = json.loads(raw)
-                            for m in messages if isinstance(messages, list) else [messages]:
-                                self.apply(m)
-                    finally:
-                        for task in helpers:
-                            task.cancel()
-            except asyncio.TimeoutError:
-                self.log(f"polymarket stream silent for {STALE_SECONDS}s, reconnecting")
-            except (websockets.ConnectionClosed, OSError) as e:
-                self.log(f"polymarket stream dropped ({type(e).__name__}), reconnecting")
-            await asyncio.sleep(3)
