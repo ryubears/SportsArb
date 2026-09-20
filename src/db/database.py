@@ -77,8 +77,7 @@ CREATE TABLE IF NOT EXISTS bet_groups (
     line         REAL,
     venues       TEXT NOT NULL,      -- Comma separated venues with a member contract.
     venue_count  INTEGER NOT NULL,
-    contracts    INTEGER NOT NULL,   -- Member contracts, mirrors excluded.
-    tradable     INTEGER NOT NULL,   -- 1 when at least two members sit on venues the user can trade on.
+    contracts    INTEGER NOT NULL,   -- Member contracts.
     flags        TEXT NOT NULL,      -- JSON list of things to check before trusting the group.
     matched_at   TEXT NOT NULL
 );
@@ -95,7 +94,6 @@ CREATE TABLE IF NOT EXISTS quotes (
 CREATE TABLE IF NOT EXISTS opportunities (
     label          TEXT NOT NULL,   -- The bet group's label.
     kind           TEXT NOT NULL,
-    scope          TEXT NOT NULL,   -- 'all' or 'tradable', see models.Opportunity.
     trade          TEXT NOT NULL,   -- The two legs in words.
     yes_venue      TEXT NOT NULL,   -- Where the yes exposure was cheapest at the peak.
     yes_contract   TEXT NOT NULL,
@@ -140,10 +138,9 @@ def migrate(conn):
     if "group_label" not in [r[1] for r in conn.execute("PRAGMA table_info(bets)")]:
         conn.execute("ALTER TABLE bets ADD COLUMN group_label TEXT")
     conn.execute("DROP TABLE IF EXISTS pairs")
-    if "scope" not in [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]:
-        conn.execute("DROP TABLE IF EXISTS opportunities")
-    groups = [r[1] for r in conn.execute("PRAGMA table_info(bet_groups)")]
-    if groups and "tradable" not in groups:
+    if "scope" in [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]:
+        conn.execute("DROP TABLE opportunities")
+    if "tradable" in [r[1] for r in conn.execute("PRAGMA table_info(bet_groups)")]:
         conn.execute("DROP TABLE bet_groups")
     conn.executescript(SCHEMA)
 
@@ -287,11 +284,10 @@ def replace_groups(conn, sport, groups, matched_at):
     conn.execute("DELETE FROM bet_groups WHERE label NOT IN (SELECT group_label FROM bets WHERE group_label IS NOT NULL)")
     conn.executemany("""
         INSERT OR REPLACE INTO bet_groups (label, kind, season, game_date, team_a, team_b, subject, line,
-                                           venues, venue_count, contracts, tradable, flags, matched_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                                           venues, venue_count, contracts, flags, matched_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, [(g.label, g.kind, g.season, g.game_date, g.team_a, g.team_b, g.subject, g.line,
-           ",".join(g.venues), len(g.venues), len(g.members), int(g.tradable), jsonutil.dump(g.flags), matched_at)
-          for g in groups])
+           ",".join(g.venues), len(g.venues), len(g.members), jsonutil.dump(g.flags), matched_at) for g in groups])
     conn.executemany("UPDATE bets SET group_label = ? WHERE venue = ? AND contract_id = ?",
                      [(g.label, m.venue, m.contract_id) for g in groups for m in g.members])
     conn.commit()
@@ -371,11 +367,11 @@ def replace_opportunities(conn, opportunities):
     conn.execute("DROP TABLE IF EXISTS opportunities")
     conn.executescript(SCHEMA)
     conn.executemany("""
-        INSERT INTO opportunities (label, kind, scope, trade, yes_venue, yes_contract, no_venue, no_contract,
+        INSERT INTO opportunities (label, kind, trade, yes_venue, yes_contract, no_venue, no_contract,
                                    start_ts, end_ts, seconds, peak_ts, peak_edge, peak_size, peak_profit,
                                    live, days_held, return_pct, annual_pct)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    """, [(o.label, o.kind, o.scope, o.trade, o.yes_venue, o.yes_contract, o.no_venue, o.no_contract,
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, [(o.label, o.kind, o.trade, o.yes_venue, o.yes_contract, o.no_venue, o.no_contract,
            o.start_ts, o.end_ts, o.seconds, o.peak_ts, o.peak_edge, o.peak_size, o.peak_profit,
            o.live, o.days_held, o.return_pct, o.annual_pct) for o in opportunities])
     conn.commit()

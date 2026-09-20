@@ -40,7 +40,7 @@ def test_bets_groups_quotes_and_targets(tmp_path):
     database.replace_bets(conn, "nfl", bets)
     assert {b["venue"] for b in database.load_bets(conn, "nfl")} == {"polymarket_us", "kalshi"}
 
-    g = BetGroup("champion 2027 BUF", "champion", 2027, None, None, None, "BUF", None, bets, ["note"], False)
+    g = BetGroup("champion 2027 BUF", "champion", 2027, None, None, None, "BUF", None, bets, ["note"])
     database.replace_groups(conn, "nfl", [g], "2026-01-01T00:00:00+00:00")
     groups = database.load_groups(conn, "nfl")
     assert list(groups) == ["champion 2027 BUF"]
@@ -62,7 +62,7 @@ def test_game_contracts_stay_targets_through_the_game(tmp_path):
     database.upsert_contracts(conn, [contract("polymarket_us", "pm", **game), contract("kalshi", "k", **game)], "2026-01-01T00:00:00+00:00")
     bets = [Bet(v, cid, "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, "yes") for v, cid in (("polymarket_us", "pm"), ("kalshi", "k"))]
     database.replace_bets(conn, "nfl", bets)
-    database.replace_groups(conn, "nfl", [BetGroup("game_winner 2026-09-20 CAR@ATL CAR", "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, bets, [], False)], "2026-01-01T00:00:00+00:00")
+    database.replace_groups(conn, "nfl", [BetGroup("game_winner 2026-09-20 CAR@ATL CAR", "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, bets, [])], "2026-01-01T00:00:00+00:00")
     during = database.load_recording_targets(conn, "nfl", "2026-09-20T18:30:00+00:00", "2026-09-27T18:30:00+00:00", ["polymarket_us"], "2026-09-20T13:30:00+00:00")
     after = database.load_recording_targets(conn, "nfl", "2026-09-21T00:00:00+00:00", "2026-09-28T00:00:00+00:00", ["polymarket_us"], "2026-09-20T19:00:00+00:00")
     assert during == {"polymarket_us": ["pm"]}
@@ -76,7 +76,7 @@ def test_game_contracts_stay_targets_through_the_game(tmp_path):
 
 def test_opportunities_are_rebuilt_each_time(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
-    o = Opportunity("label", "spread", "all", "yes: K buy, no: PMUS buy", "kalshi", "k", "polymarket_us", "pm", "t0", "t1", 60, "t0", 0.02, 100, 2.0, 0, 10.0, 2.04, 74.5)
+    o = Opportunity("label", "spread", "yes: K buy, no: PMUS buy", "kalshi", "k", "polymarket_us", "pm", "t0", "t1", 60, "t0", 0.02, 100, 2.0, 0, 10.0, 2.04, 74.5)
     database.replace_opportunities(conn, [o, o])
     database.replace_opportunities(conn, [o])
     assert conn.execute("SELECT COUNT(*) FROM opportunities").fetchone()[0] == 1
@@ -93,7 +93,7 @@ def test_replace_groups_clears_labels_of_groups_that_disappeared(tmp_path):
     database.upsert_contracts(conn, [contract("polymarket_us", "pm"), contract("kalshi", "k")], "2026-01-01T00:00:00+00:00")
     bets = [Bet(v, cid, "champion", 2027, None, None, None, "BUF", None, "yes") for v, cid in (("polymarket_us", "pm"), ("kalshi", "k"))]
     database.replace_bets(conn, "nfl", bets)
-    g = BetGroup("champion 2027 BUF", "champion", 2027, None, None, None, "BUF", None, bets, [], False)
+    g = BetGroup("champion 2027 BUF", "champion", 2027, None, None, None, "BUF", None, bets, [])
     database.replace_groups(conn, "nfl", [g], "2026-01-01T00:00:00+00:00")
     database.replace_groups(conn, "nfl", [], "2026-01-02T00:00:00+00:00")
     assert database.load_groups(conn, "nfl") == {}

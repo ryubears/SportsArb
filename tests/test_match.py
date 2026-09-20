@@ -30,17 +30,8 @@ def test_same_bet_on_two_venues_forms_one_group():
     g = groups[0]
     assert g.label == "champion 2027 BUF"
     assert g.venues == ["kalshi", "polymarket_us"]
-    assert g.tradable is True
     assert sorted((m.venue, m.contract_id, m.polarity, m.group_label) for m in g.members) == [
         ("kalshi", "k", "yes", "champion 2027 BUF"), ("polymarket_us", "us", "yes", "champion 2027 BUF")]
-
-
-def test_group_is_tradable_only_with_two_members_on_tradable_venues(monkeypatch):
-    monkeypatch.setattr(match, "is_tradable", lambda venue: venue == "kalshi")
-    assert match.match([bet("polymarket_us", "us"), bet("kalshi", "k")])[0][0].tradable is False
-    game = dict(kind="game_winner", game_date="2026-09-20", team_a="CAR", team_b="ATL", subject="CAR")
-    groups, _ = match.match([bet("polymarket_us", "us", **game), bet("kalshi", "k_car", **game), bet("kalshi", "k_atl", polarity="no", **game)])
-    assert groups[0].tradable is True     # Two Kalshi contracts can be traded against each other.
 
 
 def test_bets_on_a_single_venue_are_left_out():

@@ -81,12 +81,11 @@ def print_contracts(conn, now):
 
 def print_groups(conn):
     body = query_rows(conn, """
-        SELECT kind, venues, COUNT(*), SUM(tradable), SUM(contracts), SUM(game_date IS NOT NULL)
+        SELECT kind, venues, COUNT(*), SUM(contracts), SUM(game_date IS NOT NULL)
         FROM bet_groups WHERE venue_count >= 2 GROUP BY kind, venues
         ORDER BY kind, venue_count DESC, COUNT(*) DESC, SUM(contracts) DESC, SUM(game_date IS NOT NULL) DESC""")
-    print_table("bet groups", ("kind", "venues", "groups", "tradable", "contracts", "games"), body)
+    print_table("bet groups", ("kind", "venues", "groups", "contracts", "games"), body)
     print(f"  total {first_value(conn, 'SELECT COUNT(*) FROM bet_groups WHERE venue_count >= 2'):,}, "
-          f"tradable {first_value(conn, 'SELECT COUNT(*) FROM bet_groups WHERE tradable = 1'):,}, "
           f"last matched {short_time(first_value(conn, 'SELECT MAX(matched_at) FROM bet_groups'))}")
 
 
@@ -128,21 +127,20 @@ def print_opportunities(conn):
     print(f"\nopportunities {total:,} episodes, covering {short_time(covered[0])} to {short_time(covered[1])} UTC")
     # Capital required is the fillable size times the cost of both legs and fees, which is one dollar minus the edge.
     body = query_rows(conn, """
-        SELECT scope, kind, COUNT(*), SUM(live), ROUND(100 * MAX(peak_edge), 1), ROUND(MAX(peak_profit), 2),
+        SELECT kind, COUNT(*), SUM(live), ROUND(100 * MAX(peak_edge), 1), ROUND(MAX(peak_profit), 2),
                ROUND(MAX(peak_size * (1 - peak_edge))), ROUND(MAX(return_pct), 2), ROUND(MAX(annual_pct)),
                ROUND(AVG(days_held), 1), SUM(annual_pct >= 10)
-        FROM opportunities GROUP BY scope, kind ORDER BY scope, kind""")
-    print_table("by scope and kind", ("scope", "kind", "episodes", "live", "best edge c", "best profit $", "max capital $",
-                                      "best return %", "best annual %", "avg days held", "beat 10%/yr"), body)
-    for scope in ("tradable", "all"):
-        best = query_rows(conn, """
-            SELECT label, trade, ROUND(100 * peak_edge, 1), ROUND(peak_size), ROUND(peak_size * (1 - peak_edge)),
-                   ROUND(peak_profit, 2), ROUND(return_pct, 2), ROUND(annual_pct), ROUND(days_held, 1), ROUND(seconds), live
-            FROM opportunities WHERE scope = ? AND annual_pct >= 10 ORDER BY peak_profit DESC LIMIT 8""", (scope,))
-        print_table(f"largest that beat the target, {scope} venues",
-                    ("bet", "trade", "edge c", "size", "capital $", "profit $", "return %", "annual %", "days held", "seconds", "live"),
-                    [(l[:40], t, e, f"{s:,.0f}", f"{cap:,.0f}", p, r, f"{a:,.0f}", d, f"{sec:,.0f}", "yes" if lv else "")
-                     for l, t, e, s, cap, p, r, a, d, sec, lv in best])
+        FROM opportunities GROUP BY kind ORDER BY kind""")
+    print_table("by kind", ("kind", "episodes", "live", "best edge c", "best profit $", "max capital $",
+                            "best return %", "best annual %", "avg days held", "beat 10%/yr"), body)
+    best = query_rows(conn, """
+        SELECT label, trade, ROUND(100 * peak_edge, 1), ROUND(peak_size), ROUND(peak_size * (1 - peak_edge)),
+               ROUND(peak_profit, 2), ROUND(return_pct, 2), ROUND(annual_pct), ROUND(days_held, 1), ROUND(seconds), live
+        FROM opportunities WHERE annual_pct >= 10 ORDER BY peak_profit DESC LIMIT 8""")
+    print_table("largest that beat the target",
+                ("bet", "trade", "edge c", "size", "capital $", "profit $", "return %", "annual %", "days held", "seconds", "live"),
+                [(l[:40], t, e, f"{s:,.0f}", f"{cap:,.0f}", p, r, f"{a:,.0f}", d, f"{sec:,.0f}", "yes" if lv else "")
+                 for l, t, e, s, cap, p, r, a, d, sec, lv in best])
 
 
 # MAIN

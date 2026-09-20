@@ -15,7 +15,6 @@ from collections import Counter, defaultdict
 from db import database
 from db.models import Bet, BetGroup
 from util.timeutil import days_between, now_iso
-from venues import is_tradable
 
 IDENTITY = ("kind", "season", "game_date", "team_a", "team_b", "subject", "line")
 
@@ -72,10 +71,9 @@ def make_group(rows):
     first = rows[0]
     members = [Bet(r["venue"], r["contract_id"], r["kind"], r["season"], r["game_date"], r["team_a"], r["team_b"],
                    r["subject"], r["line"], r["polarity"], label(first)) for r in rows]
-    tradable = sum(is_tradable(r["venue"]) for r in rows) >= 2
     return BetGroup(label=label(first), kind=first["kind"], season=first["season"], game_date=first["game_date"],
                     team_a=first["team_a"], team_b=first["team_b"], subject=first["subject"], line=first["line"],
-                    members=members, flags=flags(rows), tradable=tradable)
+                    members=members, flags=flags(rows))
 
 
 def match(bets):
@@ -100,16 +98,14 @@ def report(groups, unmatched):
     Print groups per kind and venue set, how many carry a close time flag, and unmatched bets per venue and kind.
     """
     counts = Counter((g.kind, " + ".join(g.venues)) for g in groups)
-    tradable = Counter((g.kind, " + ".join(g.venues)) for g in groups if g.tradable)
     flagged = Counter((g.kind, " + ".join(g.venues)) for g in groups if any(f.startswith("close times") for f in g.flags))
     members = Counter()
     for g in groups:
         members[(g.kind, " + ".join(g.venues))] += len(g.members)
-    print(f"{'kind':18s} {'venues':40s} {'groups':>6s} {'tradable':>8s} {'contracts':>9s} {'close flag':>11s}")
+    print(f"{'kind':18s} {'venues':40s} {'groups':>6s} {'contracts':>9s} {'close flag':>11s}")
     for key, n in sorted(counts.items()):
-        print(f"  {key[0]:16s} {key[1]:40s} {n:6d} {tradable[key]:8d} {members[key]:9d} {flagged[key]:11d}")
-    print(f"total groups {len(groups)} with {sum(len(g.members) for g in groups)} contracts, "
-          f"{sum(1 for g in groups if g.tradable)} tradable")
+        print(f"  {key[0]:16s} {key[1]:40s} {n:6d} {members[key]:9d} {flagged[key]:11d}")
+    print(f"total groups {len(groups)} with {sum(len(g.members) for g in groups)} contracts")
     left = Counter((b["venue"], b["kind"]) for b in unmatched)
     print("bets on a single venue only")
     for (venue, kind), n in sorted(left.items()):

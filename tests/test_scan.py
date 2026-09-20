@@ -21,10 +21,6 @@ def group(members):
     return {"label": "spread 2026-09-20 CAR@ATL ATL 4.5", "kind": "spread", "members": members}
 
 
-def in_scope(episodes, scope):
-    return [o for o in episodes if o.scope == scope]
-
-
 def quote(venue, contract_id, ts, bids, asks):
     return Quote(venue, contract_id, ts, bids, asks)
 
@@ -118,9 +114,8 @@ def test_scan_group_finds_one_episode_with_duration_and_return():
                                 quote("kalshi", "k", "2026-09-19T12:01:01+00:00", [[0.49, 100]], [[0.50, 100]])]}
     fees_ = histories({("polymarket_us", "pm"): NO_US_FEES, ("kalshi", "k"): NO_K_FEES})
     episodes = scan.scan_group(g, quotes, fees_)
-    # Both venues are tradable, so the same episode appears in both scopes.
-    assert sorted(o.scope for o in episodes) == ["all", "tradable"]
-    o = in_scope(episodes, "all")[0]
+    assert len(episodes) == 1
+    o = episodes[0]
     assert (o.start_ts, o.end_ts, o.seconds) == ("2026-09-19T12:00:01+00:00", "2026-09-19T12:01:01+00:00", 60)
     assert (o.yes_venue, o.no_venue) == ("polymarket_us", "kalshi")
     assert o.trade == "yes: PMUS buy, no: K buy other side"
@@ -137,7 +132,7 @@ def test_scan_group_marks_live_and_uses_kickoff_for_payout():
     g = group([member("kalshi", "k", start_time=kickoff), member("polymarket_us", "pm", start_time=kickoff)])
     quotes = {("polymarket_us", "pm"): [quote("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
               ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]])]}
-    o = in_scope(scan.scan_group(g, quotes, histories({("polymarket_us", "pm"): NO_US_FEES, ("kalshi", "k"): NO_K_FEES})), "all")[0]
+    o = scan.scan_group(g, quotes, histories({("polymarket_us", "pm"): NO_US_FEES, ("kalshi", "k"): NO_K_FEES}))[0]
     assert o.live == 1
     assert o.end_ts == "2026-09-19T12:00:01+00:00"
     assert o.days_held == pytest.approx((scan.GAME_HOURS - 1) / 24, rel=1e-3)
@@ -152,25 +147,16 @@ def test_scan_group_applies_the_fee_in_force_at_each_quote():
     fees_ = histories({("kalshi", "k"): NO_K_FEES})
     fees_[("polymarket_us", "pm")] = [FeeRecord("polymarket_us", "pm", T0, US_FEES),
                                    FeeRecord("polymarket_us", "pm", "2026-09-19T12:00:30+00:00", NO_US_FEES)]
-    o = in_scope(scan.scan_group(g, quotes, fees_), "all")[0]
+    o = scan.scan_group(g, quotes, fees_)[0]
     assert o.peak_ts == "2026-09-19T12:00:59+00:00"
     assert o.peak_edge == pytest.approx(0.04)
-
-
-def test_scan_group_leaves_the_tradable_scope_out_when_a_leg_is_not_tradable(monkeypatch):
-    monkeypatch.setattr(scan, "is_tradable", lambda venue: venue == "kalshi")
-    g = group([member("kalshi", "k"), member("polymarket_us", "us")])
-    quotes = {("kalshi", "k"): [quote("kalshi", "k", T0, [[0.53, 100]], [[0.54, 100]])],
-              ("polymarket_us", "us"): [quote("polymarket_us", "us", "2026-09-19T12:00:01+00:00", [[0.44, 100]], [[0.45, 100]])]}
-    episodes = scan.scan_group(g, quotes, histories({("kalshi", "k"): NO_K_FEES, ("polymarket_us", "us"): NO_US_FEES}))
-    assert [o.scope for o in episodes] == ["all"]
 
 
 def test_scan_group_holds_until_the_slower_leg_pays():
     g = group([member("kalshi", "k", close_time="2026-10-19T12:00:00+00:00"), member("polymarket_us", "pm", close_time="2026-09-29T12:00:00+00:00")])
     quotes = {("polymarket_us", "pm"): [quote("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
               ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]])]}
-    o = in_scope(scan.scan_group(g, quotes, histories({("polymarket_us", "pm"): NO_US_FEES, ("kalshi", "k"): NO_K_FEES})), "all")[0]
+    o = scan.scan_group(g, quotes, histories({("polymarket_us", "pm"): NO_US_FEES, ("kalshi", "k"): NO_K_FEES}))[0]
     assert o.days_held == pytest.approx(30, rel=1e-4)
 
 

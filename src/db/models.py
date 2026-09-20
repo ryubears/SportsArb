@@ -73,9 +73,8 @@ class BetGroup:
     team_b: str | None
     subject: str | None
     line: float | None
-    members: list           # Bets, one per contract, mirrors excluded.
+    members: list           # Bets, one per contract.
     flags: list[str]        # Things a human should check before trusting the group.
-    tradable: bool          # At least two members sit on venues the user can trade on.
 
     @property
     def venues(self):
@@ -102,7 +101,6 @@ class Opportunity:
     """
     label: str              # The bet group's label.
     kind: str
-    scope: str              # 'all' when any venue could carry a leg, 'tradable' when only tradable venues could.
     trade: str              # The two legs in words.
     yes_venue: str          # Where the yes exposure was cheapest at the peak.
     yes_contract: str
