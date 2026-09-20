@@ -29,11 +29,11 @@ CREATE TABLE IF NOT EXISTS fee_history (
 );
 
 CREATE TABLE IF NOT EXISTS contracts (
-    venue        TEXT NOT NULL,   -- Either 'polymarket' or 'kalshi'.
-    contract_id  TEXT NOT NULL,   -- Polymarket outcome token id, or Kalshi market ticker.
-    market_id    TEXT NOT NULL,   -- Polymarket conditionId, or Kalshi market ticker.
-    event_id     TEXT NOT NULL,   -- Polymarket event slug, or Kalshi event ticker.
-    series_id    TEXT,            -- Kalshi series ticker. Polymarket has none.
+    venue        TEXT NOT NULL,   -- 'kalshi' or 'polymarket_us'.
+    contract_id  TEXT NOT NULL,   -- Kalshi market ticker, or Polymarket US market slug.
+    market_id    TEXT NOT NULL,   -- Kalshi market ticker, or Polymarket US market id.
+    event_id     TEXT NOT NULL,   -- Kalshi event ticker, or Polymarket US event slug.
+    series_id    TEXT,            -- Kalshi series ticker, or Polymarket US series slug.
     sport        TEXT NOT NULL,   -- Our own sport key, for example 'nfl'.
     event_title  TEXT,
     title        TEXT NOT NULL,   -- The market question or title.
@@ -347,8 +347,8 @@ def load_recording_targets(conn, sport, now, horizon, venues, game_started_after
     spans two or more venues, is still open, and is either a future or a
     game starting before the horizon. A game contract also counts as open
     while its game may still be in play, meaning it started after
-    game_started_after, because Polymarket's close time is the kickoff
-    even though its markets trade through the game.
+    game_started_after, in case a venue's close time is the kickoff even
+    though its markets trade through the game.
     """
     targets = {}
     for venue in venues:

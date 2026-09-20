@@ -26,20 +26,17 @@ ALIAS_FILE = Path(__file__).resolve().parent / "aliases.json"
 
 def load_aliases():
     """
-    Build two lookups from the alias file. Names are matched inside free
-    text. Codes are matched only against slug and ticker pieces.
+    Build the code lookup from the alias file. Codes are matched against
+    slug and ticker pieces, never inside free text.
     """
-    data = jsonutil.read_file(ALIAS_FILE)
-    names, codes = {}, {}
-    for team, entry in data.items():
-        for n in entry["names"]:
-            names[n.lower()] = team
+    codes = {}
+    for team, entry in jsonutil.read_file(ALIAS_FILE).items():
         for c in entry["codes"]:
             codes[c.upper()] = team
-    return names, codes
+    return codes
 
 
-NAME_TO_TEAM, CODE_TO_TEAM = load_aliases()
+CODE_TO_TEAM = load_aliases()
 
 
 def glued_code(full_name):
@@ -55,42 +52,11 @@ def glued_code(full_name):
 
 GLUED_TO_TEAM = {glued_code(entry["names"][0]): team for team, entry in jsonutil.read_file(ALIAS_FILE).items()}
 
-# Longest names first, so 'Los Angeles Rams' wins over 'Rams' at the same spot.
-# The lookarounds stop 'Rams' from matching inside 'Ramsey'.
-NAME_PATTERN = re.compile(
-    r"(?<![A-Za-z])(?:" + "|".join(re.escape(n) for n in sorted(NAME_TO_TEAM, key=len, reverse=True)) + r")(?![A-Za-z])",
-    re.IGNORECASE,
-)
-
-
-def teams_in_text(text):
-    """
-    Team codes mentioned in the text, in order of first appearance, without repeats.
-    """
-    found = []
-    for m in NAME_PATTERN.finditer(text or ""):
-        team = NAME_TO_TEAM[m.group(0).lower()]
-        if team not in found:
-            found.append(team)
-    return found
-
-
 def team_from_code(piece):
     """
     Canonical team code for a slug or ticker piece, or None.
     """
     return CODE_TO_TEAM.get((piece or "").upper())
-
-
-def team_from_label(text):
-    """
-    The one team a short label names, by nickname first and by code second.
-    Polymarket labels most outcomes 'Falcons' but a few as 'ATL'. None if unclear.
-    """
-    teams = teams_in_text(text)
-    if len(teams) == 1:
-        return teams[0]
-    return team_from_code(text.strip()) if not teams else None
 
 
 def split_codes(pair):
@@ -124,113 +90,6 @@ def season_from_date(game_date):
     """
     year, month = int(game_date[:4]), int(game_date[5:7])
     return year + 1 if month >= 8 else year
-
-
-# POLYMARKET
-
-GAME_SLUG = re.compile(r"^nfl-([a-z]+)-([a-z]+)-\d{4}-\d{2}-\d{2}$")
-SPREAD_TITLE = re.compile(r"^Spread: (.+?) \(([+-]?[\d.]+)\)")
-
-
-def polymarket_game(row):
-    """
-    Bets for moneyline, spread, and total contracts on a single dated game.
-    """
-    m = GAME_SLUG.match(row["event_id"])
-    if not m or not row["start_time"]:
-        return None
-    away, home = team_from_code(m.group(1)), team_from_code(m.group(2))
-    if not (away and home):
-        return None
-    game_date = eastern_date(row["start_time"])
-    base = dict(venue=row["venue"], contract_id=row["contract_id"], season=season_from_date(game_date),
-                game_date=game_date, team_a=away, team_b=home)
-    kind, outcome = row["market_type"], row["outcome"]
-
-    if kind == "moneyline":
-        # Game winners are always stated as the away team winning.
-        # The home outcome is its complement, since ties pay half on every venue.
-        picked = team_from_label(outcome)
-        if picked not in (away, home):
-            return None
-        return Bet(kind="game_winner", subject=away, line=None, polarity="yes" if picked == away else "no", **base)
-
-    if kind == "spreads":
-        # The title names one team with its handicap, for example 'Spread: Falcons (-4.5)'.
-        # We restate every spread as 'subject wins by more than line' with a positive line.
-        t = SPREAD_TITLE.match(row["title"])
-        named, picked = team_from_label(t.group(1)) if t else None, team_from_label(outcome)
-        if not named or not picked:
-            return None
-        handicap = float(t.group(2))
-        other = home if named == away else away
-        if handicap < 0:
-            subject, line = named, -handicap
-        else:
-            subject, line = other, handicap
-        polarity = "yes" if picked == subject else "no"
-        return Bet(kind="spread", subject=subject, line=line, polarity=polarity, **base)
-
-    if kind == "totals":
-        polarity = {"Over": "yes", "Under": "no"}.get(outcome)
-        if row["line"] is None or polarity is None:
-            return None
-        return Bet(kind="total", subject=None, line=row["line"], polarity=polarity, **base)
-
-    return None
-
-
-WINS_OUTCOME = re.compile(r"^([OU]) ([\d.]+)$")
-WINS_QUESTION = re.compile(r"more than ([\d.]+) (?:wins|games)")
-
-
-def polymarket_future(row):
-    """
-    Bets for season long team contracts. The event title says which kind it is.
-    """
-    event_title, question, outcome = row["event_title"] or "", row["title"], row["outcome"]
-    teams = teams_in_text(question)
-    if len(teams) != 1:
-        return None
-    line, polarity = None, "yes"
-
-    if re.match(r"^Pro Football: \d{4} Champion$", event_title):
-        kind, season = "champion", season_from_text(event_title)
-    elif re.match(r"^Pro Football: \d{4} (AFC|NFC) Champion", event_title):
-        kind, season = "conf_champion", season_from_text(event_title)
-    elif re.match(r"^Pro Football: (AFC|NFC) (East|West|North|South) Champion", event_title):
-        # The question names the year the season starts, so add one.
-        kind, season = "division_champion", season_from_text(question) + 1
-    elif re.search(r"(AFC|NFC) #1 Seed", event_title):
-        kind, season = "conf_top_seed", season_from_text(event_title)
-    elif re.search(r"Team to advance to (AFC|NFC) Championship Game", event_title):
-        kind, season = "reach_conf_final", season_from_text(question)
-    elif "Win Total" in event_title:
-        kind, season = "season_wins", season_from_text(question) + 1
-        m = WINS_OUTCOME.match(outcome)
-        if m:
-            line, polarity = float(m.group(2)), "yes" if m.group(1) == "O" else "no"
-        else:
-            m = WINS_QUESTION.search(question)
-            if not m or outcome != "Yes":
-                return None
-            line = float(m.group(1))
-    else:
-        return None
-
-    return Bet(venue=row["venue"], contract_id=row["contract_id"], kind=kind, season=season,
-                     game_date=None, team_a=None, team_b=None, subject=teams[0], line=line, polarity=polarity)
-
-
-def classify_polymarket(row):
-    """
-    Route a Polymarket contract to the game or the futures parser.
-    """
-    if row["market_type"] in ("moneyline", "spreads", "totals"):
-        return polymarket_game(row)
-    if row["market_type"] is None:
-        return polymarket_future(row)
-    return None
 
 
 # KALSHI
@@ -394,7 +253,7 @@ def us_team_suffix(suffix):
 
 # MAIN
 
-CLASSIFIERS = {"polymarket": classify_polymarket, "kalshi": classify_kalshi, "polymarket_us": classify_polymarket_us}
+CLASSIFIERS = {"kalshi": classify_kalshi, "polymarket_us": classify_polymarket_us}
 
 
 def classify_all(rows):
@@ -403,7 +262,8 @@ def classify_all(rows):
     """
     bets, unclassified = [], []
     for row in rows:
-        bet = CLASSIFIERS[row["venue"]](row)
+        classifier = CLASSIFIERS.get(row["venue"])
+        bet = classifier(row) if classifier else None
         if bet:
             bets.append(bet)
         else:
@@ -422,6 +282,8 @@ def report(bets, unclassified):
     groups = Counter()
     for row in unclassified:
         label = row["series_id"] if row["venue"] == "kalshi" else (row["market_type"] or row["event_title"])
+        if row["venue"] not in CLASSIFIERS:
+            label = "venue no longer classified"
         groups[(row["venue"], label)] += 1
     print(f"unclassified {len(unclassified)}, largest groups")
     for (venue, label), n in groups.most_common(12):

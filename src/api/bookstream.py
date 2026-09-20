@@ -151,7 +151,8 @@ class BookStream:
             except Reconnect as e:
                 self.log(f"{self.name} stream {e}, reconnecting")
             except (websockets.ConnectionClosed, OSError) as e:
-                self.log(f"{self.name} stream dropped ({type(e).__name__}), reconnecting")
+                # For a closed connection the message carries the close code and reason from each side.
+                self.log(f"{self.name} stream dropped ({type(e).__name__}: {str(e)[:100]}), reconnecting")
             except asyncio.CancelledError:
                 raise
             except Exception as e:

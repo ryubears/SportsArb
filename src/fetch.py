@@ -8,7 +8,7 @@ Run with:
 
 import argparse
 import time
-from api import kalshi, polymarket, polymarket_us
+from api import kalshi, polymarket_us
 from db import database
 from util.timeutil import now_iso
 from venues import VENUES
@@ -16,7 +16,6 @@ from venues import VENUES
 # How each of our sport keys maps onto the venues' own categories.
 SPORTS = {
     "nfl": {
-        "polymarket_tags": ["nfl"],
         "kalshi_series_prefixes": ["KXNFL"],
         "kalshi_series_tickers": ["KXSB"],   # The Super Bowl winner series does not use the NFL prefix.
         "polymarket_us_tags": ["nfl"],
@@ -29,8 +28,6 @@ def fetch_contracts(venue, sport):
     Call the right venue client for a sport and return its Contracts.
     """
     config = SPORTS[sport]
-    if venue == "polymarket":
-        return polymarket.contracts(sport, config["polymarket_tags"])
     if venue == "kalshi":
         return kalshi.contracts(sport, config["kalshi_series_prefixes"], config["kalshi_series_tickers"])
     if venue == "polymarket_us":
@@ -54,7 +51,7 @@ def fetch_and_store(sport, venues, conn):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Fetch open sports markets into SQLite.")
     ap.add_argument("--sport", default="nfl", choices=sorted(SPORTS))
-    ap.add_argument("--venue", default="all", choices=["all", "polymarket", "kalshi", "polymarket_us"])
+    ap.add_argument("--venue", default="all", choices=["all", *VENUES])
     args = ap.parse_args()
     venues = VENUES if args.venue == "all" else [args.venue]
     with database.connect() as conn:

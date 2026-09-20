@@ -108,7 +108,7 @@ def test_loop_subscribes_and_reconnects_on_silence_gap_and_drop(monkeypatch):
     monkeypatch.setattr(bookstream, "RECONNECT_SECONDS", 0)
     first = FakeConnection(["a"], then="hang")                          # Goes silent after one message.
     second = FakeConnection(["b", "gap"], then="hang")                  # Asks for a reconnect.
-    third = FakeConnection(["c"], then=ConnectionResetError())          # Drops.
+    third = FakeConnection(["c"], then=ConnectionResetError("peer reset"))   # Drops.
     fourth = FakeConnection([], then="hang")
     stream = ScriptedStream(["x", "y"], [first, second, third, fourth])
     run_until_connections_used(stream)
@@ -116,7 +116,7 @@ def test_loop_subscribes_and_reconnects_on_silence_gap_and_drop(monkeypatch):
     # The final connection goes stale too before the harness stops, so only the scripted three are compared.
     assert stream.logs[:3] == ["scripted stream silent for 0.05s, reconnecting",
                            "scripted stream skipped a message, reconnecting",
-                           "scripted stream dropped (ConnectionResetError), reconnecting"]
+                           "scripted stream dropped (ConnectionResetError: peer reset), reconnecting"]
     assert stream.resets >= 4
     assert stream.books == {}                                            # Cleared before the last connection.
 

@@ -6,8 +6,8 @@ import pytest
 import scan
 from db.models import FeeRecord, Quote
 
-PM_FEES = {"feesEnabled": True, "feeSchedule": {"rate": 0.05}}
-NO_PM_FEES = {"feesEnabled": False}
+US_FEES = {"feeCoefficient": 0.0695}
+NO_US_FEES = {"feeCoefficient": 0}
 NO_K_FEES = {"fee_type": "quadratic", "fee_multiplier": 0}
 REAL_K_FEES = {"fee_type": "quadratic", "fee_multiplier": 1}
 T0 = "2026-09-19T12:00:00+00:00"
@@ -46,29 +46,28 @@ def test_ladder_depends_on_which_side_the_contract_pays():
 def test_fill_walks_both_ladders_while_the_edge_is_positive():
     leg_a = [(0.40, 10), (0.41, 10)]
     leg_b = [(0.50, 5), (0.58, 100)]
-    fee_infos = {"polymarket": NO_PM_FEES}
-    top_edge, size, profit = scan.fill(leg_a, leg_b, "polymarket", "polymarket", fee_infos)
+    fee_infos = {"polymarket_us": NO_US_FEES}
+    top_edge, size, profit = scan.fill(leg_a, leg_b, "polymarket_us", "polymarket_us", fee_infos)
     assert top_edge == pytest.approx(0.10)
     assert size == 20
     assert profit == pytest.approx(5 * 0.10 + 5 * 0.02 + 10 * 0.01)
 
 
 def test_fill_stops_at_zero_edge_and_handles_empty_ladders():
-    fee_infos = {"polymarket": NO_PM_FEES}
-    assert scan.fill([(0.5, 10)], [(0.5, 10)], "polymarket", "polymarket", fee_infos) == (0.0, 0.0, 0.0)
-    assert scan.fill([], [(0.5, 10)], "polymarket", "polymarket", fee_infos) == (-1.0, 0.0, 0.0)
+    fee_infos = {"polymarket_us": NO_US_FEES}
+    assert scan.fill([(0.5, 10)], [(0.5, 10)], "polymarket_us", "polymarket_us", fee_infos) == (0.0, 0.0, 0.0)
+    assert scan.fill([], [(0.5, 10)], "polymarket_us", "polymarket_us", fee_infos) == (-1.0, 0.0, 0.0)
 
 
 def test_best_trade_picks_the_cheapest_leg_on_each_side_across_venues():
-    members = [member("kalshi", "k"), member("polymarket", "pm"), member("polymarket_us", "us")]
+    members = [member("kalshi", "k"), member("polymarket_us", "us")]
     quotes = {("kalshi", "k"): quote("kalshi", "k", "t", [[0.53, 100]], [[0.54, 100]]),
-              ("polymarket", "pm"): quote("polymarket", "pm", "t", [[0.48, 100]], [[0.49, 100]]),
-              ("polymarket_us", "us"): quote("polymarket_us", "us", "t", [[0.55, 100]], [[0.56, 100]])}
-    fee_infos = {("kalshi", "k"): NO_K_FEES, ("polymarket", "pm"): NO_PM_FEES, ("polymarket_us", "us"): {"feeCoefficient": 0}}
+              ("polymarket_us", "us"): quote("polymarket_us", "us", "t", [[0.44, 100]], [[0.45, 100]])}
+    fee_infos = {("kalshi", "k"): NO_K_FEES, ("polymarket_us", "us"): NO_US_FEES}
     yes, no, edge, size, profit = scan.best_trade(members, quotes, fee_infos)
-    # Yes is cheapest at Polymarket's 0.49 ask. No is cheapest at Polymarket US, one minus its 0.55 bid.
-    assert (yes["venue"], no["venue"]) == ("polymarket", "polymarket_us")
-    assert edge == pytest.approx(1 - 0.49 - 0.45)
+    # Yes is cheapest at Polymarket US's 0.45 ask. No is cheapest at Kalshi, one minus its 0.53 bid.
+    assert (yes["venue"], no["venue"]) == ("polymarket_us", "kalshi")
+    assert edge == pytest.approx(1 - 0.45 - 0.47)
     assert size == 100
 
 
@@ -102,8 +101,8 @@ def test_best_trade_returns_none_without_two_quoted_sides():
 
 
 def test_fee_at_picks_the_record_in_force():
-    history = [FeeRecord("polymarket", "x", "2026-09-18T00:00:00+00:00", {"a": 1}),
-               FeeRecord("polymarket", "x", "2026-09-19T16:00:00+00:00", {"a": 2})]
+    history = [FeeRecord("polymarket_us", "x", "2026-09-18T00:00:00+00:00", {"a": 1}),
+               FeeRecord("polymarket_us", "x", "2026-09-19T16:00:00+00:00", {"a": 2})]
     assert scan.fee_at(history, "2026-09-17T00:00:00+00:00") == {"a": 1}
     assert scan.fee_at(history, "2026-09-19T12:00:00+00:00") == {"a": 1}
     assert scan.fee_at(history, "2026-09-19T16:00:00+00:00") == {"a": 2}
@@ -113,18 +112,18 @@ def test_fee_at_picks_the_record_in_force():
 # EPISODES
 
 def test_scan_group_finds_one_episode_with_duration_and_return():
-    g = group([member("kalshi", "k"), member("polymarket", "pm")])
-    quotes = {("polymarket", "pm"): [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
+    g = group([member("kalshi", "k"), member("polymarket_us", "pm")])
+    quotes = {("polymarket_us", "pm"): [quote("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
               ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]]),
                                 quote("kalshi", "k", "2026-09-19T12:01:01+00:00", [[0.49, 100]], [[0.50, 100]])]}
-    fees_ = histories({("polymarket", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES})
+    fees_ = histories({("polymarket_us", "pm"): NO_US_FEES, ("kalshi", "k"): NO_K_FEES})
     episodes = scan.scan_group(g, quotes, fees_)
-    # Polymarket is not tradable, so the tradable scope has one member and no episode.
-    assert [o.scope for o in episodes] == ["all"]
-    o = episodes[0]
+    # Both venues are tradable, so the same episode appears in both scopes.
+    assert sorted(o.scope for o in episodes) == ["all", "tradable"]
+    o = in_scope(episodes, "all")[0]
     assert (o.start_ts, o.end_ts, o.seconds) == ("2026-09-19T12:00:01+00:00", "2026-09-19T12:01:01+00:00", 60)
-    assert (o.yes_venue, o.no_venue) == ("polymarket", "kalshi")
-    assert o.trade == "yes: PM buy, no: K buy other side"
+    assert (o.yes_venue, o.no_venue) == ("polymarket_us", "kalshi")
+    assert o.trade == "yes: PMUS buy, no: K buy other side"
     assert o.peak_edge == pytest.approx(0.04)
     assert o.peak_size == 100
     assert o.live == 0
@@ -135,61 +134,55 @@ def test_scan_group_finds_one_episode_with_duration_and_return():
 
 def test_scan_group_marks_live_and_uses_kickoff_for_payout():
     kickoff = "2026-09-19T11:00:00+00:00"
-    g = group([member("kalshi", "k", start_time=kickoff), member("polymarket", "pm", start_time=kickoff)])
-    quotes = {("polymarket", "pm"): [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
+    g = group([member("kalshi", "k", start_time=kickoff), member("polymarket_us", "pm", start_time=kickoff)])
+    quotes = {("polymarket_us", "pm"): [quote("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
               ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]])]}
-    o = in_scope(scan.scan_group(g, quotes, histories({("polymarket", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES})), "all")[0]
+    o = in_scope(scan.scan_group(g, quotes, histories({("polymarket_us", "pm"): NO_US_FEES, ("kalshi", "k"): NO_K_FEES})), "all")[0]
     assert o.live == 1
     assert o.end_ts == "2026-09-19T12:00:01+00:00"
     assert o.days_held == pytest.approx((scan.GAME_HOURS - 1) / 24, rel=1e-3)
 
 
 def test_scan_group_applies_the_fee_in_force_at_each_quote():
-    g = group([member("kalshi", "k"), member("polymarket", "pm")])
-    # Polymarket fees switch off at 12:00:30, between the two Kalshi quotes, which both fall within the stale limit.
-    quotes = {("polymarket", "pm"): [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
+    g = group([member("kalshi", "k"), member("polymarket_us", "pm")])
+    # Polymarket US fees switch off at 12:00:30, between the two Kalshi quotes, which both fall within the stale limit.
+    quotes = {("polymarket_us", "pm"): [quote("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
               ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]]),
                                 quote("kalshi", "k", "2026-09-19T12:00:59+00:00", [[0.53, 100]], [[0.54, 100]])]}
     fees_ = histories({("kalshi", "k"): NO_K_FEES})
-    fees_[("polymarket", "pm")] = [FeeRecord("polymarket", "pm", T0, PM_FEES),
-                                   FeeRecord("polymarket", "pm", "2026-09-19T12:00:30+00:00", NO_PM_FEES)]
+    fees_[("polymarket_us", "pm")] = [FeeRecord("polymarket_us", "pm", T0, US_FEES),
+                                   FeeRecord("polymarket_us", "pm", "2026-09-19T12:00:30+00:00", NO_US_FEES)]
     o = in_scope(scan.scan_group(g, quotes, fees_), "all")[0]
     assert o.peak_ts == "2026-09-19T12:00:59+00:00"
     assert o.peak_edge == pytest.approx(0.04)
 
 
-def test_scan_group_reports_both_scopes_when_tradable_venues_cross():
-    g = group([member("kalshi", "k"), member("polymarket_us", "us"), member("polymarket", "pm")])
+def test_scan_group_leaves_the_tradable_scope_out_when_a_leg_is_not_tradable(monkeypatch):
+    monkeypatch.setattr(scan, "is_tradable", lambda venue: venue == "kalshi")
+    g = group([member("kalshi", "k"), member("polymarket_us", "us")])
     quotes = {("kalshi", "k"): [quote("kalshi", "k", T0, [[0.53, 100]], [[0.54, 100]])],
-              ("polymarket_us", "us"): [quote("polymarket_us", "us", "2026-09-19T12:00:01+00:00", [[0.44, 100]], [[0.45, 100]])],
-              ("polymarket", "pm"): [quote("polymarket", "pm", "2026-09-19T12:00:02+00:00", [[0.40, 100]], [[0.41, 100]])]}
-    fees_ = histories({("kalshi", "k"): NO_K_FEES, ("polymarket_us", "us"): {"feeCoefficient": 0}, ("polymarket", "pm"): NO_PM_FEES})
-    episodes = scan.scan_group(g, quotes, fees_)
-    tradable, everything = in_scope(episodes, "tradable")[0], in_scope(episodes, "all")[0]
-    assert (tradable.yes_venue, tradable.no_venue) == ("polymarket_us", "kalshi")
-    assert tradable.peak_edge == pytest.approx(1 - 0.45 - 0.47)
-    # Once Polymarket quotes, its cheaper yes improves the all venues edge but not the tradable one.
-    assert (everything.yes_venue, everything.no_venue) == ("polymarket", "kalshi")
-    assert everything.peak_edge == pytest.approx(1 - 0.41 - 0.47)
+              ("polymarket_us", "us"): [quote("polymarket_us", "us", "2026-09-19T12:00:01+00:00", [[0.44, 100]], [[0.45, 100]])]}
+    episodes = scan.scan_group(g, quotes, histories({("kalshi", "k"): NO_K_FEES, ("polymarket_us", "us"): NO_US_FEES}))
+    assert [o.scope for o in episodes] == ["all"]
 
 
 def test_scan_group_holds_until_the_slower_leg_pays():
-    g = group([member("kalshi", "k", close_time="2026-10-19T12:00:00+00:00"), member("polymarket", "pm", close_time="2026-09-29T12:00:00+00:00")])
-    quotes = {("polymarket", "pm"): [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
+    g = group([member("kalshi", "k", close_time="2026-10-19T12:00:00+00:00"), member("polymarket_us", "pm", close_time="2026-09-29T12:00:00+00:00")])
+    quotes = {("polymarket_us", "pm"): [quote("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
               ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]])]}
-    o = in_scope(scan.scan_group(g, quotes, histories({("polymarket", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES})), "all")[0]
+    o = in_scope(scan.scan_group(g, quotes, histories({("polymarket_us", "pm"): NO_US_FEES, ("kalshi", "k"): NO_K_FEES})), "all")[0]
     assert o.days_held == pytest.approx(30, rel=1e-4)
 
 
 def test_scan_group_ignores_a_member_whose_quote_went_stale():
-    g = group([member("kalshi", "k"), member("polymarket", "pm")])
-    # Polymarket quoted once, then went quiet. Two minutes later Kalshi reprices and would appear to cross it.
-    quotes = {("polymarket", "pm"): [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
+    g = group([member("kalshi", "k"), member("polymarket_us", "pm")])
+    # Polymarket US quoted once, then went quiet. Two minutes later Kalshi reprices and would appear to cross it.
+    quotes = {("polymarket_us", "pm"): [quote("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
               ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:02:01+00:00", [[0.53, 100]], [[0.54, 100]])]}
-    assert scan.scan_group(g, quotes, histories({("polymarket", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES})) == []
+    assert scan.scan_group(g, quotes, histories({("polymarket_us", "pm"): NO_US_FEES, ("kalshi", "k"): NO_K_FEES})) == []
 
 
 def test_scan_group_ignores_time_before_two_members_have_quotes():
-    g = group([member("kalshi", "k"), member("polymarket", "pm")])
-    quotes = {("polymarket", "pm"): [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]])], ("kalshi", "k"): []}
-    assert scan.scan_group(g, quotes, histories({("polymarket", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES})) == []
+    g = group([member("kalshi", "k"), member("polymarket_us", "pm")])
+    quotes = {("polymarket_us", "pm"): [quote("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]])], ("kalshi", "k"): []}
+    assert scan.scan_group(g, quotes, histories({("polymarket_us", "pm"): NO_US_FEES, ("kalshi", "k"): NO_K_FEES})) == []

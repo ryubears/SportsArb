@@ -27,7 +27,7 @@ import asyncio
 import pipeline
 import sys
 import time
-from api import kalshi, polymarket, polymarket_us
+from api import kalshi, polymarket_us
 from db import database
 from db.models import Quote
 from util.timeutil import now_iso, shift
@@ -42,8 +42,7 @@ GAME_WINDOW_DAYS = 7    # Games further out than this are not recorded.
 GAME_HOURS = 5          # A game contract stays recorded this long after kickoff, whatever its close time says.
 CATALOG_MINUTES = 60    # How often the catalog is refreshed and subscriptions updated. Zero disables it.
 
-STREAMS = {"polymarket": polymarket.PolymarketBookStream, "kalshi": kalshi.KalshiBookStream,
-           "polymarket_us": polymarket_us.PolymarketUSBookStream}
+STREAMS = {"kalshi": kalshi.KalshiBookStream, "polymarket_us": polymarket_us.PolymarketUSBookStream}
 
 
 def log(message):
