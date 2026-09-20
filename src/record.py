@@ -170,16 +170,21 @@ class Streams:
         self.tasks = []
 
 
-async def run(conn, sport, seconds, catalog_minutes):
+async def run(conn, sport, seconds, catalog_seconds):
     """
     Refresh the catalog, start both streams and the flush timer, and keep the
     catalog fresh on a timer. Stops after the given seconds, or never when zero.
+    A refresh that fails is logged and tried again at the next interval, so a
+    bad fetch never stops the recording.
     """
     recorder = Recorder(conn)
     streams = Streams(recorder)
-    if catalog_minutes:
+    if catalog_seconds:
         log("refreshing catalog before starting")
-        log(await asyncio.to_thread(pipeline.refresh, sport, log))
+        try:
+            log(await asyncio.to_thread(pipeline.refresh, sport, log))
+        except Exception as e:
+            log(f"catalog refresh failed ({e!r}), starting with the stored catalog")
     targets = load_targets(conn, sport)
     log(f"recording {len(targets['polymarket'])} polymarket and {len(targets['kalshi'])} kalshi contracts")
     for venue, contract_ids in targets.items():
@@ -193,11 +198,14 @@ async def run(conn, sport, seconds, catalog_minutes):
             if time.time() - last_status >= STATUS_SECONDS:
                 log(recorder.status())
                 last_status = time.time()
-            if catalog_minutes and refresh is None and time.time() - last_catalog >= catalog_minutes * 60:
+            if catalog_seconds and refresh is None and time.time() - last_catalog >= catalog_seconds:
                 refresh = asyncio.create_task(asyncio.to_thread(pipeline.refresh, sport, log))
             if refresh is not None and refresh.done():
-                log(f"catalog refreshed, {refresh.result()}")
-                log(f"subscriptions {streams.update(load_targets(conn, sport))}")
+                if refresh.exception():
+                    log(f"catalog refresh failed ({refresh.exception()!r}), keeping current subscriptions")
+                else:
+                    log(f"catalog refreshed, {refresh.result()}")
+                    log(f"subscriptions {streams.update(load_targets(conn, sport))}")
                 refresh, last_catalog = None, time.time()
     finally:
         if refresh is not None:
@@ -218,6 +226,6 @@ if __name__ == "__main__":
     args = ap.parse_args()
     with database.connect() as conn:
         try:
-            asyncio.run(run(conn, args.sport, args.seconds, args.catalog_minutes))
+            asyncio.run(run(conn, args.sport, args.seconds, args.catalog_minutes * 60))
         except KeyboardInterrupt:
             print("stopped")

@@ -27,6 +27,19 @@ def test_books_are_trimmed_to_the_kept_levels(tmp_path):
     assert len(r.latest[("polymarket", "T")].bids) == record.LEVELS
 
 
+def test_run_survives_a_failing_refresh(tmp_path, monkeypatch, capsys):
+    def broken_refresh(sport, log=print, db_path=None):
+        raise RuntimeError("kalshi is down")
+    monkeypatch.setattr(record.pipeline, "refresh", broken_refresh)
+    for venue in record.STREAMERS:
+        monkeypatch.setitem(record.STREAMERS, venue, fake_streamer([]))
+    conn = database.connect(tmp_path / "test.sqlite")
+    asyncio.run(record.run(conn, "nfl", seconds=3, catalog_seconds=1))
+    out = capsys.readouterr().out
+    assert "catalog refresh failed (RuntimeError('kalshi is down')), starting with the stored catalog" in out
+    assert "catalog refresh failed (RuntimeError('kalshi is down')), keeping current subscriptions" in out
+
+
 def test_status_reports_time_since_each_venue_updated(tmp_path):
     r = record.Recorder(database.connect(tmp_path / "test.sqlite"))
     assert "last never" in r.status()
