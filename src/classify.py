@@ -26,37 +26,57 @@ ALIAS_FILE = Path(__file__).resolve().parent / "aliases.json"
 
 def load_aliases():
     """
-    Build the code lookup from the alias file. Codes are matched against
-    slug and ticker pieces, never inside free text.
+    Build two lookups from the alias file. Names are matched inside free
+    text. Codes are matched only against slug and ticker pieces.
     """
-    codes = {}
-    for team, entry in jsonutil.read_file(ALIAS_FILE).items():
+    data = jsonutil.read_file(ALIAS_FILE)
+    names, codes = {}, {}
+    for team, entry in data.items():
+        for n in entry["names"]:
+            names[n.lower()] = team
         for c in entry["codes"]:
             codes[c.upper()] = team
-    return codes
+    return names, codes
 
 
-CODE_TO_TEAM = load_aliases()
+NAME_TO_TEAM, CODE_TO_TEAM = load_aliases()
+
+# Longest names first, so 'Los Angeles Rams' wins over 'Rams' at the same spot.
+# The lookarounds stop 'Rams' from matching inside 'Ramsey'.
+NAME_PATTERN = re.compile(
+    r"(?<![A-Za-z])(?:" + "|".join(re.escape(n) for n in sorted(NAME_TO_TEAM, key=len, reverse=True)) + r")(?![A-Za-z])",
+    re.IGNORECASE,
+)
 
 
-def glued_code(full_name):
+def teams_in_text(text):
     """
-    Polymarket US glues the first three letters of the city to the first three
-    of the nickname in some slugs, with digits dropped, so 'San Francisco 49ers'
-    becomes 'saners' and 'Kansas City Chiefs' becomes 'kanchi'.
+    Team codes mentioned in the text, in order of first appearance, without repeats.
     """
-    *city, nickname = full_name.split()
-    letters = lambda s: "".join(ch for ch in s if ch.isalpha()).lower()
-    return letters("".join(city))[:3] + letters(nickname)[:3]
+    found = []
+    for m in NAME_PATTERN.finditer(text or ""):
+        team = NAME_TO_TEAM[m.group(0).lower()]
+        if team not in found:
+            found.append(team)
+    return found
 
-
-GLUED_TO_TEAM = {glued_code(entry["names"][0]): team for team, entry in jsonutil.read_file(ALIAS_FILE).items()}
 
 def team_from_code(piece):
     """
     Canonical team code for a slug or ticker piece, or None.
     """
     return CODE_TO_TEAM.get((piece or "").upper())
+
+
+def team_from_label(text):
+    """
+    The one team a short label names, by nickname first and by code second.
+    Polymarket labels most outcomes 'Falcons' but a few as 'ATL'. None if unclear.
+    """
+    teams = teams_in_text(text)
+    if len(teams) == 1:
+        return teams[0]
+    return team_from_code(text.strip()) if not teams else None
 
 
 def split_codes(pair):
@@ -173,87 +193,116 @@ def classify_kalshi(row):
                      subject=subject, line=line, polarity="yes", **base)
 
 
-# POLYMARKET US
+# POLYMARKET
 
-US_GAME_EVENT = re.compile(r"^nfl-([a-z]+)-([a-z]+)-\d{4}-\d{2}-\d{2}$")
-US_FUTURE_EVENT = re.compile(r"^nfl-([a-z0-9]+)-(\d{4})-\d{2}-\d{2}(?:-w)?$")
-US_QUALIFIER_EVENT = re.compile(r"^nfl-(afc|nfc)-(\d{4})-\d{2}-\d{2}-champq$")
-US_GAME_KINDS = {
-    "football_team_full_game_winner": "game_winner",
-    "football_team_full_game_spread": "spread",
-    "football_team_full_game_total": "total",
-}
-US_FUTURE_KINDS = {
-    "champ": "champion",
-    "afcchamp": "conf_champion", "nfcchamp": "conf_champion",
-    "afc1seed": "conf_top_seed", "nfc1seed": "conf_top_seed",
-    "afceast": "division_champion", "afcwest": "division_champion", "afcnorth": "division_champion", "afcsouth": "division_champion",
-    "nfceast": "division_champion", "nfcwest": "division_champion", "nfcnorth": "division_champion", "nfcsouth": "division_champion",
-}
+GAME_SLUG = re.compile(r"^nfl-([a-z]+)-([a-z]+)-\d{4}-\d{2}-\d{2}$")
+SPREAD_TITLE = re.compile(r"^Spread: (.+?) \(([+-]?[\d.]+)\)")
 
 
-def classify_polymarket_us(row):
+def polymarket_game(row):
     """
-    Bets for Polymarket US contracts. Every contract is a market's long side.
-    The event slug names the game or the future, the market slug ends with
-    the team for futures, and the line is the away team's handicap for spreads.
-    The venue's titles on positive spread lines contradict its own prices, so
-    only the slug and the signed line are trusted.
+    Bets for moneyline, spread, and total contracts on a single dated game.
     """
-    base = dict(venue=row["venue"], contract_id=row["contract_id"])
-    m = US_GAME_EVENT.match(row["event_id"])
-    if m:
-        away, home = team_from_code(m.group(1)), team_from_code(m.group(2))
-        kind = US_GAME_KINDS.get(row["market_type"])
-        if not (away and home and kind and row["start_time"]):
-            return None
-        game_date = eastern_date(row["start_time"])
-        common = dict(season=season_from_date(game_date), game_date=game_date, team_a=away, team_b=home, **base)
-        if kind == "game_winner":
-            return Bet(kind=kind, subject=away, line=None, polarity="yes", **common)
-        if row["line"] is None:
-            return None
-        if kind == "spread":
-            # Yes pays when the away team covers the line.
-            # A negative line means the away team wins by more than it.
-            # A positive line means the home team fails to win by more than it.
-            if row["line"] < 0:
-                return Bet(kind=kind, subject=away, line=-row["line"], polarity="yes", **common)
-            return Bet(kind=kind, subject=home, line=row["line"], polarity="no", **common)
-        return Bet(kind=kind, subject=None, line=row["line"], polarity="yes", **common)
-    m = US_FUTURE_EVENT.match(row["event_id"])
-    if m and m.group(1) in US_FUTURE_KINDS:
-        kind = US_FUTURE_KINDS[m.group(1)]
-    else:
-        m = US_QUALIFIER_EVENT.match(row["event_id"])
-        if not m:
-            return None
-        kind = "reach_conf_final"
-    team = us_team_suffix(row["contract_id"].rsplit("-", 1)[-1])
-    if not team:
+    m = GAME_SLUG.match(row["event_id"])
+    if not m or not row["start_time"]:
         return None
-    return Bet(kind=kind, season=int(m.group(2)), game_date=None, team_a=None, team_b=None,
-               subject=team, line=None, polarity="yes", **base)
+    away, home = team_from_code(m.group(1)), team_from_code(m.group(2))
+    if not (away and home):
+        return None
+    game_date = eastern_date(row["start_time"])
+    base = dict(venue=row["venue"], contract_id=row["contract_id"], season=season_from_date(game_date),
+                game_date=game_date, team_a=away, team_b=home)
+    kind, outcome = row["market_type"], row["outcome"]
+
+    if kind == "moneyline":
+        # Game winners are always stated as the away team winning.
+        # The home outcome is its complement, since ties pay half on every venue.
+        picked = team_from_label(outcome)
+        if picked not in (away, home):
+            return None
+        return Bet(kind="game_winner", subject=away, line=None, polarity="yes" if picked == away else "no", **base)
+
+    if kind == "spreads":
+        # The title names one team with its handicap, for example 'Spread: Falcons (-4.5)'.
+        # We restate every spread as 'subject wins by more than line' with a positive line.
+        t = SPREAD_TITLE.match(row["title"])
+        named, picked = team_from_label(t.group(1)) if t else None, team_from_label(outcome)
+        if not named or not picked:
+            return None
+        handicap = float(t.group(2))
+        other = home if named == away else away
+        if handicap < 0:
+            subject, line = named, -handicap
+        else:
+            subject, line = other, handicap
+        polarity = "yes" if picked == subject else "no"
+        return Bet(kind="spread", subject=subject, line=line, polarity=polarity, **base)
+
+    if kind == "totals":
+        polarity = {"Over": "yes", "Under": "no"}.get(outcome)
+        if row["line"] is None or polarity is None:
+            return None
+        return Bet(kind="total", subject=None, line=row["line"], polarity=polarity, **base)
+
+    return None
 
 
-def us_team_suffix(suffix):
+WINS_OUTCOME = re.compile(r"^([OU]) ([\d.]+)$")
+WINS_QUESTION = re.compile(r"more than ([\d.]+) (?:wins|games)")
+
+
+def polymarket_future(row):
     """
-    The team a Polymarket US market slug ends with. Some events use the plain
-    code, others glue city and nickname letters together, see glued_code.
-    Three letter codes are tried before two letter ones, which is unambiguous.
+    Bets for season long team contracts. The event title says which kind it is.
     """
-    if suffix in GLUED_TO_TEAM:
-        return GLUED_TO_TEAM[suffix]
-    for candidate in (suffix, suffix[:3], suffix[:2]):
-        team = team_from_code(candidate)
-        if team:
-            return team
+    event_title, question, outcome = row["event_title"] or "", row["title"], row["outcome"]
+    teams = teams_in_text(question)
+    if len(teams) != 1:
+        return None
+    line, polarity = None, "yes"
+
+    if re.match(r"^Pro Football: \d{4} Champion$", event_title):
+        kind, season = "champion", season_from_text(event_title)
+    elif re.match(r"^Pro Football: \d{4} (AFC|NFC) Champion", event_title):
+        kind, season = "conf_champion", season_from_text(event_title)
+    elif re.match(r"^Pro Football: (AFC|NFC) (East|West|North|South) Champion", event_title):
+        # The question names the year the season starts, so add one.
+        kind, season = "division_champion", season_from_text(question) + 1
+    elif re.search(r"(AFC|NFC) #1 Seed", event_title):
+        kind, season = "conf_top_seed", season_from_text(event_title)
+    elif re.search(r"Team to advance to (AFC|NFC) Championship Game", event_title):
+        kind, season = "reach_conf_final", season_from_text(question)
+    elif "Win Total" in event_title:
+        kind, season = "season_wins", season_from_text(question) + 1
+        m = WINS_OUTCOME.match(outcome)
+        if m:
+            line, polarity = float(m.group(2)), "yes" if m.group(1) == "O" else "no"
+        else:
+            m = WINS_QUESTION.search(question)
+            if not m or outcome != "Yes":
+                return None
+            line = float(m.group(1))
+    else:
+        return None
+
+    return Bet(venue=row["venue"], contract_id=row["contract_id"], kind=kind, season=season,
+               game_date=None, team_a=None, team_b=None, subject=teams[0], line=line, polarity=polarity)
+
+
+def classify_polymarket(row):
+    """
+    Route a Polymarket contract to the game or the futures parser.
+    """
+    if row["market_type"] in ("moneyline", "spreads", "totals"):
+        return polymarket_game(row)
+    if row["market_type"] is None:
+        return polymarket_future(row)
     return None
 
 
 # MAIN
 
-CLASSIFIERS = {"kalshi": classify_kalshi, "polymarket_us": classify_polymarket_us}
+CLASSIFIERS = {"kalshi": classify_kalshi, "polymarket": classify_polymarket}
 
 
 def classify_all(rows):

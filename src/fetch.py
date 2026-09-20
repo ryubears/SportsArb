@@ -8,7 +8,7 @@ Run with:
 
 import argparse
 import time
-from api import kalshi, polymarket_us
+from api import kalshi, polymarket
 from db import database
 from util.timeutil import now_iso
 from venues import VENUES
@@ -18,7 +18,7 @@ SPORTS = {
     "nfl": {
         "kalshi_series_prefixes": ["KXNFL"],
         "kalshi_series_tickers": ["KXSB"],   # The Super Bowl winner series does not use the NFL prefix.
-        "polymarket_us_tags": ["nfl"],
+        "polymarket_tags": ["nfl"],
     },
 }
 
@@ -30,8 +30,8 @@ def fetch_contracts(venue, sport):
     config = SPORTS[sport]
     if venue == "kalshi":
         return kalshi.contracts(sport, config["kalshi_series_prefixes"], config["kalshi_series_tickers"])
-    if venue == "polymarket_us":
-        return polymarket_us.contracts(sport, config["polymarket_us_tags"])
+    if venue == "polymarket":
+        return polymarket.contracts(sport, config["polymarket_tags"])
     raise ValueError(f"unknown venue {venue}")
 
 

@@ -21,12 +21,17 @@ IDENTITY = ("kind", "season", "game_date", "team_a", "team_b", "subject", "line"
 # Flag a group when its members stop trading more than this many days apart.
 CLOSE_GAP_LIMIT_DAYS = 60
 
+# Venues that list a mirror contract for the other outcome of the same book.
+MIRRORED_VENUES = {"polymarket"}
+
 # Known rule differences by kind, from reading the venues' rules text.
 # Every group of that kind carries the note so nobody has to reread the rules.
 KIND_NOTES = {
-    "game_winner": "Ties pay half on both venues. If the game does not start within 48 hours, Kalshi settles at a fair price while Polymarket US waits up to two weeks for a rescheduled game.",
-    "spread": "If the game does not start within 48 hours, Kalshi settles at a fair price. Polymarket US waits up to two weeks for a rescheduled game.",
-    "total": "If the game does not start within 48 hours, Kalshi settles at a fair price. Polymarket US waits up to two weeks for a rescheduled game.",
+    "game_winner": "Ties pay half on both venues. If the game does not start within 48 hours, Kalshi settles at a fair price while Polymarket waits for the game.",
+    "spread": "If the game does not start within 48 hours, Kalshi settles at a fair price. Polymarket waits, and pays 50-50 only if the game is cancelled.",
+    "total": "If the game does not start within 48 hours, Kalshi settles at a fair price. Polymarket waits, and pays 50-50 only if the game is cancelled.",
+    "champion": "Polymarket resolves to Other if no champion is crowned by March 31 of the season end year.",
+    "season_wins": "Polymarket pays 50-50 if the regular season is cancelled or cut short. Kalshi rules do not say.",
 }
 
 
@@ -49,6 +54,15 @@ def label(bet):
     if bet["line"] is not None:
         parts.append(str(bet["line"]))
     return " ".join(parts)
+
+
+def without_mirrors(rows):
+    """
+    A mirrored venue lists both outcomes of one book as separate contracts.
+    The No side's book mirrors the Yes side's, so keep the Yes side only.
+    """
+    has_yes = {r["venue"] for r in rows if r["venue"] in MIRRORED_VENUES and r["polarity"] == "yes"}
+    return [r for r in rows if not (r["venue"] in has_yes and r["polarity"] == "no")]
 
 
 def flags(rows):
@@ -86,6 +100,7 @@ def match(bets):
         by_identity[identity(bet)].append(bet)
     groups, unmatched = [], []
     for rows in by_identity.values():
+        rows = without_mirrors(rows)
         if len({r["venue"] for r in rows}) >= 2:
             groups.append(make_group(rows))
         else:
