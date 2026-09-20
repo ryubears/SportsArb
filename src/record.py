@@ -16,6 +16,7 @@ schedule changes reach the fee history through the same refresh.
 Run with:
     python3 src/record.py --sport nfl
     python3 src/record.py --sport nfl --seconds 120 --catalog-minutes 0
+    python3 src/record.py --sport nfl --skip-refresh
 
 For a long run on a laptop, stop the Mac from sleeping while it runs:
     caffeinate -i -s python3 src/record.py --sport nfl
@@ -38,6 +39,7 @@ LEVELS = 5              # Price levels kept per side.
 FLUSH_SECONDS = 1.0     # How often changed books are written.
 STATUS_SECONDS = 60     # How often a status line is printed.
 GAME_WINDOW_DAYS = 7    # Games further out than this are not recorded.
+GAME_HOURS = 5          # A game contract stays recorded this long after kickoff, whatever its close time says.
 CATALOG_MINUTES = 60    # How often the catalog is refreshed and subscriptions updated. Zero disables it.
 
 STREAMS = {"polymarket": polymarket.PolymarketBookStream, "kalshi": kalshi.KalshiBookStream,
@@ -56,7 +58,8 @@ def load_targets(conn, sport):
     The contracts to record right now, as {venue: [contract_id, ...]}.
     """
     now = now_iso()
-    return database.load_recording_targets(conn, sport, now, shift(now, days=GAME_WINDOW_DAYS), list(STREAMS))
+    return database.load_recording_targets(conn, sport, now, shift(now, days=GAME_WINDOW_DAYS), list(STREAMS),
+                                           shift(now, hours=-GAME_HOURS))
 
 
 class Recorder:
@@ -171,16 +174,16 @@ class Streams:
         self.tasks = {}
 
 
-async def run(conn, sport, seconds, catalog_seconds):
+async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True):
     """
-    Refresh the catalog, start both streams and the flush timer, and keep the
+    Refresh the catalog, start every stream and the flush timer, and keep the
     catalog fresh on a timer. Stops after the given seconds, or never when zero.
     A refresh that fails is logged and tried again at the next interval, so a
     bad fetch never stops the recording.
     """
     recorder = Recorder(conn)
     streams = Streams(recorder)
-    if catalog_seconds:
+    if catalog_seconds and refresh_at_start:
         log("refreshing catalog before starting")
         try:
             log(await asyncio.to_thread(pipeline.refresh, sport, log))
@@ -188,6 +191,8 @@ async def run(conn, sport, seconds, catalog_seconds):
             log(f"catalog refresh failed ({e!r}), starting with the stored catalog")
     targets = load_targets(conn, sport)
     log("recording " + ", ".join(f"{len(ids)} {venue}" for venue, ids in targets.items()) + " contracts")
+    if not any(targets.values()):
+        log("nothing to record, run pipeline.py first")
     for venue, contract_ids in targets.items():
         streams.start(venue, contract_ids)
     started = last_status = last_catalog = time.time()
@@ -224,9 +229,11 @@ if __name__ == "__main__":
     ap.add_argument("--seconds", type=int, default=0, help="stop after this many seconds, 0 means run forever")
     ap.add_argument("--catalog-minutes", type=int, default=CATALOG_MINUTES,
                     help="minutes between catalog refreshes, 0 means never refresh")
+    ap.add_argument("--skip-refresh", action="store_true",
+                    help="start streaming at once from the stored catalog instead of refreshing first")
     args = ap.parse_args()
     with database.connect() as conn:
         try:
-            asyncio.run(run(conn, args.sport, args.seconds, args.catalog_minutes * 60))
+            asyncio.run(run(conn, args.sport, args.seconds, args.catalog_minutes * 60, not args.skip_refresh))
         except KeyboardInterrupt:
             print("stopped")

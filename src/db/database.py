@@ -341,11 +341,14 @@ def load_quotes(conn, venue, contract_ids, since=None):
     return out
 
 
-def load_recording_targets(conn, sport, now, horizon, venues):
+def load_recording_targets(conn, sport, now, horizon, venues, game_started_after):
     """
     Return {venue: [contract_id, ...]} for every contract in a group that
     spans two or more venues, is still open, and is either a future or a
-    game starting before the horizon.
+    game starting before the horizon. A game contract also counts as open
+    while its game may still be in play, meaning it started after
+    game_started_after, because Polymarket's close time is the kickoff
+    even though its markets trade through the game.
     """
     targets = {}
     for venue in venues:
@@ -353,9 +356,10 @@ def load_recording_targets(conn, sport, now, horizon, venues):
             SELECT c.contract_id FROM contracts c
             JOIN bets b ON b.venue = c.venue AND b.contract_id = c.contract_id
             JOIN bet_groups g ON g.label = b.group_label
-            WHERE c.venue = ? AND c.sport = ? AND (c.close_time IS NULL OR c.close_time > ?)
+            WHERE c.venue = ? AND c.sport = ?
+              AND (c.close_time IS NULL OR c.close_time > ? OR (c.start_time IS NOT NULL AND c.start_time > ?))
               AND (b.game_date IS NULL OR b.game_date <= ?) AND g.venue_count >= 2
-        """, (venue, sport, now, horizon[:10]))
+        """, (venue, sport, now, game_started_after, horizon[:10]))
         targets[venue] = [r[0] for r in rows]
     return targets
 

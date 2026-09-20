@@ -146,14 +146,15 @@ def test_scan_group_marks_live_and_uses_kickoff_for_payout():
 
 def test_scan_group_applies_the_fee_in_force_at_each_quote():
     g = group([member("kalshi", "k"), member("polymarket", "pm")])
+    # Polymarket fees switch off at 12:00:30, between the two Kalshi quotes, which both fall within the stale limit.
     quotes = {("polymarket", "pm"): [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
               ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]]),
-                                quote("kalshi", "k", "2026-09-19T12:01:01+00:00", [[0.53, 100]], [[0.54, 100]])]}
+                                quote("kalshi", "k", "2026-09-19T12:00:59+00:00", [[0.53, 100]], [[0.54, 100]])]}
     fees_ = histories({("kalshi", "k"): NO_K_FEES})
     fees_[("polymarket", "pm")] = [FeeRecord("polymarket", "pm", T0, PM_FEES),
                                    FeeRecord("polymarket", "pm", "2026-09-19T12:00:30+00:00", NO_PM_FEES)]
     o = in_scope(scan.scan_group(g, quotes, fees_), "all")[0]
-    assert o.peak_ts == "2026-09-19T12:01:01+00:00"
+    assert o.peak_ts == "2026-09-19T12:00:59+00:00"
     assert o.peak_edge == pytest.approx(0.04)
 
 
@@ -178,6 +179,14 @@ def test_scan_group_holds_until_the_slower_leg_pays():
               ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]])]}
     o = in_scope(scan.scan_group(g, quotes, histories({("polymarket", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES})), "all")[0]
     assert o.days_held == pytest.approx(30, rel=1e-4)
+
+
+def test_scan_group_ignores_a_member_whose_quote_went_stale():
+    g = group([member("kalshi", "k"), member("polymarket", "pm")])
+    # Polymarket quoted once, then went quiet. Two minutes later Kalshi reprices and would appear to cross it.
+    quotes = {("polymarket", "pm"): [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
+              ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:02:01+00:00", [[0.53, 100]], [[0.54, 100]])]}
+    assert scan.scan_group(g, quotes, histories({("polymarket", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES})) == []
 
 
 def test_scan_group_ignores_time_before_two_members_have_quotes():

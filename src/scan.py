@@ -27,6 +27,7 @@ from venues import SHORT_NAMES, is_tradable
 
 GAME_HOURS = 4          # A game pays out about this long after kickoff.
 TARGET_ANNUAL_PCT = 10  # The return an opportunity must beat to be worth the risk.
+MAX_QUOTE_AGE = 60      # Seconds. A member whose latest quote is older than this is left out, its book may be stale.
 
 
 # PRICING
@@ -173,8 +174,11 @@ def scan_group(group, quotes_by_contract, fee_histories):
     for quote in events:
         latest[(quote.venue, quote.contract_id)] = quote
         fee_infos = {key: fee_at(fee_histories[key], quote.ts) for key in latest}
+        # A book nobody has updated for a while may be stale, for example after a venue lost its connection.
+        # A stale book cannot be traded against a fresh one.
+        fresh = {key for key, q in latest.items() if seconds_between(q.ts, quote.ts) <= MAX_QUOTE_AGE}
         for scope, candidates in scopes.items():
-            members = [m for m in candidates if (m["venue"], m["contract_id"]) in latest]
+            members = [m for m in candidates if (m["venue"], m["contract_id"]) in fresh]
             result = best_trade(members, latest, fee_infos) if len(members) >= 2 else None
             if result is None:
                 continue

@@ -49,10 +49,24 @@ def test_bets_groups_quotes_and_targets(tmp_path):
     assert groups["champion 2027 BUF"]["members"][0]["close_time"] == "2027-01-01T00:00:00+00:00"
 
     venues = ["polymarket", "kalshi", "polymarket_us"]
-    targets = database.load_recording_targets(conn, "nfl", "2026-06-01T00:00:00+00:00", "2026-06-08T00:00:00+00:00", venues)
+    targets = database.load_recording_targets(conn, "nfl", "2026-06-01T00:00:00+00:00", "2026-06-08T00:00:00+00:00", venues, "2026-05-31T19:00:00+00:00")
     assert targets == {"polymarket": ["pm"], "kalshi": ["k"], "polymarket_us": []}
-    closed = database.load_recording_targets(conn, "nfl", "2028-01-01T00:00:00+00:00", "2028-01-08T00:00:00+00:00", venues)
+    closed = database.load_recording_targets(conn, "nfl", "2028-01-01T00:00:00+00:00", "2028-01-08T00:00:00+00:00", venues, "2027-12-31T19:00:00+00:00")
     assert closed == {"polymarket": [], "kalshi": [], "polymarket_us": []}
+
+
+def test_game_contracts_stay_targets_through_the_game(tmp_path):
+    conn = database.connect(tmp_path / "t.sqlite")
+    # Polymarket closes its game markets at kickoff on paper, but they trade through the game.
+    game = dict(start_time="2026-09-20T17:00:00+00:00", close_time="2026-09-20T17:00:00+00:00")
+    database.upsert_contracts(conn, [contract("polymarket", "pm", **game), contract("kalshi", "k", **game)], "2026-01-01T00:00:00+00:00")
+    bets = [Bet(v, cid, "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, "yes") for v, cid in (("polymarket", "pm"), ("kalshi", "k"))]
+    database.replace_bets(conn, "nfl", bets)
+    database.replace_groups(conn, "nfl", [BetGroup("game_winner 2026-09-20 CAR@ATL CAR", "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, bets, [], False)], "2026-01-01T00:00:00+00:00")
+    during = database.load_recording_targets(conn, "nfl", "2026-09-20T18:30:00+00:00", "2026-09-27T18:30:00+00:00", ["polymarket"], "2026-09-20T13:30:00+00:00")
+    after = database.load_recording_targets(conn, "nfl", "2026-09-21T00:00:00+00:00", "2026-09-28T00:00:00+00:00", ["polymarket"], "2026-09-20T19:00:00+00:00")
+    assert during == {"polymarket": ["pm"]}
+    assert after == {"polymarket": []}
 
     database.insert_quotes(conn, [Quote("kalshi", "k", "2026-01-01T00:00:00+00:00", [[0.5, 1]], [[0.6, 2]])])
     q = database.load_quotes(conn, "kalshi", ["k"])["k"][0]
