@@ -62,7 +62,8 @@ def print_storage(conn):
         size += os.path.getsize(wal)
     print(f"database {DB_PATH}")
     print(f"size {size / 1e6:,.0f} MB")
-    tables = [r[0] for r in query_rows(conn, "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")]
+    # Listed in pipeline order rather than alphabetically.
+    tables = ["fee_history", "contracts", "bets", "bet_groups", "quotes", "opportunities"]
     print_table("tables", ("table", "rows"), [(t, f"{first_value(conn, f'SELECT COUNT(*) FROM {t}'):,}") for t in tables])
 
 
@@ -81,7 +82,8 @@ def print_contracts(conn, now):
 def print_groups(conn):
     body = query_rows(conn, """
         SELECT kind, venues, COUNT(*), SUM(contracts), SUM(game_date IS NOT NULL)
-        FROM bet_groups WHERE venue_count >= 2 GROUP BY kind, venues ORDER BY kind, venues""")
+        FROM bet_groups WHERE venue_count >= 2 GROUP BY kind, venues
+        ORDER BY kind, venue_count DESC, COUNT(*) DESC, SUM(contracts) DESC, SUM(game_date IS NOT NULL) DESC""")
     print_table("bet groups", ("kind", "venues", "groups", "contracts", "games"), body)
     print(f"  total {first_value(conn, 'SELECT COUNT(*) FROM bet_groups WHERE venue_count >= 2'):,}, "
           f"last matched {short_time(first_value(conn, 'SELECT MAX(matched_at) FROM bet_groups'))}")
