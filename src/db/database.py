@@ -9,11 +9,12 @@ SQLite browser. The tables follow the pipeline in order.
     bets           each contract restated in venue neutral terms, by classify.py
     bet_groups     every contract for one bet across venues, by match.py
     quotes         order book snapshots for paired contracts, by record.py
+    stream_gaps    stretches when a venue's feed was down, also by record.py
     opportunities  stretches where a pair could be traded for a profit, by scan.py
 """
 
 import sqlite3
-from db.models import FeeRecord, Quote
+from db.models import FeeRecord, Quote, StreamGap
 from pathlib import Path
 from util import jsonutil
 
@@ -89,6 +90,13 @@ CREATE TABLE IF NOT EXISTS quotes (
     bids         TEXT NOT NULL,   -- JSON list of [price, size] for the Yes side, best first.
     asks         TEXT NOT NULL,   -- JSON list of [price, size] for the Yes side, best first.
     PRIMARY KEY (venue, contract_id, ts)
+);
+
+CREATE TABLE IF NOT EXISTS stream_gaps (
+    venue        TEXT NOT NULL,
+    start_ts     TEXT NOT NULL,   -- When the connection was lost, ISO 8601 UTC.
+    end_ts       TEXT,            -- When a new connection was subscribed. Null if the recorder stopped first.
+    PRIMARY KEY (venue, start_ts)
 );
 
 CREATE TABLE IF NOT EXISTS opportunities (
@@ -335,6 +343,26 @@ def load_quotes(conn, venue, contract_ids, since=None):
         if cid in out:
             out[cid].append(Quote(venue, cid, ts, jsonutil.parse(bids), jsonutil.parse(asks)))
     return out
+
+
+def insert_gap(conn, gap):
+    """
+    Record a stretch when a venue's feed was down.
+    """
+    conn.execute("INSERT OR REPLACE INTO stream_gaps (venue, start_ts, end_ts) VALUES (?,?,?)", (gap.venue, gap.start_ts, gap.end_ts))
+    conn.commit()
+
+
+def load_gaps(conn, venue, since=None):
+    """
+    Return a venue's StreamGaps in time order, optionally only those starting at or after since.
+    """
+    sql = "SELECT venue, start_ts, end_ts FROM stream_gaps WHERE venue = ?"
+    params = [venue]
+    if since:
+        sql += " AND start_ts >= ?"
+        params.append(since)
+    return [StreamGap(*row) for row in conn.execute(sql + " ORDER BY start_ts", params)]
 
 
 def load_recording_targets(conn, sport, now, horizon, venues, game_started_after):

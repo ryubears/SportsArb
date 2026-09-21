@@ -182,7 +182,8 @@ class KalshiBookStream(BookStream):
         self.message_id = 2
 
     def connect(self):
-        return websockets.connect(WS_URL, additional_headers=ws_headers(), open_timeout=20, max_size=None)
+        # No receive queue limit, so a busy loop delays our timestamps instead of stalling the socket.
+        return websockets.connect(WS_URL, additional_headers=ws_headers(), open_timeout=20, max_size=None, max_queue=None)
 
     async def subscribe(self, ws):
         await ws.send(json.dumps({"id": 1, "cmd": "subscribe",

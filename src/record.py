@@ -6,6 +6,10 @@ the latest book per contract in memory and once a second writes a row for
 each contract whose best bid or best ask changed, in price or in size,
 since the last row. Each row still carries the top five levels. Quiet
 contracts produce nothing, busy ones produce at most one row per second.
+When a venue's connection is lost the stretch until the next connection is
+subscribed is stored as a stream gap, and every book from the new
+connection is written again, so the scanner can tell a quiet book from
+one that went unseen.
 
 Only futures and games within GAME_WINDOW_DAYS of kickoff are recorded.
 Every CATALOG_MINUTES the recorder refreshes the catalog in a background
@@ -29,7 +33,7 @@ import sys
 import time
 from api import kalshi, polymarket
 from db import database
-from db.models import Quote
+from db.models import Quote, StreamGap
 from util.timeutil import now_iso, shift
 
 # Print immediately even when output goes to a file.
@@ -72,6 +76,7 @@ class Recorder:
         self.written = {}       # (venue, contract_id) maps to the best levels last written to the database.
         self.updates = {venue: 0 for venue in STREAMS}
         self.last_update = {venue: None for venue in STREAMS}       # Wall clock seconds of the newest update per venue.
+        self.gaps = {venue: 0 for venue in STREAMS}
         self.rows_written = 0
 
     def on_book(self, venue, contract_id, bids, asks):
@@ -81,6 +86,16 @@ class Recorder:
         self.updates[venue] += 1
         self.last_update[venue] = time.time()
         self.latest[(venue, contract_id)] = Quote(venue, contract_id, now_iso(), bids[:LEVELS], asks[:LEVELS])
+
+    def on_gap(self, venue, start_ts, end_ts):
+        """
+        Store a venue's connection gap and drop what was known of its books,
+        so every book from the new connection is written with a fresh time.
+        """
+        database.insert_gap(self.conn, StreamGap(venue, start_ts, end_ts))
+        self.gaps[venue] += 1
+        self.latest = {key: q for key, q in self.latest.items() if key[0] != venue}
+        self.written = {key: best for key, best in self.written.items() if key[0] != venue}
 
     def forget(self, venue, contract_ids):
         """
@@ -112,7 +127,7 @@ class Recorder:
         parts = []
         for venue, n in self.updates.items():
             t = self.last_update[venue]
-            parts.append(f"{venue} {n} (last {f'{time.time() - t:.0f}s ago' if t else 'never'})")
+            parts.append(f"{venue} {n} (last {f'{time.time() - t:.0f}s ago' if t else 'never'}, {self.gaps[venue]} gaps)")
         return f"tracking {len(self.latest)} books, updates {', '.join(parts)}, rows written {self.rows_written}"
 
 
@@ -139,7 +154,8 @@ class Streams:
         """
         Open a venue's connection for these contracts.
         """
-        stream = self.stream_classes[venue](list(contract_ids), lambda cid, b, a: self.on_book(venue, cid, b, a), log)
+        stream = self.stream_classes[venue](list(contract_ids), lambda cid, b, a: self.on_book(venue, cid, b, a), log,
+                                            on_gap=lambda start_ts, end_ts: self.recorder.on_gap(venue, start_ts, end_ts))
         self.streams[venue] = stream
         self.tasks[venue] = asyncio.create_task(stream.run())
 

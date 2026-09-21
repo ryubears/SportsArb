@@ -13,6 +13,7 @@ into a frame, how to apply one message, and any keepalive the feed needs.
 import asyncio
 import time
 import websockets
+from util.timeutil import now_iso
 
 RECONNECT_SECONDS = 3   # Pause between a failed connection and the next attempt.
 
@@ -28,17 +29,21 @@ class BookStream:
     """
     One websocket connection carrying every wanted contract. Runs forever
     once started, reconnecting when the connection drops, goes silent, or
-    a subclass asks for it. Subclasses set name and stale_seconds and
+    a subclass asks for it. Every failure starts a gap that ends when the
+    next connection is subscribed, reported through on_gap so the recorder
+    can mark the stretch. Subclasses set name and stale_seconds and
     implement the venue hooks below.
     """
 
     name = "venue"          # Used in log lines.
     stale_seconds = 120     # Reconnect after this long without a message that counts as data.
 
-    def __init__(self, contract_ids, on_book, log=print):
+    def __init__(self, contract_ids, on_book, log=print, on_gap=None):
         self.wanted = set(contract_ids)
         self.on_book = on_book
         self.log = log
+        self.on_gap = on_gap or (lambda start_ts, end_ts: None)    # Called with the gap's start and end times.
+        self.down_since = None      # When the current gap began, or None while connected.
         self.books = {}
         self.commands = asyncio.Queue()     # Pending ("add" or "remove", [contract ids]) changes.
 
@@ -140,6 +145,9 @@ class BookStream:
             try:
                 async with self.connect() as ws:
                     await self.subscribe(ws)
+                    if self.down_since:
+                        self.on_gap(self.down_since, now_iso())
+                        self.down_since = None
                     helpers = [asyncio.create_task(self.keepalive(ws)), asyncio.create_task(self.send_commands(ws))]
                     try:
                         await self.read(ws)
@@ -158,4 +166,6 @@ class BookStream:
             except Exception as e:
                 # A rejected handshake or a bad message must never end the stream for good.
                 self.log(f"{self.name} stream failed ({type(e).__name__}: {str(e)[:120]}), reconnecting")
+            if self.down_since is None:
+                self.down_since = now_iso()
             await asyncio.sleep(RECONNECT_SECONDS)

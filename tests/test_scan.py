@@ -79,15 +79,22 @@ def test_best_trade_uses_a_no_contract_for_yes_exposure():
     assert edge == pytest.approx(1 - 0.45 - 0.60)
 
 
-def test_best_trade_on_one_contract_never_has_an_edge():
-    # When one contract is cheapest on both sides the trade buys both sides of one book, which costs at least a dollar.
+def test_best_trade_never_uses_one_contract_for_both_legs():
+    # k_no is cheapest on both sides, so it is paired with the other contract on whichever side works out better.
     members = [member("kalshi", "k_yes", "yes"), member("kalshi", "k_no", "no")]
     quotes = {("kalshi", "k_yes"): quote("kalshi", "k_yes", "t", [[0.40, 100]], [[0.60, 100]]),
               ("kalshi", "k_no"): quote("kalshi", "k_no", "t", [[0.55, 100]], [[0.56, 100]])}
     fee_infos = {("kalshi", "k_yes"): NO_K_FEES, ("kalshi", "k_no"): NO_K_FEES}
     yes, no, edge, _, _ = scan.best_trade(members, quotes, fee_infos)
-    assert yes["contract_id"] == no["contract_id"] == "k_no"
-    assert edge == pytest.approx(-0.01)
+    assert (yes["contract_id"], no["contract_id"]) == ("k_no", "k_yes")
+    assert edge == pytest.approx(1 - 0.45 - 0.60)
+
+
+def test_best_trade_ignores_a_crossed_book_with_no_partner():
+    # A lone book whose bid is above its ask is a feed glitch, not free money.
+    members = [member("polymarket", "pm", "yes")]
+    quotes = {("polymarket", "pm"): quote("polymarket", "pm", "t", [[0.46, 100]], [[0.36, 100]])}
+    assert scan.best_trade(members, quotes, {("polymarket", "pm"): NO_PM_FEES}) is None
 
 
 def test_best_trade_returns_none_without_two_quoted_sides():
@@ -166,6 +173,18 @@ def test_scan_group_ignores_a_member_whose_quote_went_stale():
     quotes = {("polymarket", "pm"): [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
               ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:02:01+00:00", [[0.53, 100]], [[0.54, 100]])]}
     assert scan.scan_group(g, quotes, histories({("polymarket", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES})) == []
+
+
+def test_scan_group_ignores_a_quote_from_before_its_venue_dropped():
+    g = group([member("kalshi", "k"), member("polymarket", "pm")])
+    # Polymarket quoted at 12:00:00, dropped at 12:00:30, and requoted the same book at 12:01:30. Kalshi crosses it at 12:01:00.
+    quotes = {("polymarket", "pm"): [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]]),
+                                     quote("polymarket", "pm", "2026-09-19T12:01:30+00:00", [[0.48, 100]], [[0.49, 100]])],
+              ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:01:00+00:00", [[0.53, 100]], [[0.54, 100]])]}
+    fees_ = histories({("polymarket", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES})
+    assert len(scan.scan_group(g, quotes, fees_)) == 1
+    episodes = scan.scan_group(g, quotes, fees_, {"polymarket": ["2026-09-19T12:00:30+00:00"]})
+    assert [o.start_ts for o in episodes] == ["2026-09-19T12:01:30+00:00"]     # Only once Polymarket is seen again.
 
 
 def test_scan_group_ignores_time_before_two_members_have_quotes():

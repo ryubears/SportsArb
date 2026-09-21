@@ -11,6 +11,7 @@ Polymarket's field names and message formats.
 
 import asyncio
 import json
+import time
 import websockets
 from api.bookstream import BookStream
 from api.helper import get_json, float_or_none
@@ -20,7 +21,8 @@ from util.timeutil import iso
 
 GAMMA = "https://gamma-api.polymarket.com"
 WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
-WS_CHUNK = 500          # Tokens per subscribe frame. Above this the feed stops sending snapshots.
+WS_CHUNK = 50           # Tokens per subscribe frame. Each frame brings a burst of full snapshots, up to 600 KB each in a live game.
+WS_CHUNK_SECONDS = 5    # Longest wait for a chunk's snapshots before the next frame is sent.
 WS_PING_SECONDS = 10    # The feed drops idle connections unless it hears a PING.
 STALE_SECONDS = 120     # A connection that sends no book data for this long is dead, even if it still answers pings.
 
@@ -94,16 +96,11 @@ def contracts(sport, tags):
 
 # STREAMING
 
-def subscribe_frames(token_ids):
+def chunks(token_ids):
     """
-    The frames that subscribe a fresh connection to these tokens. The feed
-    only sends snapshots for up to WS_CHUNK tokens per frame, so the set is
-    split. The first frame opens the market channel and the rest add to it.
+    Split tokens into subscribe frame sized lists.
     """
-    chunks = [token_ids[i:i + WS_CHUNK] for i in range(0, len(token_ids), WS_CHUNK)]
-    frames = [{"assets_ids": chunks[0], "type": "market"}] if chunks else []
-    frames += [{"assets_ids": chunk, "operation": "subscribe"} for chunk in chunks[1:]]
-    return frames
+    return [token_ids[i:i + WS_CHUNK] for i in range(0, len(token_ids), WS_CHUNK)]
 
 
 def sorted_levels(levels, reverse):
@@ -118,22 +115,46 @@ class PolymarketBookStream(BookStream):
     Polymarket's public market channel. Books are kept as {price: size} per
     side and reported as [price, size] lists, best first. Only book data
     resets the stale clock, because a stalled feed can keep answering pings.
+
+    The feed answers a subscribe frame with a full snapshot per token, all
+    at once, and closes the connection as a slow consumer when its send
+    buffer fills before the link drains it. So tokens are subscribed one
+    chunk at a time, and the next chunk waits for the last one's snapshots.
+    The first chunk opens the channel from subscribe. The rest are queued as
+    adds, so the command helper paces them while the read loop runs.
     """
 
     name = "polymarket"
     stale_seconds = STALE_SECONDS
 
+    def reset(self):
+        self.pending = set()    # Tokens of the last subscribe frame whose snapshots have not arrived.
+
     def connect(self):
-        return websockets.connect(WS_URL, open_timeout=20, max_size=None)
+        # No receive queue limit, so a busy loop delays our timestamps instead of stalling the socket.
+        return websockets.connect(WS_URL, open_timeout=20, max_size=None, max_queue=None)
 
     async def subscribe(self, ws):
-        for frame in subscribe_frames(sorted(self.wanted)):
-            await ws.send(json.dumps(frame))
+        first, *rest = chunks(sorted(self.wanted)) or [[]]
+        self.pending = set(first)
+        await ws.send(json.dumps({"assets_ids": first, "type": "market"}))
+        if rest:
+            self.commands.put_nowait(("add", [t for chunk in rest for t in chunk]))
 
     async def send_command(self, ws, action, token_ids):
-        operation = "subscribe" if action == "add" else "unsubscribe"
-        for i in range(0, len(token_ids), WS_CHUNK):
-            await ws.send(json.dumps({"assets_ids": token_ids[i:i + WS_CHUNK], "operation": operation}))
+        for chunk in chunks(token_ids):
+            if action == "add":
+                await self.drained()
+                self.pending = set(chunk)
+            await ws.send(json.dumps({"assets_ids": chunk, "operation": "subscribe" if action == "add" else "unsubscribe"}))
+
+    async def drained(self):
+        """
+        Wait until the last chunk's snapshots have arrived, or WS_CHUNK_SECONDS have passed.
+        """
+        deadline = time.time() + WS_CHUNK_SECONDS
+        while (self.pending & self.wanted) - set(self.books) and time.time() < deadline:
+            await asyncio.sleep(0.1)
 
     async def keepalive(self, ws):
         while True:

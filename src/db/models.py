@@ -94,6 +94,16 @@ class Quote:
 
 
 @dataclass
+class StreamGap:
+    """
+    A stretch when a venue's feed was down, so its books could not be trusted.
+    """
+    venue: str
+    start_ts: str           # When the connection was lost.
+    end_ts: str | None      # When a new connection was subscribed. None while still down.
+
+
+@dataclass
 class Opportunity:
     """
     A stretch of time when one bet group could be traded for a profit after

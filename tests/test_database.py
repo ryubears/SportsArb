@@ -3,7 +3,7 @@ Round trip every table through the database module.
 """
 
 from db import database
-from db.models import Bet, BetGroup, Contract, Opportunity, Quote
+from db.models import StreamGap, Bet, BetGroup, Contract, Opportunity, Quote
 
 
 def contract(venue, contract_id, **fields):
@@ -72,6 +72,15 @@ def test_game_contracts_stay_targets_through_the_game(tmp_path):
     q = database.load_quotes(conn, "kalshi", ["k"])["k"][0]
     assert (q.bids, q.asks) == ([[0.5, 1]], [[0.6, 2]])
     assert database.load_quotes(conn, "kalshi", ["k"], since="2026-02-01")["k"] == []
+
+
+def test_gaps_are_stored_in_time_order_and_filtered_by_since(tmp_path):
+    conn = database.connect(tmp_path / "t.sqlite")
+    database.insert_gap(conn, StreamGap("polymarket", "2026-09-20T20:39:07+00:00", "2026-09-20T20:39:12+00:00"))
+    database.insert_gap(conn, StreamGap("polymarket", "2026-09-20T20:37:31+00:00", None))
+    assert [g.start_ts[11:19] for g in database.load_gaps(conn, "polymarket")] == ["20:37:31", "20:39:07"]
+    assert [g.end_ts for g in database.load_gaps(conn, "polymarket", "2026-09-20T20:38:00+00:00")] == ["2026-09-20T20:39:12+00:00"]
+    assert database.load_gaps(conn, "kalshi") == []
 
 
 def test_opportunities_are_rebuilt_each_time(tmp_path):

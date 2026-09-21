@@ -17,6 +17,7 @@ Run with:
 
 import argparse
 import fees
+from bisect import bisect_right
 from collections import defaultdict
 from db import database
 from db.models import Opportunity
@@ -26,6 +27,7 @@ from venues import SHORT_NAMES
 GAME_HOURS = 4          # A game pays out about this long after kickoff.
 TARGET_ANNUAL_PCT = 10  # The return an opportunity must beat to be worth the risk.
 MAX_QUOTE_AGE = 60      # Seconds. A member whose latest quote is older than this is left out, its book may be stale.
+                        # A quote is also left out once its venue's feed has dropped since, whatever its age.
 
 
 # PRICING
@@ -88,20 +90,40 @@ def cheapest(members, quotes, side, fee_infos):
     return best, best_cost
 
 
+def price_pair(yes, no, quotes, fee_infos):
+    """
+    Price buying the yes leg and the no leg together. Returns (yes, no, edge at top, size, profit).
+    """
+    yes_key, no_key = (yes["venue"], yes["contract_id"]), (no["venue"], no["contract_id"])
+    edge, size, profit = fill(ladder(quotes[yes_key], yes["polarity"], "yes"), ladder(quotes[no_key], no["polarity"], "no"),
+                              yes["venue"], no["venue"], {yes["venue"]: fee_infos[yes_key], no["venue"]: fee_infos[no_key]})
+    return yes, no, edge, size, profit
+
+
 def best_trade(members, quotes, fee_infos):
     """
     The cheapest yes leg and the cheapest no leg across a group's members,
-    priced together. Returns (yes member, no member, edge at top, size, profit),
-    or None when a side has no quotes.
+    priced together. The two legs are never the same contract, since buying
+    both sides of one book is not a trade between venues and a crossed book
+    would look like free money. Returns (yes member, no member, edge at top,
+    size, profit), or None when a side has no quotes on another contract.
     """
     yes, _ = cheapest(members, quotes, "yes", fee_infos)
     no, _ = cheapest(members, quotes, "no", fee_infos)
     if yes is None or no is None:
         return None
-    yes_key, no_key = (yes["venue"], yes["contract_id"]), (no["venue"], no["contract_id"])
-    edge, size, profit = fill(ladder(quotes[yes_key], yes["polarity"], "yes"), ladder(quotes[no_key], no["polarity"], "no"),
-                              yes["venue"], no["venue"], {yes["venue"]: fee_infos[yes_key], no["venue"]: fee_infos[no_key]})
-    return yes, no, edge, size, profit
+    if yes is not no:
+        return price_pair(yes, no, quotes, fee_infos)
+    # One contract is cheapest on both sides. Try the best partner for each side and keep the better pair.
+    others = [m for m in members if m is not yes]
+    candidates = []
+    other_no, _ = cheapest(others, quotes, "no", fee_infos)
+    if other_no is not None:
+        candidates.append(price_pair(yes, other_no, quotes, fee_infos))
+    other_yes, _ = cheapest(others, quotes, "yes", fee_infos)
+    if other_yes is not None:
+        candidates.append(price_pair(other_yes, no, quotes, fee_infos))
+    return max(candidates, key=lambda c: c[2]) if candidates else None
 
 
 # EPISODES
@@ -158,11 +180,20 @@ def finish(group, peak, start_ts, end_ts):
     )
 
 
-def scan_group(group, quotes_by_contract, fee_histories):
+def unseen_since(gap_starts, quote_ts, now_ts):
+    """
+    True when a feed drop started after the quote and no later than now, so the quote's book went unseen.
+    """
+    return bisect_right(gap_starts, now_ts) > bisect_right(gap_starts, quote_ts)
+
+
+def scan_group(group, quotes_by_contract, fee_histories, gap_starts=None):
     """
     Replay one group's quotes and return its episodes as Opportunities.
     quotes_by_contract and fee_histories are keyed by (venue, contract_id).
+    gap_starts maps a venue to the sorted start times of its feed drops.
     """
+    gap_starts = gap_starts or {}
     events = sorted((q for key in quotes_by_contract for q in quotes_by_contract[key]), key=lambda q: q.ts)
     latest = {}
     episodes = []
@@ -170,9 +201,10 @@ def scan_group(group, quotes_by_contract, fee_histories):
     for quote in events:
         latest[(quote.venue, quote.contract_id)] = quote
         fee_infos = {key: fee_at(fee_histories[key], quote.ts) for key in latest}
-        # A book nobody has updated for a while may be stale, for example after a venue lost its connection.
-        # A stale book cannot be traded against a fresh one.
-        fresh = {key for key, q in latest.items() if seconds_between(q.ts, quote.ts) <= MAX_QUOTE_AGE}
+        # A book nobody has updated for a while may be stale, and a book whose venue dropped its
+        # connection since the quote went unseen. Neither can be traded against a fresh one.
+        fresh = {key for key, q in latest.items()
+                 if seconds_between(q.ts, quote.ts) <= MAX_QUOTE_AGE and not unseen_since(gap_starts.get(key[0], []), q.ts, quote.ts)}
         members = [m for m in group["members"] if (m["venue"], m["contract_id"]) in fresh]
         result = best_trade(members, latest, fee_infos) if len(members) >= 2 else None
         if result is None:
@@ -216,10 +248,11 @@ def scan(conn, sport="nfl", since=None):
             ids[m["venue"]].add(m["contract_id"])
     quotes = {venue: database.load_quotes(conn, venue, wanted, since) for venue, wanted in ids.items()}
     histories = {venue: database.load_fee_history(conn, venue, wanted) for venue, wanted in ids.items()}
+    gap_starts = {venue: [gap.start_ts for gap in database.load_gaps(conn, venue, since)] for venue in ids}
     opportunities = []
     for g in groups.values():
         keys = [(m["venue"], m["contract_id"]) for m in g["members"]]
-        opportunities.extend(scan_group(g, {k: quotes[k[0]][k[1]] for k in keys}, {k: histories[k[0]][k[1]] for k in keys}))
+        opportunities.extend(scan_group(g, {k: quotes[k[0]][k[1]] for k in keys}, {k: histories[k[0]][k[1]] for k in keys}, gap_starts))
     return opportunities
 
 

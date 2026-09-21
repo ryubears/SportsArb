@@ -2,17 +2,67 @@
 Tests for the venue stream frames and book handling that need no network.
 """
 
+import asyncio
+import json
 import pytest
 from api import bookstream, kalshi, polymarket
 
 
-def test_polymarket_subscribe_frames_split_at_the_snapshot_limit():
-    tokens = [str(i) for i in range(1201)]
-    frames = polymarket.subscribe_frames(tokens)
-    assert [len(f["assets_ids"]) for f in frames] == [500, 500, 201]
-    assert frames[0]["type"] == "market" and "operation" not in frames[0]
-    assert all(f["operation"] == "subscribe" for f in frames[1:])
-    assert polymarket.subscribe_frames([]) == []
+class FakeSocket:
+    """
+    Collects the frames a stream sends.
+    """
+
+    def __init__(self):
+        self.frames = []
+
+    async def send(self, raw):
+        self.frames.append(json.loads(raw))
+
+
+def test_polymarket_subscribe_opens_with_one_chunk_and_queues_the_rest(monkeypatch):
+    monkeypatch.setattr(polymarket, "WS_CHUNK", 2)
+    stream = polymarket.PolymarketBookStream(["a", "b", "c", "d", "e"], lambda *args: None)
+    stream.reset()
+    ws = FakeSocket()
+    asyncio.run(stream.subscribe(ws))
+    assert ws.frames == [{"assets_ids": ["a", "b"], "type": "market"}]
+    assert stream.pending == {"a", "b"}
+    assert stream.commands.get_nowait() == ("add", ["c", "d", "e"])
+
+
+def test_polymarket_adds_wait_for_the_last_chunks_snapshots(monkeypatch):
+    monkeypatch.setattr(polymarket, "WS_CHUNK", 2)
+    monkeypatch.setattr(polymarket, "WS_CHUNK_SECONDS", 0.3)
+    stream = polymarket.PolymarketBookStream(["a", "b", "c", "d", "e"], lambda *args: None)
+    stream.reset()
+    stream.pending = {"a", "b"}
+    ws = FakeSocket()
+
+    async def scenario():
+        sender = asyncio.create_task(stream.send_command(ws, "add", ["c", "d", "e"]))
+        await asyncio.sleep(0.15)
+        sent_before = len(ws.frames)
+        stream.books["a"] = stream.books["b"] = {}     # The first chunk's snapshots land.
+        await asyncio.sleep(0.15)
+        sent_after = len(ws.frames)
+        await sender
+        return sent_before, sent_after
+
+    sent_before, sent_after = asyncio.run(scenario())
+    assert sent_before == 0 and sent_after == 1              # Waited for snapshots, then sent the next chunk.
+    assert ws.frames[0] == {"assets_ids": ["c", "d"], "operation": "subscribe"}
+    assert ws.frames[1] == {"assets_ids": ["e"], "operation": "subscribe"}    # Sent once the wait timed out.
+    assert stream.pending == {"e"}
+
+
+def test_polymarket_removes_are_sent_at_once(monkeypatch):
+    monkeypatch.setattr(polymarket, "WS_CHUNK", 2)
+    stream = polymarket.PolymarketBookStream(["a"], lambda *args: None)
+    stream.reset()
+    ws = FakeSocket()
+    asyncio.run(stream.send_command(ws, "remove", ["x", "y", "z"]))
+    assert ws.frames == [{"assets_ids": ["x", "y"], "operation": "unsubscribe"}, {"assets_ids": ["z"], "operation": "unsubscribe"}]
 
 
 def test_polymarket_stream_queues_only_real_changes():
