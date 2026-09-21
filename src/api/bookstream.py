@@ -13,7 +13,7 @@ into a frame, how to apply one message, and any keepalive the feed needs.
 import asyncio
 import time
 import websockets
-from util.timeutil import now_iso
+from common.timeutil import now_iso
 
 # Pause before each attempt after a failure. The first retry is immediate, since most drops are
 # one off and every second costs data. Repeated failures back off, and the last value repeats.

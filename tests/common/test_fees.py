@@ -2,8 +2,8 @@
 Tests for the fee formulas against the venues' documented examples.
 """
 
-import fees
 import pytest
+from common import fees
 
 PM_SPORTS = {"feesEnabled": True, "feeSchedule": {"rate": 0.05}}
 KALSHI_SPORTS = {"fee_type": "quadratic", "fee_multiplier": 1}

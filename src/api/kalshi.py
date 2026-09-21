@@ -17,11 +17,11 @@ import time
 import websockets
 from api.bookstream import BookStream, Reconnect
 from api.helper import get_json, float_or_none
+from common.timeutil import iso
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from db.models import Contract
 from pathlib import Path
-from util.timeutil import iso
 
 BASE = "https://api.elections.kalshi.com/trade-api/v2"
 SLEEP = 0.12   # Seconds between calls, to stay under the public rate limit.

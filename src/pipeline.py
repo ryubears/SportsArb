@@ -15,8 +15,8 @@ import argparse
 import classify
 import fetch
 import match
+from common.timeutil import now_iso
 from db import database
-from util.timeutil import now_iso
 
 
 def refresh(sport, log=print, db_path=None):

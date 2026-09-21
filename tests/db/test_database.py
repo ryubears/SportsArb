@@ -83,12 +83,17 @@ def test_gaps_are_stored_in_time_order_and_filtered_by_since(tmp_path):
     assert database.load_gaps(conn, "kalshi") == []
 
 
-def test_opportunities_are_rebuilt_each_time(tmp_path):
+def test_opportunities_append_and_an_old_source_column_is_dropped(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
     o = Opportunity("label", "spread", "yes: K buy, no: PM buy", "kalshi", "k", "polymarket", "pm", "t0", "t1", 60, "t0", 0.02, 100, 2.0, 0, 10.0, 2.04, 74.5)
-    database.replace_opportunities(conn, [o, o])
-    database.replace_opportunities(conn, [o])
-    assert conn.execute("SELECT COUNT(*) FROM opportunities").fetchone()[0] == 1
+    database.insert_opportunities(conn, [o])
+    database.insert_opportunities(conn, [o])
+    assert conn.execute("SELECT COUNT(*) FROM opportunities").fetchone()[0] == 2
+    conn.execute("ALTER TABLE opportunities ADD COLUMN source TEXT")      # As the retired replay scanner left it.
+    conn.commit()
+    conn = database.connect(tmp_path / "t.sqlite")
+    assert "source" not in [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]
+    assert conn.execute("SELECT COUNT(*) FROM opportunities").fetchone()[0] == 2
 
 
 def test_upsert_returns_fee_change_count(tmp_path):

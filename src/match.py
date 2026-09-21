@@ -12,9 +12,9 @@ Run with:
 
 import argparse
 from collections import Counter, defaultdict
+from common.timeutil import days_between, now_iso
 from db import database
 from db.models import Bet, BetGroup
-from util.timeutil import days_between, now_iso
 
 IDENTITY = ("kind", "season", "game_date", "team_a", "team_b", "subject", "line")
 

@@ -9,8 +9,8 @@ Run with:
 import argparse
 import time
 from api import kalshi, polymarket
+from common.timeutil import now_iso
 from db import database
-from util.timeutil import now_iso
 from venues import VENUES
 
 # How each of our sport keys maps onto the venues' own categories.

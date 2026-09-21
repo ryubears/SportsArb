@@ -127,7 +127,7 @@ def print_quotes(conn, now, hours):
 def print_opportunities(conn):
     total = first_value(conn, "SELECT COUNT(*) FROM opportunities")
     if not total:
-        print("\nopportunities: none stored, run scan.py")
+        print("\nopportunities: none yet, the recorder's scanner writes them")
         return
     covered = conn.execute("SELECT MIN(start_ts), MAX(end_ts) FROM opportunities").fetchone()
     print(f"\nopportunities {total:,} episodes, covering {short_time(covered[0])} to {short_time(covered[1])} UTC")

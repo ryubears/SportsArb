@@ -10,13 +10,13 @@ SQLite browser. The tables follow the pipeline in order.
     bet_groups     every contract for one bet across venues, by match.py
     quotes         order book snapshots for paired contracts, by record.py
     stream_gaps    stretches when a venue's feed was down, also by record.py
-    opportunities  stretches where a pair could be traded for a profit, by scan.py
+    opportunities  every episode the live scanner saw, by record.py
 """
 
 import sqlite3
+from common import jsonutil
 from db.models import FeeRecord, Quote, StreamGap
 from pathlib import Path
-from util import jsonutil
 
 DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "sportsarb.sqlite"
 
@@ -146,8 +146,12 @@ def migrate(conn):
     if "group_label" not in [r[1] for r in conn.execute("PRAGMA table_info(bets)")]:
         conn.execute("ALTER TABLE bets ADD COLUMN group_label TEXT")
     conn.execute("DROP TABLE IF EXISTS pairs")
-    if "scope" in [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]:
+    columns = [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]
+    if "scope" in columns:
         conn.execute("DROP TABLE opportunities")
+    if "source" in columns:
+        # Rows from the retired replay scanner stay as part of the log, without the column that told them apart.
+        conn.execute("ALTER TABLE opportunities DROP COLUMN source")
     if "tradable" in [r[1] for r in conn.execute("PRAGMA table_info(bet_groups)")]:
         conn.execute("DROP TABLE bet_groups")
     conn.executescript(SCHEMA)
@@ -388,12 +392,10 @@ def load_recording_targets(conn, sport, now, horizon, venues, game_started_after
     return targets
 
 
-def replace_opportunities(conn, opportunities):
+def insert_opportunities(conn, opportunities):
     """
-    Rebuild the table and insert the new Opportunities. Scans are deterministic, so dropping is safe.
+    Append Opportunities.
     """
-    conn.execute("DROP TABLE IF EXISTS opportunities")
-    conn.executescript(SCHEMA)
     conn.executemany("""
         INSERT INTO opportunities (label, kind, trade, yes_venue, yes_contract, no_venue, no_contract,
                                    start_ts, end_ts, seconds, peak_ts, peak_edge, peak_size, peak_profit,
@@ -403,3 +405,11 @@ def replace_opportunities(conn, opportunities):
            o.start_ts, o.end_ts, o.seconds, o.peak_ts, o.peak_edge, o.peak_size, o.peak_profit,
            o.live, o.days_held, o.return_pct, o.annual_pct) for o in opportunities])
     conn.commit()
+
+
+def load_fee_infos(conn, sport):
+    """
+    Return {(venue, contract_id): fee_info} with the fee schedule currently stored for every contract of a sport.
+    """
+    return {(venue, cid): jsonutil.parse(fee_info, {})
+            for venue, cid, fee_info in conn.execute("SELECT venue, contract_id, fee_info FROM contracts WHERE sport = ?", (sport,))}

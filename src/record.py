@@ -11,6 +11,9 @@ subscribed is stored as a stream gap, and every book from the new
 connection is written again, so the scanner can tell a quiet book from
 one that went unseen.
 
+The scanner from scan.py prices bet groups from the same in memory books
+as they change and stores every episode it finds in the opportunities table.
+
 Only futures and games within GAME_WINDOW_DAYS of kickoff are recorded.
 Every CATALOG_MINUTES the recorder refreshes the catalog in a background
 thread, fetch then classify then match, then adds the new groups' contracts to the
@@ -21,6 +24,7 @@ Run with:
     python3 src/record.py --sport nfl
     python3 src/record.py --sport nfl --seconds 120 --catalog-minutes 0
     python3 src/record.py --sport nfl --skip-refresh
+    python3 src/record.py --sport nfl --no-scan
 
 For a long run on a laptop, stop the Mac from sleeping while it runs:
     caffeinate -i -s python3 src/record.py --sport nfl
@@ -29,12 +33,13 @@ For a long run on a laptop, stop the Mac from sleeping while it runs:
 import argparse
 import asyncio
 import pipeline
+import scan
 import sys
 import time
 from api import kalshi, polymarket
+from common.timeutil import now_iso, shift
 from db import database
 from db.models import Quote, StreamGap
-from util.timeutil import now_iso, shift
 
 # Print immediately even when output goes to a file.
 sys.stdout.reconfigure(line_buffering=True)
@@ -67,11 +72,13 @@ def load_targets(conn, sport):
 
 class Recorder:
     """
-    Collects book updates from both venues and writes the changed ones on a timer.
+    Collects book updates from both venues and writes the changed ones on a
+    timer. With a scanner, every change at the top of a book is priced as it lands.
     """
 
-    def __init__(self, conn):
+    def __init__(self, conn, scanner=None):
         self.conn = conn
+        self.scanner = scanner
         self.latest = {}        # (venue, contract_id) maps to the newest Quote seen.
         self.written = {}       # (venue, contract_id) maps to the best levels last written to the database.
         self.updates = {venue: 0 for venue in STREAMS}
@@ -85,7 +92,11 @@ class Recorder:
         """
         self.updates[venue] += 1
         self.last_update[venue] = time.time()
-        self.latest[(venue, contract_id)] = Quote(venue, contract_id, now_iso(), bids[:LEVELS], asks[:LEVELS])
+        key = (venue, contract_id)
+        before = self.latest.get(key)
+        quote = self.latest[key] = Quote(venue, contract_id, now_iso(), bids[:LEVELS], asks[:LEVELS])
+        if self.scanner and (before is None or (before.bids[:1], before.asks[:1]) != (quote.bids[:1], quote.asks[:1])):
+            self.scanner.on_book(venue, contract_id, self.latest, quote.ts)
 
     def on_gap(self, venue, start_ts, end_ts):
         """
@@ -189,33 +200,40 @@ class Streams:
         self.tasks = {}
 
 
-async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True):
+async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True, with_scanner=True):
     """
     Refresh the catalog, start every stream and the flush timer, and keep the
     catalog fresh on a timer. Stops after the given seconds, or never when zero.
     A refresh that fails is logged and tried again at the next interval, so a
-    bad fetch never stops the recording.
+    bad fetch never stops the recording. With with_scanner, the live scanner
+    runs on the same books and logs a summary every scan.SUMMARY_SECONDS.
     """
-    recorder = Recorder(conn)
-    streams = Streams(recorder)
     if catalog_seconds and refresh_at_start:
         log("refreshing catalog before starting")
         try:
             log(await asyncio.to_thread(pipeline.refresh, sport, log))
         except Exception as e:
             log(f"catalog refresh failed ({e!r}), starting with the stored catalog")
+    scanner = scan.Scanner(conn, sport, log) if with_scanner else None
+    recorder = Recorder(conn, scanner)
+    streams = Streams(recorder)
     targets = load_targets(conn, sport)
     log("recording " + ", ".join(f"{len(ids)} {venue}" for venue, ids in targets.items()) + " contracts")
     if not any(targets.values()):
         log("nothing to record, run pipeline.py first")
     for venue, contract_ids in targets.items():
         streams.start(venue, contract_ids)
-    started = last_status = last_catalog = time.time()
+    started = last_status = last_catalog = last_summary = time.time()
     refresh = None      # The background catalog refresh while one is running.
     try:
         while not seconds or time.time() - started < seconds:
             await asyncio.sleep(FLUSH_SECONDS)
             recorder.flush()
+            if scanner:
+                scanner.sweep(recorder.latest, now_iso())
+                if time.time() - last_summary >= scan.SUMMARY_SECONDS:
+                    log(scanner.summary())
+                    last_summary = time.time()
             if time.time() - last_status >= STATUS_SECONDS:
                 log(recorder.status())
                 last_status = time.time()
@@ -227,12 +245,17 @@ async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True):
                 else:
                     log(f"catalog refreshed, {refresh.result()}")
                     log(f"subscriptions {streams.update(load_targets(conn, sport))}")
+                    if scanner:
+                        scanner.reload()
                 refresh, last_catalog = None, time.time()
     finally:
         if refresh is not None:
             refresh.cancel()
         await streams.stop_all()
         recorder.flush()
+        if scanner:
+            scanner.sweep({}, now_iso())
+            log(scanner.summary())
         log(recorder.status())
 
 
@@ -246,9 +269,10 @@ if __name__ == "__main__":
                     help="minutes between catalog refreshes, 0 means never refresh")
     ap.add_argument("--skip-refresh", action="store_true",
                     help="start streaming at once from the stored catalog instead of refreshing first")
+    ap.add_argument("--no-scan", action="store_true", help="record only, without the live scanner")
     args = ap.parse_args()
     with database.connect() as conn:
         try:
-            asyncio.run(run(conn, args.sport, args.seconds, args.catalog_minutes * 60, not args.skip_refresh))
+            asyncio.run(run(conn, args.sport, args.seconds, args.catalog_minutes * 60, not args.skip_refresh, not args.no_scan))
         except KeyboardInterrupt:
             print("stopped")

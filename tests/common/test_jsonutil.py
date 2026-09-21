@@ -2,7 +2,7 @@
 Tests for the shared JSON helpers.
 """
 
-from util import jsonutil
+from common import jsonutil
 
 
 def test_parse_returns_default_for_missing_text():

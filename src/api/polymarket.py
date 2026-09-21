@@ -15,9 +15,9 @@ import time
 import websockets
 from api.bookstream import BookStream
 from api.helper import get_json, float_or_none
+from common import jsonutil
+from common.timeutil import iso
 from db.models import Contract
-from util import jsonutil
-from util.timeutil import iso
 
 GAMMA = "https://gamma-api.polymarket.com"
 WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"

@@ -2,7 +2,7 @@
 Tests for the shared time helpers.
 """
 
-from util import timeutil
+from common import timeutil
 
 
 def test_iso_accepts_each_venue_format():

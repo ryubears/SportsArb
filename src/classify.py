@@ -12,12 +12,12 @@ Run with:
 import argparse
 import re
 from collections import Counter
+from common import jsonutil
+from common.timeutil import eastern_date
 from datetime import datetime
 from db import database
 from db.models import Bet
 from pathlib import Path
-from util import jsonutil
-from util.timeutil import eastern_date
 
 ALIAS_FILE = Path(__file__).resolve().parent / "aliases.json"
 

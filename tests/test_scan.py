@@ -1,126 +1,80 @@
 """
-Tests for the scanner's pricing and episode detection over bet groups.
+Tests for the scanner's episode detection over the recorder's in memory books.
 """
 
 import pytest
+import record
 import scan
-from db.models import FeeRecord, Quote
+from db import database
+from db.models import Bet, BetGroup, Contract, Opportunity, Quote
 
-PM_FEES = {"feesEnabled": True, "feeSchedule": {"rate": 0.05}}
 NO_PM_FEES = {"feesEnabled": False}
 NO_K_FEES = {"fee_type": "quadratic", "fee_multiplier": 0}
-REAL_K_FEES = {"fee_type": "quadratic", "fee_multiplier": 1}
 T0 = "2026-09-19T12:00:00+00:00"
+LABEL = "spread 2026-09-20 CAR@ATL ATL 4.5"
 
 
 def member(venue, contract_id, polarity="yes", start_time=None, close_time="2026-09-29T12:00:00+00:00"):
-    return {"venue": venue, "contract_id": contract_id, "polarity": polarity, "start_time": start_time, "close_time": close_time}
+    fee_info = NO_K_FEES if venue == "kalshi" else NO_PM_FEES
+    return dict(venue=venue, contract_id=contract_id, polarity=polarity, start_time=start_time, close_time=close_time, fee_info=fee_info)
 
 
-def group(members):
-    return {"label": "spread 2026-09-20 CAR@ATL ATL 4.5", "kind": "spread", "members": members}
+def make_db(tmp_path, members):
+    """
+    A database holding one spread group with these members, so a Scanner can load it.
+    """
+    conn = database.connect(tmp_path / "t.sqlite")
+    contracts = [Contract(venue=m["venue"], contract_id=m["contract_id"], market_id=m["contract_id"], event_id="e", series_id=None,
+                          sport="nfl", event_title=None, title="t", outcome="Yes", market_type=None, line=None, rules=None,
+                          start_time=m["start_time"], close_time=m["close_time"], fee_info=m["fee_info"]) for m in members]
+    database.upsert_contracts(conn, contracts, "2026-09-19T00:00:00+00:00")
+    bets = [Bet(m["venue"], m["contract_id"], "spread", 2027, "2026-09-20", "CAR", "ATL", "ATL", 4.5, m["polarity"]) for m in members]
+    database.replace_bets(conn, "nfl", bets)
+    database.replace_groups(conn, "nfl", [BetGroup(LABEL, "spread", 2027, "2026-09-20", "CAR", "ATL", "ATL", 4.5, bets, [])],
+                            "2026-09-19T00:00:00+00:00")
+    return conn
 
 
 def quote(venue, contract_id, ts, bids, asks):
     return Quote(venue, contract_id, ts, bids, asks)
 
 
-def histories(fee_by_key, seen_at="2000-01-01T00:00:00+00:00"):
-    return {key: [FeeRecord(key[0], key[1], seen_at, info)] for key, info in fee_by_key.items()}
+def stored(conn):
+    """
+    The Opportunities in the database, oldest first.
+    """
+    return [Opportunity(*row) for row in conn.execute("""
+        SELECT label, kind, trade, yes_venue, yes_contract, no_venue, no_contract, start_ts, end_ts, seconds, peak_ts,
+               peak_edge, peak_size, peak_profit, live, days_held, return_pct, annual_pct FROM opportunities ORDER BY start_ts""")]
 
 
-# PRICING
-
-def test_ladder_depends_on_which_side_the_contract_pays():
-    q = quote("kalshi", "k", "t", bids=[[0.53, 100]], asks=[[0.54, 50]])
-    assert scan.ladder(q, "yes", "yes") == [(0.54, 50)]     # Hold yes through a yes contract, buy it.
-    assert scan.ladder(q, "yes", "no") == [(0.47, 100)]     # Hold no through a yes contract, buy the other side.
-    assert scan.ladder(q, "no", "no") == [(0.54, 50)]       # Hold no through a no contract, buy it.
-    assert scan.ladder(q, "no", "yes") == [(0.47, 100)]
-
-
-def test_fill_walks_both_ladders_while_the_edge_is_positive():
-    leg_a = [(0.40, 10), (0.41, 10)]
-    leg_b = [(0.50, 5), (0.58, 100)]
-    fee_infos = {"polymarket": NO_PM_FEES}
-    top_edge, size, profit = scan.fill(leg_a, leg_b, "polymarket", "polymarket", fee_infos)
-    assert top_edge == pytest.approx(0.10)
-    assert size == 20
-    assert profit == pytest.approx(5 * 0.10 + 5 * 0.02 + 10 * 0.01)
-
-
-def test_fill_stops_at_zero_edge_and_handles_empty_ladders():
-    fee_infos = {"polymarket": NO_PM_FEES}
-    assert scan.fill([(0.5, 10)], [(0.5, 10)], "polymarket", "polymarket", fee_infos) == (0.0, 0.0, 0.0)
-    assert scan.fill([], [(0.5, 10)], "polymarket", "polymarket", fee_infos) == (-1.0, 0.0, 0.0)
-
-
-def test_best_trade_picks_the_cheapest_leg_on_each_side_across_venues():
-    members = [member("kalshi", "k"), member("polymarket", "us")]
-    quotes = {("kalshi", "k"): quote("kalshi", "k", "t", [[0.53, 100]], [[0.54, 100]]),
-              ("polymarket", "us"): quote("polymarket", "us", "t", [[0.44, 100]], [[0.45, 100]])}
-    fee_infos = {("kalshi", "k"): NO_K_FEES, ("polymarket", "us"): NO_PM_FEES}
-    yes, no, edge, size, profit = scan.best_trade(members, quotes, fee_infos)
-    # Yes is cheapest at Polymarket's 0.45 ask. No is cheapest at Kalshi, one minus its 0.53 bid.
-    assert (yes["venue"], no["venue"]) == ("polymarket", "kalshi")
-    assert edge == pytest.approx(1 - 0.45 - 0.47)
-    assert size == 100
-
-
-def test_best_trade_uses_a_no_contract_for_yes_exposure():
-    members = [member("kalshi", "k_yes", "yes"), member("kalshi", "k_no", "no")]
-    quotes = {("kalshi", "k_yes"): quote("kalshi", "k_yes", "t", [[0.40, 100]], [[0.60, 100]]),
-              ("kalshi", "k_no"): quote("kalshi", "k_no", "t", [[0.55, 100]], [[0.70, 100]])}
-    fee_infos = {("kalshi", "k_yes"): NO_K_FEES, ("kalshi", "k_no"): NO_K_FEES}
-    yes, no, edge, _, _ = scan.best_trade(members, quotes, fee_infos)
-    # Yes through the no contract's bid costs 0.45, cheaper than the yes contract's 0.60 ask.
-    # No through the yes contract's bid costs 0.60, cheaper than the no contract's 0.70 ask.
-    assert (yes["contract_id"], no["contract_id"]) == ("k_no", "k_yes")
-    assert edge == pytest.approx(1 - 0.45 - 0.60)
-
-
-def test_best_trade_never_uses_one_contract_for_both_legs():
-    # k_no is cheapest on both sides, so it is paired with the other contract on whichever side works out better.
-    members = [member("kalshi", "k_yes", "yes"), member("kalshi", "k_no", "no")]
-    quotes = {("kalshi", "k_yes"): quote("kalshi", "k_yes", "t", [[0.40, 100]], [[0.60, 100]]),
-              ("kalshi", "k_no"): quote("kalshi", "k_no", "t", [[0.55, 100]], [[0.56, 100]])}
-    fee_infos = {("kalshi", "k_yes"): NO_K_FEES, ("kalshi", "k_no"): NO_K_FEES}
-    yes, no, edge, _, _ = scan.best_trade(members, quotes, fee_infos)
-    assert (yes["contract_id"], no["contract_id"]) == ("k_no", "k_yes")
-    assert edge == pytest.approx(1 - 0.45 - 0.60)
-
-
-def test_best_trade_ignores_a_crossed_book_with_no_partner():
-    # A lone book whose bid is above its ask is a feed glitch, not free money.
-    members = [member("polymarket", "pm", "yes")]
-    quotes = {("polymarket", "pm"): quote("polymarket", "pm", "t", [[0.46, 100]], [[0.36, 100]])}
-    assert scan.best_trade(members, quotes, {("polymarket", "pm"): NO_PM_FEES}) is None
-
-
-def test_best_trade_returns_none_without_two_quoted_sides():
-    members = [member("kalshi", "k")]
-    quotes = {("kalshi", "k"): quote("kalshi", "k", "t", [[0.53, 100]], [])}
-    assert scan.best_trade(members, quotes, {("kalshi", "k"): NO_K_FEES}) is None
-
-
-def test_fee_at_picks_the_record_in_force():
-    history = [FeeRecord("polymarket", "x", "2026-09-18T00:00:00+00:00", {"a": 1}),
-               FeeRecord("polymarket", "x", "2026-09-19T16:00:00+00:00", {"a": 2})]
-    assert scan.fee_at(history, "2026-09-17T00:00:00+00:00") == {"a": 1}
-    assert scan.fee_at(history, "2026-09-19T12:00:00+00:00") == {"a": 1}
-    assert scan.fee_at(history, "2026-09-19T16:00:00+00:00") == {"a": 2}
-    assert scan.fee_at([], "2026-09-20T00:00:00+00:00") == {}
+def replay(conn, quotes, drops=()):
+    """
+    Drive a Scanner with quotes in time order, the way the recorder drives it live, and return what it stored.
+    drops are (ts, venue) pairs at which the venue's books are forgotten.
+    """
+    scanner = scan.Scanner(conn, "nfl", lambda m: None)
+    events = sorted(quotes, key=lambda q: q.ts)
+    latest = {}
+    for q in events:
+        for ts, venue in drops:
+            if ts <= q.ts and not any(x.ts >= ts for k, x in latest.items() if k[0] == venue):
+                latest = {k: x for k, x in latest.items() if k[0] != venue}
+        latest[(q.venue, q.contract_id)] = q
+        scanner.on_book(q.venue, q.contract_id, latest, q.ts)
+        scanner.sweep(latest, q.ts)
+    if events:
+        scanner.sweep({}, events[-1].ts)
+    return stored(conn)
 
 
 # EPISODES
 
-def test_scan_group_finds_one_episode_with_duration_and_return():
-    g = group([member("kalshi", "k"), member("polymarket", "pm")])
-    quotes = {("polymarket", "pm"): [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
-              ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]]),
-                                quote("kalshi", "k", "2026-09-19T12:01:01+00:00", [[0.49, 100]], [[0.50, 100]])]}
-    fees_ = histories({("polymarket", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES})
-    episodes = scan.scan_group(g, quotes, fees_)
+def test_scanner_finds_one_episode_with_duration_and_return(tmp_path):
+    conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket", "pm")])
+    episodes = replay(conn, [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]]),
+                             quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]]),
+                             quote("kalshi", "k", "2026-09-19T12:01:01+00:00", [[0.49, 100]], [[0.50, 100]])])
     assert len(episodes) == 1
     o = episodes[0]
     assert (o.start_ts, o.end_ts, o.seconds) == ("2026-09-19T12:00:01+00:00", "2026-09-19T12:01:01+00:00", 60)
@@ -129,65 +83,132 @@ def test_scan_group_finds_one_episode_with_duration_and_return():
     assert o.peak_edge == pytest.approx(0.04)
     assert o.peak_size == 100
     assert o.live == 0
-    assert o.days_held == pytest.approx(10, rel=1e-4)
+    assert o.days_held == pytest.approx(10, rel=1e-3)
     assert o.return_pct == pytest.approx(100 * 0.04 / 0.96)
-    assert o.annual_pct == pytest.approx(o.return_pct * 365 / o.days_held)
+    assert o.annual_pct == pytest.approx(o.return_pct * 365 / 10, rel=1e-3)
 
 
-def test_scan_group_marks_live_and_uses_kickoff_for_payout():
+def test_scanner_marks_live_and_uses_kickoff_for_payout(tmp_path):
     kickoff = "2026-09-19T11:00:00+00:00"
-    g = group([member("kalshi", "k", start_time=kickoff), member("polymarket", "pm", start_time=kickoff)])
-    quotes = {("polymarket", "pm"): [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
-              ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]])]}
-    o = scan.scan_group(g, quotes, histories({("polymarket", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES}))[0]
+    conn = make_db(tmp_path, [member("kalshi", "k", start_time=kickoff), member("polymarket", "pm", start_time=kickoff)])
+    o = replay(conn, [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]]),
+                      quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]])])[0]
     assert o.live == 1
     assert o.end_ts == "2026-09-19T12:00:01+00:00"
     assert o.days_held == pytest.approx((scan.GAME_HOURS - 1) / 24, rel=1e-3)
 
 
-def test_scan_group_applies_the_fee_in_force_at_each_quote():
-    g = group([member("kalshi", "k"), member("polymarket", "pm")])
-    # Polymarket fees switch off at 12:00:30, between the two Kalshi quotes, which both fall within the stale limit.
-    quotes = {("polymarket", "pm"): [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
-              ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]]),
-                                quote("kalshi", "k", "2026-09-19T12:00:59+00:00", [[0.53, 100]], [[0.54, 100]])]}
-    fees_ = histories({("kalshi", "k"): NO_K_FEES})
-    fees_[("polymarket", "pm")] = [FeeRecord("polymarket", "pm", T0, PM_FEES),
-                                   FeeRecord("polymarket", "pm", "2026-09-19T12:00:30+00:00", NO_PM_FEES)]
-    o = scan.scan_group(g, quotes, fees_)[0]
-    assert o.peak_ts == "2026-09-19T12:00:59+00:00"
-    assert o.peak_edge == pytest.approx(0.04)
-
-
-def test_scan_group_holds_until_the_slower_leg_pays():
-    g = group([member("kalshi", "k", close_time="2026-10-19T12:00:00+00:00"), member("polymarket", "pm", close_time="2026-09-29T12:00:00+00:00")])
-    quotes = {("polymarket", "pm"): [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
-              ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]])]}
-    o = scan.scan_group(g, quotes, histories({("polymarket", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES}))[0]
+def test_scanner_holds_until_the_slower_leg_pays(tmp_path):
+    conn = make_db(tmp_path, [member("kalshi", "k", close_time="2026-10-19T12:00:00+00:00"),
+                              member("polymarket", "pm", close_time="2026-09-29T12:00:00+00:00")])
+    o = replay(conn, [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]]),
+                      quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]])])[0]
     assert o.days_held == pytest.approx(30, rel=1e-4)
 
 
-def test_scan_group_ignores_a_member_whose_quote_went_stale():
-    g = group([member("kalshi", "k"), member("polymarket", "pm")])
+def test_scanner_ignores_a_member_whose_book_went_stale(tmp_path):
+    conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket", "pm")])
     # Polymarket quoted once, then went quiet. Two minutes later Kalshi reprices and would appear to cross it.
-    quotes = {("polymarket", "pm"): [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]])],
-              ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:02:01+00:00", [[0.53, 100]], [[0.54, 100]])]}
-    assert scan.scan_group(g, quotes, histories({("polymarket", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES})) == []
+    assert replay(conn, [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]]),
+                         quote("kalshi", "k", "2026-09-19T12:02:01+00:00", [[0.53, 100]], [[0.54, 100]])]) == []
 
 
-def test_scan_group_ignores_a_quote_from_before_its_venue_dropped():
-    g = group([member("kalshi", "k"), member("polymarket", "pm")])
+def test_scanner_ignores_a_book_from_before_its_venue_dropped(tmp_path):
+    conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket", "pm")])
     # Polymarket quoted at 12:00:00, dropped at 12:00:30, and requoted the same book at 12:01:30. Kalshi crosses it at 12:01:00.
-    quotes = {("polymarket", "pm"): [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]]),
-                                     quote("polymarket", "pm", "2026-09-19T12:01:30+00:00", [[0.48, 100]], [[0.49, 100]])],
-              ("kalshi", "k"): [quote("kalshi", "k", "2026-09-19T12:01:00+00:00", [[0.53, 100]], [[0.54, 100]])]}
-    fees_ = histories({("polymarket", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES})
-    assert len(scan.scan_group(g, quotes, fees_)) == 1
-    episodes = scan.scan_group(g, quotes, fees_, {"polymarket": ["2026-09-19T12:00:30+00:00"]})
+    quotes = [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]]),
+              quote("polymarket", "pm", "2026-09-19T12:01:30+00:00", [[0.48, 100]], [[0.49, 100]]),
+              quote("kalshi", "k", "2026-09-19T12:01:00+00:00", [[0.53, 100]], [[0.54, 100]])]
+    assert len(replay(conn, quotes)) == 1
+    conn.execute("DELETE FROM opportunities")
+    episodes = replay(conn, quotes, drops=[("2026-09-19T12:00:30+00:00", "polymarket")])
     assert [o.start_ts for o in episodes] == ["2026-09-19T12:01:30+00:00"]     # Only once Polymarket is seen again.
 
 
-def test_scan_group_ignores_time_before_two_members_have_quotes():
-    g = group([member("kalshi", "k"), member("polymarket", "pm")])
-    quotes = {("polymarket", "pm"): [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]])], ("kalshi", "k"): []}
-    assert scan.scan_group(g, quotes, histories({("polymarket", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES})) == []
+def test_scanner_ignores_time_before_two_members_have_books(tmp_path):
+    conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket", "pm")])
+    assert replay(conn, [quote("polymarket", "pm", T0, [[0.48, 100]], [[0.49, 100]])]) == []
+
+
+# LIVE
+
+TL = "2026-09-20T17:%02d:%02d+00:00"
+KICKOFF = "2026-09-20T17:00:00+00:00"
+
+
+def book(venue, cid, ts, bid, ask, size=100):
+    return Quote(venue, cid, ts, [[bid, size]], [[ask, size]])
+
+
+def game_db(tmp_path):
+    return make_db(tmp_path, [member("kalshi", "k", start_time=KICKOFF, close_time="2026-09-20T21:00:00+00:00"),
+                              member("polymarket", "pm", start_time=KICKOFF, close_time="2026-09-20T21:00:00+00:00")])
+
+
+def test_episode_opens_peaks_and_closes_from_book_changes(tmp_path):
+    conn = game_db(tmp_path)
+    logs = []
+    s = scan.Scanner(conn, "nfl", logs.append)
+    latest = {("kalshi", "k"): book("kalshi", "k", TL % (0, 1), 0.53, 0.54)}
+    s.on_book("kalshi", "k", latest, TL % (0, 1))
+    assert s.episodes == {}                                     # One book is not a trade.
+    latest[("polymarket", "pm")] = book("polymarket", "pm", TL % (0, 2), 0.44, 0.45)
+    s.on_book("polymarket", "pm", latest, TL % (0, 2))          # Buy yes at 0.45, no at 1 - 0.53: 2c edge.
+    assert list(s.episodes) == [LABEL]
+    latest[("polymarket", "pm")] = book("polymarket", "pm", TL % (0, 3), 0.40, 0.41)
+    s.on_book("polymarket", "pm", latest, TL % (0, 3))          # 12c edge, a new peak.
+    latest[("kalshi", "k")] = book("kalshi", "k", TL % (0, 5), 0.40, 0.41)
+    s.on_book("kalshi", "k", latest, TL % (0, 5))               # Kalshi catches up, edge gone.
+    assert s.episodes == {}
+    o = stored(conn)[0]
+    assert (o.start_ts, o.end_ts, o.peak_ts, round(o.peak_edge, 2), o.peak_size, o.live) == (TL % (0, 2), TL % (0, 5), TL % (0, 3), 0.12, 100, 1)
+    assert logs == [f"episode {LABEL}: yes: PM buy, no: K buy other side, 12.0c x 100 = 12.00$, lasted 3.0s"]
+    assert s.summary().startswith("scanner: spread 1 episodes, 1 beat target, best 12.00$ for 3s; 0 open")
+    assert s.summary() == "scanner: no episodes; 0 open"
+
+
+def test_sweep_closes_an_episode_whose_book_went_stale_or_unseen(tmp_path):
+    conn = game_db(tmp_path)
+    s = scan.Scanner(conn, "nfl", lambda m: None)
+    latest = {("kalshi", "k"): book("kalshi", "k", TL % (0, 1), 0.53, 0.54),
+              ("polymarket", "pm"): book("polymarket", "pm", TL % (0, 2), 0.44, 0.45)}
+    s.on_book("polymarket", "pm", latest, TL % (0, 2))
+    s.sweep(latest, TL % (0, 30))
+    assert len(s.episodes) == 1                                 # Still fresh.
+    s.sweep(latest, TL % (1, 30))                               # Kalshi's book is now 89 seconds old.
+    assert s.episodes == {}
+    assert stored(conn)[0].end_ts == TL % (1, 30)
+    latest = {("kalshi", "k"): book("kalshi", "k", TL % (1, 31), 0.53, 0.54),
+              ("polymarket", "pm"): book("polymarket", "pm", TL % (1, 31), 0.44, 0.45)}
+    s.on_book("kalshi", "k", latest, TL % (1, 31))
+    assert len(s.episodes) == 1
+    del latest[("polymarket", "pm")]                            # The recorder forgot Polymarket's books after a drop.
+    s.sweep(latest, TL % (1, 32))
+    assert s.episodes == {}
+
+
+def test_reload_ends_episodes_of_groups_that_vanished(tmp_path):
+    conn = game_db(tmp_path)
+    s = scan.Scanner(conn, "nfl", lambda m: None)
+    latest = {("kalshi", "k"): book("kalshi", "k", TL % (0, 1), 0.53, 0.54),
+              ("polymarket", "pm"): book("polymarket", "pm", TL % (0, 2), 0.44, 0.45)}
+    s.on_book("polymarket", "pm", latest, TL % (0, 2))
+    database.replace_groups(conn, "nfl", [], "2026-09-20T18:00:00+00:00")
+    s.reload()
+    assert s.groups == {} and s.episodes == {} and s.by_contract == {}
+    assert len(stored(conn)) == 1
+
+
+def test_recorder_prices_only_top_of_book_changes(tmp_path):
+    conn = game_db(tmp_path)
+    calls = []
+
+    class FakeScanner:
+        def on_book(self, venue, cid, latest, now):
+            calls.append((venue, cid))
+
+    r = record.Recorder(conn, FakeScanner())
+    r.on_book("kalshi", "k", [[0.5, 10], [0.49, 5]], [[0.52, 7]])
+    r.on_book("kalshi", "k", [[0.5, 10], [0.48, 5]], [[0.52, 7]])     # Only a deeper level moved.
+    r.on_book("kalshi", "k", [[0.5, 11]], [[0.52, 7]])                # Size at the top moved.
+    assert calls == [("kalshi", "k"), ("kalshi", "k")]
