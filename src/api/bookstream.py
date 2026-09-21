@@ -15,7 +15,16 @@ import time
 import websockets
 from util.timeutil import now_iso
 
-RECONNECT_SECONDS = 3   # Pause between a failed connection and the next attempt.
+# Pause before each attempt after a failure. The first retry is immediate, since most drops are
+# one off and every second costs data. Repeated failures back off, and the last value repeats.
+RECONNECT_SECONDS = (0, 1, 3, 10)
+
+
+def reconnect_pause(failures):
+    """
+    Seconds to wait before the next attempt after this many failures in a row.
+    """
+    return RECONNECT_SECONDS[min(failures, len(RECONNECT_SECONDS)) - 1]
 
 
 class Reconnect(Exception):
@@ -44,6 +53,7 @@ class BookStream:
         self.log = log
         self.on_gap = on_gap or (lambda start_ts, end_ts: None)    # Called with the gap's start and end times.
         self.down_since = None      # When the current gap began, or None while connected.
+        self.failures = 0           # Failures in a row, reset once a connection is subscribed.
         self.books = {}
         self.commands = asyncio.Queue()     # Pending ("add" or "remove", [contract ids]) changes.
 
@@ -148,6 +158,7 @@ class BookStream:
                     if self.down_since:
                         self.on_gap(self.down_since, now_iso())
                         self.down_since = None
+                    self.failures = 0
                     helpers = [asyncio.create_task(self.keepalive(ws)), asyncio.create_task(self.send_commands(ws))]
                     try:
                         await self.read(ws)
@@ -168,4 +179,5 @@ class BookStream:
                 self.log(f"{self.name} stream failed ({type(e).__name__}: {str(e)[:120]}), reconnecting")
             if self.down_since is None:
                 self.down_since = now_iso()
-            await asyncio.sleep(RECONNECT_SECONDS)
+            self.failures += 1
+            await asyncio.sleep(reconnect_pause(self.failures))

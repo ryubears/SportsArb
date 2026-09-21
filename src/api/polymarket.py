@@ -22,7 +22,7 @@ from util.timeutil import iso
 GAMMA = "https://gamma-api.polymarket.com"
 WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 WS_CHUNK = 50           # Tokens per subscribe frame. Each frame brings a burst of full snapshots, up to 600 KB each in a live game.
-WS_CHUNK_SECONDS = 5    # Longest wait for a chunk's snapshots before the next frame is sent.
+WS_CHUNK_SECONDS = 2    # Longest wait for a chunk's snapshots before the next frame is sent.
 WS_PING_SECONDS = 10    # The feed drops idle connections unless it hears a PING.
 STALE_SECONDS = 120     # A connection that sends no book data for this long is dead, even if it still answers pings.
 
@@ -154,7 +154,7 @@ class PolymarketBookStream(BookStream):
         """
         deadline = time.time() + WS_CHUNK_SECONDS
         while (self.pending & self.wanted) - set(self.books) and time.time() < deadline:
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.02)
 
     async def keepalive(self, ws):
         while True:

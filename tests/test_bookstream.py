@@ -106,7 +106,7 @@ def run_until_connections_used(stream):
 
 
 def test_loop_subscribes_and_reconnects_on_silence_gap_and_drop(monkeypatch):
-    monkeypatch.setattr(bookstream, "RECONNECT_SECONDS", 0)
+    monkeypatch.setattr(bookstream, "RECONNECT_SECONDS", (0,))
     first = FakeConnection(["a"], then="hang")                          # Goes silent after one message.
     second = FakeConnection(["b", "gap"], then="hang")                  # Asks for a reconnect.
     third = FakeConnection(["c"], then=ConnectionResetError("peer reset"))   # Drops.
@@ -121,6 +121,11 @@ def test_loop_subscribes_and_reconnects_on_silence_gap_and_drop(monkeypatch):
     assert stream.resets >= 4
     assert stream.books == {}                                            # Cleared before the last connection.
     assert len(stream.gaps) == 3 and all(start <= end for start, end in stream.gaps)   # One gap per failure, closed on resubscribe.
+    assert stream.failures == 1                                          # Reset by each resubscribe, then the last connection stalled.
+
+
+def test_reconnect_pause_is_immediate_first_and_backs_off_after():
+    assert [bookstream.reconnect_pause(n) for n in (1, 2, 3, 4, 5, 9)] == [0, 1, 3, 10, 10, 10]
 
 
 class RefusingConnection:
@@ -136,7 +141,7 @@ class RefusingConnection:
 
 
 def test_loop_survives_a_rejected_handshake(monkeypatch):
-    monkeypatch.setattr(bookstream, "RECONNECT_SECONDS", 0)
+    monkeypatch.setattr(bookstream, "RECONNECT_SECONDS", (0,))
     stream = ScriptedStream(["x"], [RefusingConnection(), FakeConnection(["a"], then="hang")])
     run_until_connections_used(stream)
     assert stream.logs[0] == "scripted stream failed (ValueError: server rejected WebSocket connection: HTTP 403), reconnecting"
@@ -144,7 +149,7 @@ def test_loop_survives_a_rejected_handshake(monkeypatch):
 
 
 def test_keepalive_replies_do_not_reset_the_stale_clock(monkeypatch):
-    monkeypatch.setattr(bookstream, "RECONNECT_SECONDS", 0)
+    monkeypatch.setattr(bookstream, "RECONNECT_SECONDS", (0,))
     chatty = FakeConnection(["keepalive"] * 50, then="hang")
     stream = ScriptedStream(["x"], [chatty, FakeConnection([], then="hang")])
     run_until_connections_used(stream)
@@ -152,7 +157,7 @@ def test_keepalive_replies_do_not_reset_the_stale_clock(monkeypatch):
 
 
 def test_changes_made_while_running_are_sent_and_pending_ones_dropped_on_connect(monkeypatch):
-    monkeypatch.setattr(bookstream, "RECONNECT_SECONDS", 0)
+    monkeypatch.setattr(bookstream, "RECONNECT_SECONDS", (0,))
     conn = FakeConnection([], then="hang")
     stream = ScriptedStream(["x"], [conn])
     stream.add(["y"])       # Queued before the first connection, so it must not be sent as a command.
