@@ -153,7 +153,7 @@ class Trade:
     profit: float = 0.0     # Dollars locked in on the matched contracts, after fees.
     hedge: str = "none"     # How the mismatch was flattened, in words.
     hedge_pnl: float = 0.0  # Dollars gained or lost by flattening, after fees.
-    status: str = "sent"    # 'filled', 'partial', or 'failed'.
+    status: str = "sent"    # 'sent' while in flight, then 'filled', 'partial', or 'failed'.
     settled_at: str | None = None   # When both legs had resolved and the payouts were booked.
     id: int | None = None   # The row id once stored.
 

@@ -14,7 +14,8 @@ one that went unseen.
 The scanner from scan.py prices pairs from the same in memory books
 as they change and stores every episode it finds in the opportunities
 table. The paper executor from execute.py trades the scanner's signals
-against the same books and stores every trade in the trades table.
+against the same books, settle.py pays the trades out when their contracts
+resolve, and rebalance.py keeps the two paper balances level.
 
 Only futures and games within GAME_WINDOW_DAYS of kickoff are recorded.
 Every CATALOG_MINUTES the recorder refreshes the catalog in a background
@@ -41,7 +42,7 @@ from catalog import pipeline
 from common.timeutil import now_iso, shift
 from db import database
 from db.models import Quote, Gap
-from live import execute, scan
+from live import balances, execute, rebalance, scan, settle
 
 # Print immediately even when output goes to a file.
 sys.stdout.reconfigure(line_buffering=True)
@@ -218,7 +219,11 @@ async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True, with
         except Exception as e:
             log(f"catalog refresh failed ({e!r}), starting with the stored catalog")
     recorder = Recorder(conn)
-    executor = execute.PaperExecutor(conn, lambda: recorder.latest, log) if with_scanner and with_trading else None
+    trading = with_scanner and with_trading
+    cash = balances.Balances(conn) if trading else None
+    executor = execute.PaperExecutor(conn, cash, lambda: recorder.latest, log) if trading else None
+    settler = settle.Settler(conn, cash, log) if trading else None
+    rebalancer = rebalance.Rebalancer(conn, cash, log) if trading else None
     scanner = scan.Scanner(conn, sport, log, executor.signal if executor else None) if with_scanner else None
     recorder.scanner = scanner
     streams = Streams(recorder)
@@ -236,12 +241,16 @@ async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True, with
             recorder.flush()
             if scanner:
                 scanner.sweep(recorder.latest, now_iso())
-                if executor:
-                    executor.tick(now_iso(), time.time())
+                if trading:
+                    settler.tick(now_iso(), time.time())
+                    rebalancer.tick(now_iso())
                 if time.time() - last_summary >= scan.SUMMARY_SECONDS:
                     log(scanner.summary())
-                    if executor:
+                    if trading:
                         log(executor.summary())
+                        log(settler.summary())
+                        if rebalancer.summary():
+                            log(rebalancer.summary())
                     last_summary = time.time()
             if time.time() - last_status >= STATUS_SECONDS:
                 log(recorder.status())
@@ -265,10 +274,11 @@ async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True, with
         if scanner:
             scanner.sweep({}, now_iso())
             log(scanner.summary())
-        if executor:
+        if trading:
             if executor.tasks:
                 await asyncio.gather(*executor.tasks, return_exceptions=True)
             log(executor.summary())
+            log(settler.summary())
         log(recorder.status())
 
 

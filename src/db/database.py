@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS trades (
     profit         REAL NOT NULL,   -- Dollars locked in on the matched contracts, after fees.
     hedge          TEXT NOT NULL,   -- How a mismatch was flattened, in words.
     hedge_pnl      REAL NOT NULL,   -- Dollars gained or lost by flattening, after fees.
-    status         TEXT NOT NULL,   -- 'filled', 'partial', or 'failed'.
+    status         TEXT NOT NULL,   -- 'sent' while in flight, then 'filled', 'partial', or 'failed'.
     pays_at        TEXT NOT NULL,
     settled_at     TEXT             -- When both legs had resolved and the payouts were booked.
 );
@@ -459,11 +459,26 @@ def insert_trade(conn, t):
     return t.id
 
 
+def update_trade(conn, t):
+    """
+    Write a Trade's fills, holdings, and outcome once it is done.
+    """
+    conn.execute("""
+        UPDATE trades SET yes_filled = ?, yes_cost = ?, yes_latency_ms = ?, yes_fill_ts = ?,
+                          no_filled = ?, no_cost = ?, no_latency_ms = ?, no_fill_ts = ?,
+                          yes_held = ?, no_held = ?, matched = ?, profit = ?, hedge = ?, hedge_pnl = ?, status = ?
+        WHERE id = ?
+    """, (t.yes_filled, t.yes_cost, t.yes_latency_ms, t.yes_fill_ts, t.no_filled, t.no_cost, t.no_latency_ms, t.no_fill_ts,
+          t.yes_held, t.no_held, t.matched, t.profit, t.hedge, t.hedge_pnl, t.status, t.id))
+    conn.commit()
+
+
 def load_open_trades(conn):
     """
-    Trades that still hold contracts and have not settled.
+    Trades that are done, still hold contracts, and have not settled.
     """
-    return [Trade(**dict(r)) for r in conn.execute("SELECT * FROM trades WHERE settled_at IS NULL AND yes_held + no_held > 0 ORDER BY id")]
+    return [Trade(**dict(r)) for r in conn.execute(
+        "SELECT * FROM trades WHERE status != 'sent' AND settled_at IS NULL AND yes_held + no_held > 0 ORDER BY id")]
 
 
 def settle_trade(conn, trade_id, settled_at, settlements):
