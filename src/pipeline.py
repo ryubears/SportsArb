@@ -1,11 +1,10 @@
 """
 Refresh the catalog. Fetch every venue, classify the contracts into bets,
-and group them across venues, in one call.
+and pair them across venues, in one call.
 
-The recorder runs this on a timer so new games enter the bet groups and
-fee schedule changes land in the fee history while it is recording. The
-same steps are available one at a time as fetch.py, classify.py, and
-match.py, which also print their full reports.
+The recorder runs this on a timer so new games enter the pairs while it
+is recording. The same steps are available one at a time as fetch.py,
+classify.py, and match.py, which also print their full reports.
 
 Run with:
     python3 src/pipeline.py --sport nfl
@@ -28,14 +27,14 @@ def refresh(sport, log=print, db_path=None):
         parts = []
         for venue in fetch.VENUES:
             contracts = fetch.fetch_contracts(venue, sport)
-            fee_records = database.upsert_contracts(conn, contracts, now_iso())
-            parts.append(f"{venue} {len(contracts)} contracts, {fee_records} fee records")
+            database.upsert_contracts(conn, contracts, now_iso())
+            parts.append(f"{venue} {len(contracts)} contracts")
             log(f"fetched {parts[-1]}")
         bets, _ = classify.classify_all(database.load_contracts(conn, sport=sport))
         database.replace_bets(conn, sport, bets)
-        groups, _ = match.match(database.load_bets(conn, sport))
-        database.replace_groups(conn, sport, groups, now_iso())
-        parts.append(f"{len(bets)} bets, {len(groups)} groups")
+        pairs, _ = match.match(database.load_bets(conn, sport))
+        database.replace_pairs(conn, sport, pairs, now_iso())
+        parts.append(f"{len(bets)} bets, {len(pairs)} pairs")
     return ", ".join(parts)
 
 

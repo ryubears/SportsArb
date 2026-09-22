@@ -1,10 +1,11 @@
 """
-Group bets that describe the same thing into bet groups.
+Pair up the bets that describe the same thing on both venues.
 
 Two bets are the same when kind, season, game date, teams, subject, and
-line all agree. Every contract with that identity, on any venue, joins one
-BetGroup. The scanner then looks across a group's members for the cheapest
-way to hold yes and the cheapest way to hold no.
+line all agree. Every contract with that identity joins one Pair, which
+only exists when both venues list the bet. The scanner then looks across
+a pair's members for the cheapest way to hold yes and the cheapest way
+to hold no.
 
 Run with:
     python3 src/match.py --sport nfl
@@ -14,15 +15,15 @@ import argparse
 from collections import Counter, defaultdict
 from common.timeutil import days_between, now_iso
 from db import database
-from db.models import Bet, BetGroup
+from db.models import Bet, Pair
 
 IDENTITY = ("kind", "season", "game_date", "team_a", "team_b", "subject", "line")
 
-# Flag a group when its members stop trading more than this many days apart.
+# Flag a pair when its members stop trading more than this many days apart.
 CLOSE_GAP_LIMIT_DAYS = 60
 
 # Known rule differences by kind, from reading the venues' rules text.
-# Every group of that kind carries the note so nobody has to reread the rules.
+# Every pair of that kind carries the note so nobody has to reread the rules.
 KIND_NOTES = {
     "game_winner": "Ties pay half on both venues. If the game does not start within 48 hours, Kalshi settles at a fair price while Polymarket US waits up to two weeks for a rescheduled game.",
     "spread": "If the game does not start within 48 hours, Kalshi settles at a fair price. Polymarket US waits up to two weeks for a rescheduled game.",
@@ -53,7 +54,7 @@ def label(bet):
 
 def flags(rows):
     """
-    Things a reviewer should check about a group, from its members' close times and kind.
+    Things a reviewer should check about a pair, from its members' close times and kind.
     """
     found = []
     closes = sorted(r["close_time"] for r in rows if r["close_time"])
@@ -64,48 +65,48 @@ def flags(rows):
     return found
 
 
-def make_group(rows):
+def make_pair(rows):
     """
-    Build a BetGroup from bet rows that share an identity.
+    Build a Pair from bet rows that share an identity.
     """
     first = rows[0]
     members = [Bet(r["venue"], r["contract_id"], r["kind"], r["season"], r["game_date"], r["team_a"], r["team_b"],
                    r["subject"], r["line"], r["polarity"], label(first)) for r in rows]
-    return BetGroup(label=label(first), kind=first["kind"], season=first["season"], game_date=first["game_date"],
-                    team_a=first["team_a"], team_b=first["team_b"], subject=first["subject"], line=first["line"],
-                    members=members, flags=flags(rows))
+    return Pair(label=label(first), kind=first["kind"], season=first["season"], game_date=first["game_date"],
+                team_a=first["team_a"], team_b=first["team_b"], subject=first["subject"], line=first["line"],
+                members=members, flags=flags(rows))
 
 
 def match(bets):
     """
-    Group bet rows by identity. Returns the groups that span at least two
-    venues, and the bets that were left out because their group has one venue.
+    Pair up bet rows by identity. Returns the pairs both venues list, and
+    the bets that were left out because only one venue lists them.
     """
     by_identity = defaultdict(list)
     for bet in bets:
         by_identity[identity(bet)].append(bet)
-    groups, unmatched = [], []
+    pairs, unmatched = [], []
     for rows in by_identity.values():
         if len({r["venue"] for r in rows}) >= 2:
-            groups.append(make_group(rows))
+            pairs.append(make_pair(rows))
         else:
             unmatched.extend(rows)
-    return groups, unmatched
+    return pairs, unmatched
 
 
-def report(groups, unmatched):
+def report(pairs, unmatched):
     """
-    Print groups per kind and venue set, how many carry a close time flag, and unmatched bets per venue and kind.
+    Print pairs per kind and venue set, how many carry a close time flag, and unmatched bets per venue and kind.
     """
-    counts = Counter((g.kind, " + ".join(g.venues)) for g in groups)
-    flagged = Counter((g.kind, " + ".join(g.venues)) for g in groups if any(f.startswith("close times") for f in g.flags))
+    counts = Counter((p.kind, " + ".join(p.venues)) for p in pairs)
+    flagged = Counter((p.kind, " + ".join(p.venues)) for p in pairs if any(f.startswith("close times") for f in p.flags))
     members = Counter()
-    for g in groups:
-        members[(g.kind, " + ".join(g.venues))] += len(g.members)
-    print(f"{'kind':18s} {'venues':40s} {'groups':>6s} {'contracts':>9s} {'close flag':>11s}")
+    for p in pairs:
+        members[(p.kind, " + ".join(p.venues))] += len(p.members)
+    print(f"{'kind':18s} {'venues':40s} {'pairs':>6s} {'contracts':>9s} {'close flag':>11s}")
     for key, n in sorted(counts.items()):
         print(f"  {key[0]:16s} {key[1]:40s} {n:6d} {members[key]:9d} {flagged[key]:11d}")
-    print(f"total groups {len(groups)} with {sum(len(g.members) for g in groups)} contracts")
+    print(f"total pairs {len(pairs)} with {sum(len(p.members) for p in pairs)} contracts")
     left = Counter((b["venue"], b["kind"]) for b in unmatched)
     print("bets on a single venue only")
     for (venue, kind), n in sorted(left.items()):
@@ -115,11 +116,11 @@ def report(groups, unmatched):
 # MAIN
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Group classified bets across venues.")
+    ap = argparse.ArgumentParser(description="Pair classified bets across venues.")
     ap.add_argument("--sport", default="nfl")
     args = ap.parse_args()
     with database.connect() as conn:
         bets = database.load_bets(conn, args.sport)
-        groups, unmatched = match(bets)
-        database.replace_groups(conn, args.sport, groups, now_iso())
-    report(groups, unmatched)
+        pairs, unmatched = match(bets)
+        database.replace_pairs(conn, args.sport, pairs, now_iso())
+    report(pairs, unmatched)

@@ -1,8 +1,8 @@
 """
-Find arbitrage episodes in bet groups as the recorder's books change.
+Find arbitrage episodes in pairs as the recorder's books change.
 
 Whenever a member's book changes, the scanner finds the cheapest way to
-hold yes and the cheapest way to hold no across the group's members, on
+hold yes and the cheapest way to hold no across the pair's members, on
 any venues, and prices buying both. An episode is a stretch where that
 net edge stays above zero after fees. Each episode becomes an Opportunity
 with its two legs, its duration, its peak edge, how many contracts could
@@ -39,11 +39,11 @@ def resolution_time(start_time, close_time):
     return close_time
 
 
-def finish(group, peak, start_ts, end_ts):
+def finish(pair, peak, start_ts, end_ts):
     """
     Turn an in progress episode into an Opportunity. peak holds the best moment seen so far.
     """
-    start_time = next((m["start_time"] for m in group["members"] if m["start_time"]), None)
+    start_time = next((m["start_time"] for m in pair["members"] if m["start_time"]), None)
     live = 1 if start_time and peak["ts"] >= start_time else 0
     # Capital is locked until the slower of the two legs pays, so the later resolution counts.
     pays_at = max((t for t in (resolution_time(leg["start_time"], leg["close_time"]) for leg in (peak["yes"], peak["no"])) if t),
@@ -51,8 +51,8 @@ def finish(group, peak, start_ts, end_ts):
     days_held = max(seconds_between(peak["ts"], pays_at) / 86400, 1 / 24) if pays_at else None
     return_pct = 100 * peak["edge"] / (1 - peak["edge"])
     return Opportunity(
-        label=group["label"],
-        kind=group["kind"],
+        label=pair["label"],
+        kind=pair["kind"],
         trade=trade_words(peak["yes"], peak["no"]),
         yes_venue=peak["yes"]["venue"],
         yes_contract=peak["yes"]["contract_id"],
@@ -74,8 +74,8 @@ def finish(group, peak, start_ts, end_ts):
 
 class Scanner:
     """
-    Tracks episodes for the bet groups of a sport from a map of the newest
-    books, keyed by (venue, contract_id). Only the groups a contract belongs
+    Tracks episodes for the pairs of a sport from a map of the newest
+    books, keyed by (venue, contract_id). Only the pairs a contract belongs
     to are priced when its book changes. A member is left out while its book
     is older than MAX_QUOTE_AGE or missing from the map, which is how the
     recorder says a venue's books went unseen. Groups and fee schedules come
@@ -87,29 +87,29 @@ class Scanner:
         self.conn = conn
         self.sport = sport
         self.log = log
-        self.episodes = {}                  # label maps to {"start_ts", "peak", "group"} while an edge is open.
+        self.episodes = {}                  # label maps to {"start_ts", "peak", "pair"} while an edge is open.
         self.finished = []                  # Opportunities ended since the last summary.
         self.reload()
 
     def reload(self):
         """
-        Load the groups and fee schedules again, ending open episodes of groups that are gone.
+        Load the pairs and fee schedules again, ending open episodes of pairs that are gone.
         """
         self.fee_infos = defaultdict(dict, database.load_fee_infos(self.conn, self.sport))
-        self.groups = database.load_groups(self.conn, self.sport)
+        self.pairs = database.load_pairs(self.conn, self.sport)
         by_contract = defaultdict(list)
-        for label, group in self.groups.items():
-            for m in group["members"]:
+        for label, pair in self.pairs.items():
+            for m in pair["members"]:
                 by_contract[(m["venue"], m["contract_id"])].append(label)
         self.by_contract = dict(by_contract)
-        for label in [label for label in self.episodes if label not in self.groups]:
+        for label in [label for label in self.episodes if label not in self.pairs]:
             self.close(label, now_iso())
 
-    def price(self, group, latest, now):
+    def price(self, pair, latest, now):
         """
-        The best trade across the group's members whose books are fresh, or None.
+        The best trade across the pair's members whose books are fresh, or None.
         """
-        members = [m for m in group["members"]
+        members = [m for m in pair["members"]
                    if (m["venue"], m["contract_id"]) in latest
                    and seconds_between(latest[(m["venue"], m["contract_id"])].ts, now) <= MAX_QUOTE_AGE]
         if len(members) < 2:
@@ -118,7 +118,7 @@ class Scanner:
 
     def on_book(self, venue, contract_id, latest, now):
         """
-        Price every group this contract belongs to.
+        Price every pair this contract belongs to.
         """
         for label in self.by_contract.get((venue, contract_id), ()):
             self.update(label, latest, now)
@@ -132,15 +132,15 @@ class Scanner:
 
     def update(self, label, latest, now):
         """
-        Open, extend, or end the episode for one group from the current books.
+        Open, extend, or end the episode for one pair from the current books.
         """
-        group = self.groups[label]
-        result = self.price(group, latest, now)
+        pair = self.pairs[label]
+        result = self.price(pair, latest, now)
         episode = self.episodes.get(label)
         if result is not None and result[2] > 0:
             yes, no, edge, size, profit = result
             if episode is None:
-                episode = self.episodes[label] = {"start_ts": now, "peak": None, "group": group}
+                episode = self.episodes[label] = {"start_ts": now, "peak": None, "pair": pair}
             if episode["peak"] is None or edge > episode["peak"]["edge"]:
                 episode["peak"] = {"yes": yes, "no": no, "ts": now, "edge": edge, "size": size, "profit": profit}
         elif episode is not None:
@@ -151,7 +151,7 @@ class Scanner:
         End an episode, store it, and log it when it was worth something.
         """
         episode = self.episodes.pop(label)
-        o = finish(episode["group"], episode["peak"], episode["start_ts"], now)
+        o = finish(episode["pair"], episode["peak"], episode["start_ts"], now)
         database.insert_opportunities(self.conn, [o])
         self.finished.append(o)
         if o.peak_profit >= LOG_PROFIT_DOLLARS:

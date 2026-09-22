@@ -2,7 +2,7 @@
 Print a summary of everything in the database.
 
 Row counts and time ranges for each table, recording health for the
-recent window, bet groups by kind, and the opportunities found so far. Reads
+recent window, pairs by kind, and the opportunities found so far. Reads
 only, so it is safe to run while the recorder is writing.
 
 This script opens the database file directly rather than importing the
@@ -63,7 +63,7 @@ def print_storage(conn):
     print(f"database {DB_PATH}")
     print(f"size {size / 1e6:,.0f} MB")
     # Listed in pipeline order rather than alphabetically.
-    tables = ["fee_history", "contracts", "bets", "bet_groups", "quotes", "stream_gaps", "opportunities"]
+    tables = ["contracts", "bets", "pairs", "quotes", "stream_gaps", "opportunities"]
     print_table("tables", ("table", "rows"), [(t, f"{first_value(conn, f'SELECT COUNT(*) FROM {t}'):,}") for t in tables])
 
 
@@ -73,20 +73,15 @@ def print_contracts(conn, now):
         FROM contracts GROUP BY venue, sport ORDER BY venue, sport""", (now,))
     print_table("contracts", ("venue", "sport", "total", "open", "last fetched"),
                 [(v, s, f"{n:,}", f"{o:,}", short_time(t)) for v, s, n, o, t in body])
-    changed = first_value(conn, "SELECT COUNT(*) FROM (SELECT 1 FROM fee_history GROUP BY venue, contract_id HAVING COUNT(*) > 1)")
-    latest = first_value(conn, "SELECT MAX(seen_at) FROM fee_history")
-    print(f"  fee history: {first_value(conn, 'SELECT COUNT(*) FROM fee_history'):,} records, "
-          f"{changed:,} contracts with a schedule change, latest {short_time(latest)}")
 
 
-def print_groups(conn):
+def print_pairs(conn):
     body = query_rows(conn, """
         SELECT kind, venues, COUNT(*), SUM(contracts), SUM(game_date IS NOT NULL)
-        FROM bet_groups WHERE venue_count >= 2 GROUP BY kind, venues
-        ORDER BY kind, venue_count DESC, COUNT(*) DESC, SUM(contracts) DESC, SUM(game_date IS NOT NULL) DESC""")
-    print_table("bet groups", ("kind", "venues", "groups", "contracts", "games"), body)
-    print(f"  total {first_value(conn, 'SELECT COUNT(*) FROM bet_groups WHERE venue_count >= 2'):,}, "
-          f"last matched {short_time(first_value(conn, 'SELECT MAX(matched_at) FROM bet_groups'))}")
+        FROM pairs GROUP BY kind, venues ORDER BY kind, COUNT(*) DESC""")
+    print_table("pairs", ("kind", "venues", "pairs", "contracts", "games"), body)
+    print(f"  total {first_value(conn, 'SELECT COUNT(*) FROM pairs'):,}, "
+          f"last matched {short_time(first_value(conn, 'SELECT MAX(matched_at) FROM pairs'))}")
 
 
 def print_quotes(conn, now, hours):
@@ -159,6 +154,6 @@ if __name__ == "__main__":
     conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=30)
     print_storage(conn)
     print_contracts(conn, now)
-    print_groups(conn)
+    print_pairs(conn)
     print_quotes(conn, now, args.hours)
     print_opportunities(conn)

@@ -6,7 +6,7 @@ import pytest
 import record
 import scan
 from db import database
-from db.models import Bet, BetGroup, Contract, Opportunity, Quote
+from db.models import Bet, Pair, Contract, Opportunity, Quote
 
 NO_PM_FEES = {"feeCoefficient": 0}
 NO_K_FEES = {"fee_type": "quadratic", "fee_multiplier": 0}
@@ -21,7 +21,7 @@ def member(venue, contract_id, polarity="yes", start_time=None, close_time="2026
 
 def make_db(tmp_path, members):
     """
-    A database holding one spread group with these members, so a Scanner can load it.
+    A database holding one spread pair with these members, so a Scanner can load it.
     """
     conn = database.connect(tmp_path / "t.sqlite")
     contracts = [Contract(venue=m["venue"], contract_id=m["contract_id"], market_id=m["contract_id"], event_id="e", series_id=None,
@@ -30,7 +30,7 @@ def make_db(tmp_path, members):
     database.upsert_contracts(conn, contracts, "2026-09-19T00:00:00+00:00")
     bets = [Bet(m["venue"], m["contract_id"], "spread", 2027, "2026-09-20", "CAR", "ATL", "ATL", 4.5, m["polarity"]) for m in members]
     database.replace_bets(conn, "nfl", bets)
-    database.replace_groups(conn, "nfl", [BetGroup(LABEL, "spread", 2027, "2026-09-20", "CAR", "ATL", "ATL", 4.5, bets, [])],
+    database.replace_pairs(conn, "nfl", [Pair(LABEL, "spread", 2027, "2026-09-20", "CAR", "ATL", "ATL", 4.5, bets, [])],
                             "2026-09-19T00:00:00+00:00")
     return conn
 
@@ -187,15 +187,15 @@ def test_sweep_closes_an_episode_whose_book_went_stale_or_unseen(tmp_path):
     assert s.episodes == {}
 
 
-def test_reload_ends_episodes_of_groups_that_vanished(tmp_path):
+def test_reload_ends_episodes_of_pairs_that_vanished(tmp_path):
     conn = game_db(tmp_path)
     s = scan.Scanner(conn, "nfl", lambda m: None)
     latest = {("kalshi", "k"): book("kalshi", "k", TL % (0, 1), 0.53, 0.54),
               ("polymarket_us", "pm"): book("polymarket_us", "pm", TL % (0, 2), 0.44, 0.45)}
     s.on_book("polymarket_us", "pm", latest, TL % (0, 2))
-    database.replace_groups(conn, "nfl", [], "2026-09-20T18:00:00+00:00")
+    database.replace_pairs(conn, "nfl", [], "2026-09-20T18:00:00+00:00")
     s.reload()
-    assert s.groups == {} and s.episodes == {} and s.by_contract == {}
+    assert s.pairs == {} and s.episodes == {} and s.by_contract == {}
     assert len(stored(conn)) == 1
 
 

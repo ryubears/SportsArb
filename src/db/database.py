@@ -4,10 +4,9 @@ SQLite storage for SportsArb.
 One database file holds every table, which makes it easy to open in any
 SQLite browser. The tables follow the pipeline in order.
 
-    fee_history    each contract's fee schedule over time, written by fetch.py
-    contracts      what each venue lists, also by fetch.py
+    contracts      what each venue lists, written by fetch.py
     bets           each contract restated in venue neutral terms, by classify.py
-    bet_groups     every contract for one bet across venues, by match.py
+    pairs          the contracts on both venues for one bet, by match.py
     quotes         order book snapshots for paired contracts, by record.py
     stream_gaps    stretches when a venue's feed was down, also by record.py
     opportunities  every episode the live scanner saw, by record.py
@@ -15,20 +14,12 @@ SQLite browser. The tables follow the pipeline in order.
 
 import sqlite3
 from common import jsonutil
-from db.models import FeeRecord, Quote, StreamGap
+from db.models import Quote, StreamGap
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "sportsarb.sqlite"
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS fee_history (
-    venue        TEXT NOT NULL,
-    contract_id  TEXT NOT NULL,
-    seen_at      TEXT NOT NULL,   -- The fetch time that first showed this schedule, ISO 8601 UTC.
-    fee_info     TEXT NOT NULL,   -- JSON, same shape as contracts.fee_info.
-    PRIMARY KEY (venue, contract_id, seen_at)
-);
-
 CREATE TABLE IF NOT EXISTS contracts (
     venue        TEXT NOT NULL,   -- 'kalshi' or 'polymarket_us'.
     contract_id  TEXT NOT NULL,   -- Kalshi market ticker, or Polymarket US market slug.
@@ -63,11 +54,11 @@ CREATE TABLE IF NOT EXISTS bets (
     subject      TEXT,            -- The team the contract is about, when there is one.
     line         REAL,            -- Spread margin, total points, or wins threshold.
     polarity     TEXT NOT NULL,   -- 'yes' or 'no', see models.Bet.
-    group_label  TEXT,            -- The bet group this bet belongs to, set by match.py.
+    pair_label   TEXT,            -- The pair this bet belongs to, set by match.py.
     PRIMARY KEY (venue, contract_id)
 );
 
-CREATE TABLE IF NOT EXISTS bet_groups (
+CREATE TABLE IF NOT EXISTS pairs (
     label        TEXT PRIMARY KEY,   -- The bet's identity in words, for example 'spread 2026-09-20 CAR@ATL ATL 4.5'.
     kind         TEXT NOT NULL,
     season       INTEGER,
@@ -77,9 +68,8 @@ CREATE TABLE IF NOT EXISTS bet_groups (
     subject      TEXT,
     line         REAL,
     venues       TEXT NOT NULL,      -- Comma separated venues with a member contract.
-    venue_count  INTEGER NOT NULL,
     contracts    INTEGER NOT NULL,   -- Member contracts.
-    flags        TEXT NOT NULL,      -- JSON list of things to check before trusting the group.
+    flags        TEXT NOT NULL,      -- JSON list of things to check before trusting the pair.
     matched_at   TEXT NOT NULL
 );
 
@@ -100,7 +90,7 @@ CREATE TABLE IF NOT EXISTS stream_gaps (
 );
 
 CREATE TABLE IF NOT EXISTS opportunities (
-    label          TEXT NOT NULL,   -- The bet group's label.
+    label          TEXT NOT NULL,   -- The pair's label.
     kind           TEXT NOT NULL,
     trade          TEXT NOT NULL,   -- The two legs in words.
     yes_venue      TEXT NOT NULL,   -- Where the yes exposure was cheapest at the peak.
@@ -141,68 +131,28 @@ def connect(db_path=None):
 def migrate(conn):
     """
     Bring older databases up to the current schema. Derived tables are
-    dropped when their columns changed, since a match or scan rebuilds them.
+    dropped when their columns changed, since a match rebuilds them.
     """
-    if "group_label" not in [r[1] for r in conn.execute("PRAGMA table_info(bets)")]:
-        conn.execute("ALTER TABLE bets ADD COLUMN group_label TEXT")
-    conn.execute("DROP TABLE IF EXISTS pairs")
+    bet_columns = [r[1] for r in conn.execute("PRAGMA table_info(bets)")]
+    if "group_label" in bet_columns:
+        conn.execute("ALTER TABLE bets RENAME COLUMN group_label TO pair_label")
+    elif "pair_label" not in bet_columns:
+        conn.execute("ALTER TABLE bets ADD COLUMN pair_label TEXT")
+    conn.execute("DROP TABLE IF EXISTS bet_groups")
+    conn.execute("DROP TABLE IF EXISTS fee_history")
     columns = [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]
     if "scope" in columns:
         conn.execute("DROP TABLE opportunities")
     if "source" in columns:
         # Rows from the retired replay scanner stay as part of the log, without the column that told them apart.
         conn.execute("ALTER TABLE opportunities DROP COLUMN source")
-    if "tradable" in [r[1] for r in conn.execute("PRAGMA table_info(bet_groups)")]:
-        conn.execute("DROP TABLE bet_groups")
     conn.executescript(SCHEMA)
-
-
-def add_fee_records(conn, contracts, fetched_at):
-    """
-    Append a fee history row for each contract whose fee_info differs from what is stored.
-    Returns how many rows were added.
-    """
-    stored = {}
-    for c in contracts:
-        row = conn.execute("SELECT fee_info FROM contracts WHERE venue = ? AND contract_id = ?",
-                           (c.venue, c.contract_id)).fetchone()
-        stored[(c.venue, c.contract_id)] = row[0] if row else None
-    changed = [FeeRecord(c.venue, c.contract_id, fetched_at, c.fee_info)
-               for c in contracts if jsonutil.dump(c.fee_info) != stored[(c.venue, c.contract_id)]]
-    insert_fee_records(conn, changed)
-    return len(changed)
-
-
-def insert_fee_records(conn, records):
-    """
-    Append FeeRecords.
-    """
-    conn.executemany(
-        "INSERT OR REPLACE INTO fee_history (venue, contract_id, seen_at, fee_info) VALUES (?,?,?,?)",
-        [(r.venue, r.contract_id, r.seen_at, jsonutil.dump(r.fee_info)) for r in records],
-    )
-    conn.commit()
-
-
-def load_fee_history(conn, venue, contract_ids):
-    """
-    Return {contract_id: [FeeRecord, ...]} in time order for the given contracts.
-    """
-    out = {cid: [] for cid in contract_ids}
-    for cid, seen_at, fee_info in conn.execute(
-            "SELECT contract_id, seen_at, fee_info FROM fee_history WHERE venue = ? ORDER BY seen_at", (venue,)):
-        if cid in out:
-            out[cid].append(FeeRecord(venue, cid, seen_at, jsonutil.parse(fee_info, {})))
-    return out
 
 
 def upsert_contracts(conn, contracts, fetched_at):
     """
     Insert new contracts or refresh existing ones. first_seen is kept as is.
-    A fee history row is added for every contract whose fee schedule is new or
-    changed, and the number of such rows is returned.
     """
-    fee_records = add_fee_records(conn, contracts, fetched_at)
     rows = []
     for c in contracts:
         rows.append((
@@ -233,7 +183,6 @@ def upsert_contracts(conn, contracts, fetched_at):
             last_seen = excluded.last_seen
     """, rows)
     conn.commit()
-    return fee_records
 
 
 def load_contracts(conn, sport=None, venue=None):
@@ -261,10 +210,10 @@ def replace_bets(conn, sport, bets):
     """, (sport,))
     conn.executemany("""
         INSERT INTO bets (venue, contract_id, kind, season, game_date,
-                          team_a, team_b, subject, line, polarity, group_label)
+                          team_a, team_b, subject, line, polarity, pair_label)
         VALUES (?,?,?,?,?,?,?,?,?,?,?)
     """, [(b.venue, b.contract_id, b.kind, b.season, b.game_date,
-           b.team_a, b.team_b, b.subject, b.line, b.polarity, b.group_label) for b in bets])
+           b.team_a, b.team_b, b.subject, b.line, b.polarity, b.pair_label) for b in bets])
     conn.commit()
 
 
@@ -284,41 +233,40 @@ def load_bets(conn, sport, venue=None):
     return [dict(r) for r in conn.execute(sql, params)]
 
 
-def replace_groups(conn, sport, groups, matched_at):
+def replace_pairs(conn, sport, pairs, matched_at):
     """
-    Drop every group belonging to the sport, then insert the new ones and
-    write each member's group label on its bet row.
+    Drop every pair belonging to the sport, then insert the new ones and
+    write each member's pair label on its bet row.
     """
     conn.execute("""
-        UPDATE bets SET group_label = NULL WHERE (venue, contract_id) IN
+        UPDATE bets SET pair_label = NULL WHERE (venue, contract_id) IN
             (SELECT venue, contract_id FROM contracts WHERE sport = ?)
     """, (sport,))
-    conn.execute("DELETE FROM bet_groups WHERE label NOT IN (SELECT group_label FROM bets WHERE group_label IS NOT NULL)")
+    conn.execute("DELETE FROM pairs WHERE label NOT IN (SELECT pair_label FROM bets WHERE pair_label IS NOT NULL)")
     conn.executemany("""
-        INSERT OR REPLACE INTO bet_groups (label, kind, season, game_date, team_a, team_b, subject, line,
-                                           venues, venue_count, contracts, flags, matched_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-    """, [(g.label, g.kind, g.season, g.game_date, g.team_a, g.team_b, g.subject, g.line,
-           ",".join(g.venues), len(g.venues), len(g.members), jsonutil.dump(g.flags), matched_at) for g in groups])
-    conn.executemany("UPDATE bets SET group_label = ? WHERE venue = ? AND contract_id = ?",
-                     [(g.label, m.venue, m.contract_id) for g in groups for m in g.members])
+        INSERT OR REPLACE INTO pairs (label, kind, season, game_date, team_a, team_b, subject, line,
+                                      venues, contracts, flags, matched_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+    """, [(p.label, p.kind, p.season, p.game_date, p.team_a, p.team_b, p.subject, p.line,
+           ",".join(p.venues), len(p.members), jsonutil.dump(p.flags), matched_at) for p in pairs])
+    conn.executemany("UPDATE bets SET pair_label = ? WHERE venue = ? AND contract_id = ?",
+                     [(p.label, m.venue, m.contract_id) for p in pairs for m in p.members])
     conn.commit()
 
 
-def load_groups(conn, sport, min_venues=2):
+def load_pairs(conn, sport):
     """
-    Return {label: group row dict with a 'members' list of bet row dicts} for one sport.
-    Only groups spanning at least min_venues venues are returned.
+    Return {label: pair row dict with a 'members' list of bet row dicts} for one sport.
     """
-    groups = {}
-    for r in conn.execute("SELECT * FROM bet_groups WHERE venue_count >= ?", (min_venues,)):
-        groups[r["label"]] = dict(r, members=[])
+    pairs = {}
+    for r in conn.execute("SELECT * FROM pairs"):
+        pairs[r["label"]] = dict(r, members=[])
     for r in conn.execute("""
         SELECT b.*, c.start_time, c.close_time FROM bets b JOIN contracts c USING (venue, contract_id)
-        WHERE c.sport = ? AND b.group_label IS NOT NULL""", (sport,)):
-        if r["group_label"] in groups:
-            groups[r["group_label"]]["members"].append(dict(r))
-    return groups
+        WHERE c.sport = ? AND b.pair_label IS NOT NULL""", (sport,)):
+        if r["pair_label"] in pairs:
+            pairs[r["pair_label"]]["members"].append(dict(r))
+    return pairs
 
 
 def insert_quotes(conn, quotes):
@@ -371,9 +319,9 @@ def load_gaps(conn, venue, since=None):
 
 def load_recording_targets(conn, sport, now, horizon, venues, game_started_after):
     """
-    Return {venue: [contract_id, ...]} for every contract in a group that
-    spans two or more venues, is still open, and is either a future or a
-    game starting before the horizon. A game contract also counts as open
+    Return {venue: [contract_id, ...]} for every contract in a pair that
+    is still open and is either a future or a game starting before the
+    horizon. A game contract also counts as open
     while its game may still be in play, meaning it started after
     game_started_after, in case a venue's close time is the kickoff even
     though its markets trade through the game.
@@ -383,10 +331,10 @@ def load_recording_targets(conn, sport, now, horizon, venues, game_started_after
         rows = conn.execute("""
             SELECT c.contract_id FROM contracts c
             JOIN bets b ON b.venue = c.venue AND b.contract_id = c.contract_id
-            JOIN bet_groups g ON g.label = b.group_label
+            JOIN pairs p ON p.label = b.pair_label
             WHERE c.venue = ? AND c.sport = ?
               AND (c.close_time IS NULL OR c.close_time > ? OR (c.start_time IS NOT NULL AND c.start_time > ?))
-              AND (b.game_date IS NULL OR b.game_date <= ?) AND g.venue_count >= 2
+              AND (b.game_date IS NULL OR b.game_date <= ?)
         """, (venue, sport, now, game_started_after, horizon[:10]))
         targets[venue] = [r[0] for r in rows]
     return targets

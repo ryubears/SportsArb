@@ -11,14 +11,13 @@ subscribed is stored as a stream gap, and every book from the new
 connection is written again, so the scanner can tell a quiet book from
 one that went unseen.
 
-The scanner from scan.py prices bet groups from the same in memory books
+The scanner from scan.py prices pairs from the same in memory books
 as they change and stores every episode it finds in the opportunities table.
 
 Only futures and games within GAME_WINDOW_DAYS of kickoff are recorded.
 Every CATALOG_MINUTES the recorder refreshes the catalog in a background
-thread, fetch then classify then match, then adds the new groups' contracts to the
-live connections and removes the closed ones, without reconnecting. Fee
-schedule changes reach the fee history through the same refresh.
+thread, fetch then classify then match, then adds the new pairs' contracts to the
+live connections and removes the closed ones, without reconnecting.
 
 Run with:
     python3 src/record.py --sport nfl

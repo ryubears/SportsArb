@@ -6,18 +6,6 @@ from dataclasses import dataclass
 
 
 @dataclass
-class FeeRecord:
-    """
-    The fee schedule a contract carried from a moment on. A new record is
-    written each time a fetch sees the schedule change.
-    """
-    venue: str
-    contract_id: str
-    seen_at: str            # The fetch time that first showed this schedule, ISO 8601 UTC.
-    fee_info: dict
-
-
-@dataclass
 class Contract:
     """
     One tradable Yes side outcome, described the same way for every venue.
@@ -55,15 +43,15 @@ class Bet:
     subject: str | None     # The team the contract is about, when there is one.
     line: float | None      # Spread margin, total points, or wins threshold.
     polarity: str           # 'yes' pays when the bet's statement is true, 'no' pays when it is false.
-    group_label: str | None = None    # The BetGroup this bet belongs to, set by match.py.
+    pair_label: str | None = None    # The pair this bet belongs to, set by match.py.
 
 
 @dataclass
-class BetGroup:
+class Pair:
     """
-    Every contract, on any venue, that describes one bet. The label is the
-    bet's identity in words and serves as its key. Members are Bets, and a
-    group is only worth recording when its members span two or more venues.
+    The contracts on both venues that describe one bet. The label is the
+    bet's identity in words and serves as its key. Members are Bets, two or
+    three of them, since a venue may list both sides of a game as contracts.
     """
     label: str              # For example 'spread 2026-09-20 CAR@ATL ATL 4.5'.
     kind: str
@@ -74,7 +62,7 @@ class BetGroup:
     subject: str | None
     line: float | None
     members: list           # Bets, one per contract.
-    flags: list[str]        # Things a human should check before trusting the group.
+    flags: list[str]        # Things a human should check before trusting the pair.
 
     @property
     def venues(self):
@@ -94,22 +82,12 @@ class Quote:
 
 
 @dataclass
-class StreamGap:
-    """
-    A stretch when a venue's feed was down, so its books could not be trusted.
-    """
-    venue: str
-    start_ts: str           # When the connection was lost.
-    end_ts: str | None      # When a new connection was subscribed. None while still down.
-
-
-@dataclass
 class Opportunity:
     """
-    A stretch of time when one bet group could be traded for a profit after
+    A stretch of time when one pair could be traded for a profit after
     fees, by buying yes exposure on one contract and no exposure on another.
     """
-    label: str              # The bet group's label.
+    label: str              # The pair's label.
     kind: str
     trade: str              # The two legs in words.
     yes_venue: str          # Where the yes exposure was cheapest at the peak.
@@ -127,3 +105,13 @@ class Opportunity:
     days_held: float | None     # From the peak until the bet pays out, if held to resolution.
     return_pct: float       # Net edge over the capital tied up, as a percent.
     annual_pct: float | None    # return_pct scaled to a year over days_held, without compounding.
+
+
+@dataclass
+class StreamGap:
+    """
+    A stretch when a venue's feed was down, so its books could not be trusted.
+    """
+    venue: str
+    start_ts: str           # When the connection was lost.
+    end_ts: str | None      # When a new connection was subscribed. None while still down.
