@@ -14,23 +14,21 @@ import asyncio
 import base64
 import json
 import time
-import websockets
 from api.bookstream import BookStream, Reconnect
-from api.helper import get_json, float_or_none
+from api.http import get_json
+from common.jsonutil import float_or_none
+from common.paths import DATA_DIR
 from common.timeutil import iso
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from db.models import Contract
-from pathlib import Path
 
 BASE = "https://api.elections.kalshi.com/trade-api/v2"
-SLEEP = 0.12   # Seconds between calls, to stay under the public rate limit.
+SLEEP = 0.12   # Seconds between paged calls, to stay under the public rate limit.
 WS_URL = "wss://api.elections.kalshi.com/trade-api/ws/v2"
 WS_PATH = "/trade-api/ws/v2"
-STALE_SECONDS = 300     # A connection that sends nothing for this long is treated as dead.
-DATA = Path(__file__).resolve().parent.parent.parent / "data"
-KEY_ID_FILE = DATA / "kalshi_key_id.txt"
-PRIVATE_KEY_FILE = DATA / "kalshi_private_key.pem"
+KEY_ID_FILE = DATA_DIR / "kalshi_key_id.txt"
+PRIVATE_KEY_FILE = DATA_DIR / "kalshi_private_key.pem"
 
 
 # QUERY
@@ -47,9 +45,9 @@ def paged(path, params, key):
         data = get_json(f"{BASE}{path}", p)
         items.extend(data.get(key, []))
         cursor = data.get("cursor")
-        time.sleep(SLEEP)
         if not cursor:
             return items
+        time.sleep(SLEEP)
 
 
 def fetch_series(prefixes, tickers=()):
@@ -130,17 +128,18 @@ def contracts(sport, prefixes, tickers=()):
     return result
 
 
-# STREAMING
+# SIGNING
 
-def ws_headers():
+def signed_headers(method, path):
     """
-    Signed headers for opening the websocket. Kalshi wants the timestamp, the
-    method, and the path signed with the account's RSA key.
+    The three headers that authenticate a request. Kalshi wants the timestamp,
+    the method, and the path signed with the account's RSA key. The websocket
+    handshake and the trading endpoints use the same scheme.
     """
     key_id = KEY_ID_FILE.read_text().strip()
     key = serialization.load_pem_private_key(PRIVATE_KEY_FILE.read_bytes(), password=None)
     ts = str(int(time.time() * 1000))
-    message = (ts + "GET" + WS_PATH).encode()
+    message = (ts + method + path).encode()
     signature = key.sign(
         message,
         padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.DIGEST_LENGTH),
@@ -152,6 +151,8 @@ def ws_headers():
         "KALSHI-ACCESS-SIGNATURE": base64.b64encode(signature).decode(),
     }
 
+
+# STREAMING
 
 def update_frame(message_id, sid, tickers, action):
     """
@@ -167,13 +168,11 @@ class KalshiBookStream(BookStream):
     Kalshi's order book channel over a signed connection. Books are given
     from the Yes side, best first, so they look the same as Polymarket US's. A
     resting No order at price p is a Yes ask at 1 minus p. Every message
-    counts as data because the feed has no keepalive replies, and the
-    stale limit is generous because the feed sends nothing while books
-    are idle. A skipped sequence number forces a reconnect.
+    counts as data because the feed has no keepalive replies. A skipped
+    sequence number forces a reconnect.
     """
 
     name = "kalshi"
-    stale_seconds = STALE_SECONDS
 
     def reset(self):
         self.sid = None                     # The live subscription id, needed for update commands.
@@ -182,8 +181,7 @@ class KalshiBookStream(BookStream):
         self.message_id = 2
 
     def connect(self):
-        # No receive queue limit, so a busy loop delays our timestamps instead of stalling the socket.
-        return websockets.connect(WS_URL, additional_headers=ws_headers(), open_timeout=20, max_size=None, max_queue=None)
+        return self.open_connection(WS_URL, signed_headers("GET", WS_PATH))
 
     async def subscribe(self, ws):
         await ws.send(json.dumps({"id": 1, "cmd": "subscribe",
@@ -215,6 +213,9 @@ class KalshiBookStream(BookStream):
             self.sid = body.get("sid")
             self.subscribed.set()
             return
+        if kind == "error":
+            self.log(f"kalshi stream error {body}")
+            return
         if kind == "orderbook_snapshot" and ticker in self.wanted:
             self.books[ticker] = {
                 "yes": {float(p): float(s) for p, s in body.get("yes_dollars_fp") or []},
@@ -228,8 +229,6 @@ class KalshiBookStream(BookStream):
             if side[price] <= 0:
                 del side[price]
         else:
-            if kind == "error":
-                self.log(f"kalshi stream error {body}")
             return
         b = self.books[ticker]
         bids = [[p, s] for p, s in sorted(b["yes"].items(), reverse=True) if s > 0]

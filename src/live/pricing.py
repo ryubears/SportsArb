@@ -9,8 +9,8 @@ fee of the venue, from fees.py. Shared by the scanner, which looks for a
 positive net edge, and the executor, which fills against the same ladders.
 """
 
-from common import fees
-from venues import SHORT_NAMES
+from common.venues import SHORT_NAMES
+from live import fees
 
 
 def ladder(quote, polarity, side):

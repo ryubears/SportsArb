@@ -16,10 +16,10 @@ pricing itself lives in pricing.py.
 """
 
 from collections import defaultdict
-from common.pricing import best_trade, trade_words
 from common.timeutil import now_iso, seconds_between, shift
 from db import database
 from db.models import Opportunity
+from live.pricing import best_trade, trade_words
 
 GAME_HOURS = 4          # A game pays out about this long after kickoff.
 TARGET_ANNUAL_PCT = 10  # The return an opportunity must beat to be worth the risk.

@@ -2,7 +2,7 @@
 Tests for pairing up bets across venues.
 """
 
-import match
+from catalog import match
 
 
 def bet(venue, contract_id, kind="champion", subject="BUF", polarity="yes", line=None,

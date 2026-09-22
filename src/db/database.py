@@ -8,16 +8,17 @@ SQLite browser. The tables follow the pipeline in order.
     bets           each contract restated in venue neutral terms, by classify.py
     pairs          the contracts on both venues for one bet, by match.py
     quotes         order book snapshots for paired contracts, by record.py
-    stream_gaps    stretches when a venue's feed was down, also by record.py
+    gaps           stretches when a venue's feed was down, also by record.py
     opportunities  every episode the live scanner saw, by record.py
 """
 
 import sqlite3
 from common import jsonutil
-from db.models import Quote, StreamGap
+from common.paths import DATA_DIR
+from db.models import Quote, Gap
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "sportsarb.sqlite"
+DB_PATH = DATA_DIR / "sportsarb.sqlite"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS contracts (
@@ -82,7 +83,7 @@ CREATE TABLE IF NOT EXISTS quotes (
     PRIMARY KEY (venue, contract_id, ts)
 );
 
-CREATE TABLE IF NOT EXISTS stream_gaps (
+CREATE TABLE IF NOT EXISTS gaps (
     venue        TEXT NOT NULL,
     start_ts     TEXT NOT NULL,   -- When the connection was lost, ISO 8601 UTC.
     end_ts       TEXT,            -- When a new connection was subscribed. Null if the recorder stopped first.
@@ -140,6 +141,9 @@ def migrate(conn):
         conn.execute("ALTER TABLE bets ADD COLUMN pair_label TEXT")
     conn.execute("DROP TABLE IF EXISTS bet_groups")
     conn.execute("DROP TABLE IF EXISTS fee_history")
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'stream_gaps'").fetchone():
+        conn.execute("INSERT OR REPLACE INTO gaps (venue, start_ts, end_ts) SELECT venue, start_ts, end_ts FROM stream_gaps")
+        conn.execute("DROP TABLE stream_gaps")
     columns = [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]
     if "scope" in columns:
         conn.execute("DROP TABLE opportunities")
@@ -301,20 +305,20 @@ def insert_gap(conn, gap):
     """
     Record a stretch when a venue's feed was down.
     """
-    conn.execute("INSERT OR REPLACE INTO stream_gaps (venue, start_ts, end_ts) VALUES (?,?,?)", (gap.venue, gap.start_ts, gap.end_ts))
+    conn.execute("INSERT OR REPLACE INTO gaps (venue, start_ts, end_ts) VALUES (?,?,?)", (gap.venue, gap.start_ts, gap.end_ts))
     conn.commit()
 
 
 def load_gaps(conn, venue, since=None):
     """
-    Return a venue's StreamGaps in time order, optionally only those starting at or after since.
+    Return a venue's Gaps in time order, optionally only those starting at or after since.
     """
-    sql = "SELECT venue, start_ts, end_ts FROM stream_gaps WHERE venue = ?"
+    sql = "SELECT venue, start_ts, end_ts FROM gaps WHERE venue = ?"
     params = [venue]
     if since:
         sql += " AND start_ts >= ?"
         params.append(since)
-    return [StreamGap(*row) for row in conn.execute(sql + " ORDER BY start_ts", params)]
+    return [Gap(*row) for row in conn.execute(sql + " ORDER BY start_ts", params)]
 
 
 def load_recording_targets(conn, sport, now, horizon, venues, game_started_after):

@@ -34,3 +34,9 @@ def test_eastern_date_rolls_late_utc_games_back_a_day():
     # A Thursday night game at 8:15 PM Eastern is already Friday in UTC.
     assert timeutil.eastern_date("2026-10-23T00:15:00+00:00") == "2026-10-22"
     assert timeutil.eastern_date("2026-09-20T17:00:00+00:00") == "2026-09-20"
+
+
+def test_season_from_date_splits_in_august():
+    assert timeutil.season_from_date("2026-09-20") == 2027
+    assert timeutil.season_from_date("2027-01-10") == 2027
+    assert timeutil.season_from_date("2027-08-01") == 2028

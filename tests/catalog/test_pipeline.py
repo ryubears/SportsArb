@@ -2,7 +2,7 @@
 Test the catalog refresh with the venue calls replaced by canned contracts.
 """
 
-import pipeline
+from catalog import pipeline
 from db import database
 from db.models import Contract
 

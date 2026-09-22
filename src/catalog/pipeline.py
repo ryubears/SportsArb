@@ -7,13 +7,12 @@ is recording. The same steps are available one at a time as fetch.py,
 classify.py, and match.py, which also print their full reports.
 
 Run with:
-    python3 src/pipeline.py --sport nfl
+    python3 -m catalog.pipeline --sport nfl
 """
 
 import argparse
-import classify
-import fetch
-import match
+from catalog import fetch, match
+from catalog.classify import classify
 from common.timeutil import now_iso
 from db import database
 

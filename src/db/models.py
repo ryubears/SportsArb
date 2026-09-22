@@ -108,7 +108,7 @@ class Opportunity:
 
 
 @dataclass
-class StreamGap:
+class Gap:
     """
     A stretch when a venue's feed was down, so its books could not be trusted.
     """

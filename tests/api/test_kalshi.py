@@ -1,23 +1,23 @@
 """
-Tests for the venue stream frames and book handling that need no network.
+Tests for the Kalshi client's frames and book handling that need no network.
 """
 
 import pytest
-from api import bookstream, kalshi, polymarket_us
+from api import bookstream, kalshi
 
 
-def test_kalshi_close_time_takes_the_earlier_of_close_and_expected_expiration():
+def test_close_time_takes_the_earlier_of_close_and_expected_expiration():
     assert kalshi.close_time({"close_time": "2029-02-13T23:30:00Z", "expected_expiration_time": "2027-02-14T23:30:00Z"}) == "2027-02-14T23:30:00+00:00"
     assert kalshi.close_time({"close_time": "2026-09-24T00:15:00Z"}) == "2026-09-24T00:15:00+00:00"
     assert kalshi.close_time({}) is None
 
 
-def test_kalshi_update_frame():
+def test_update_frame():
     frame = kalshi.update_frame(7, 3, ["A", "B"], "add_markets")
     assert frame == {"id": 7, "cmd": "update_subscription", "params": {"sids": [3], "market_tickers": ["A", "B"], "action": "add_markets"}}
 
 
-def test_kalshi_stream_restates_no_side_as_yes_asks_and_tracks_sid():
+def test_stream_restates_no_side_as_yes_asks_and_tracks_sid():
     seen = []
     stream = kalshi.KalshiBookStream(["T"], lambda ticker, bids, asks: seen.append((ticker, bids, asks)))
     stream.reset()
@@ -29,20 +29,10 @@ def test_kalshi_stream_restates_no_side_as_yes_asks_and_tracks_sid():
     assert seen[1] == ("T", [[0.48, 10.0]], [])
 
 
-def test_kalshi_stream_asks_to_reconnect_on_a_sequence_gap():
+def test_stream_asks_to_reconnect_on_a_sequence_gap():
     stream = kalshi.KalshiBookStream(["T"], lambda *args: None)
     stream.reset()
     stream.handle('{"type": "ok", "seq": 1, "msg": {}}')
     stream.handle('{"type": "ok", "seq": 2, "msg": {}}')
     with pytest.raises(bookstream.Reconnect):
         stream.handle('{"type": "ok", "seq": 4, "msg": {}}')
-
-
-def test_polymarket_us_stream_replaces_the_book_from_each_message():
-    seen = []
-    stream = polymarket_us.PolymarketUSBookStream(["s"], lambda slug, bids, asks: seen.append((slug, bids, asks)))
-    stream.reset()
-    assert stream.handle('{"requestId": "md-1", "subscriptionType": "SUBSCRIPTION_TYPE_MARKET_DATA"}') is False
-    stream.handle('{"marketData": {"marketSlug": "s", "bids": [{"px": {"value": "0.30"}, "qty": "5"}, {"px": {"value": "0.31"}, "qty": "2"}], "offers": [{"px": {"value": "0.33"}, "qty": "1"}]}}')
-    stream.handle('{"marketData": {"marketSlug": "other", "bids": [], "offers": []}}')
-    assert seen == [("s", [[0.31, 2.0], [0.30, 5.0]], [[0.33, 1.0]])]

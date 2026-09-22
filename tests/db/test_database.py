@@ -3,7 +3,7 @@ Round trip every table through the database module.
 """
 
 from db import database
-from db.models import StreamGap, Bet, Pair, Contract, Opportunity, Quote
+from db.models import Bet, Contract, Gap, Opportunity, Pair, Quote
 
 
 def contract(venue, contract_id, **fields):
@@ -67,8 +67,8 @@ def test_game_contracts_stay_targets_through_the_game(tmp_path):
 
 def test_gaps_are_stored_in_time_order_and_filtered_by_since(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
-    database.insert_gap(conn, StreamGap("polymarket_us", "2026-09-20T20:39:07+00:00", "2026-09-20T20:39:12+00:00"))
-    database.insert_gap(conn, StreamGap("polymarket_us", "2026-09-20T20:37:31+00:00", None))
+    database.insert_gap(conn, Gap("polymarket_us", "2026-09-20T20:39:07+00:00", "2026-09-20T20:39:12+00:00"))
+    database.insert_gap(conn, Gap("polymarket_us", "2026-09-20T20:37:31+00:00", None))
     assert [g.start_ts[11:19] for g in database.load_gaps(conn, "polymarket_us")] == ["20:37:31", "20:39:07"]
     assert [g.end_ts for g in database.load_gaps(conn, "polymarket_us", "2026-09-20T20:38:00+00:00")] == ["2026-09-20T20:39:12+00:00"]
     assert database.load_gaps(conn, "kalshi") == []
@@ -109,9 +109,13 @@ def test_old_databases_are_migrated_to_pairs(tmp_path):
         INSERT INTO bets VALUES ('kalshi', 'k', 'champion', 2027, NULL, NULL, NULL, 'BUF', NULL, 'yes', 'champion 2027 BUF');
         CREATE TABLE bet_groups (label TEXT PRIMARY KEY);
         CREATE TABLE fee_history (venue TEXT, contract_id TEXT, seen_at TEXT, fee_info TEXT);
+        CREATE TABLE stream_gaps (venue TEXT, start_ts TEXT, end_ts TEXT, PRIMARY KEY (venue, start_ts));
+        INSERT INTO stream_gaps VALUES ('kalshi', '2026-09-21T19:39:39+00:00', '2026-09-21T19:39:41+00:00');
     """)
     old.commit(); old.close()
     conn = database.connect(path)
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-    assert "pairs" in tables and "bet_groups" not in tables and "fee_history" not in tables
+    assert "pairs" in tables and "gaps" in tables
+    assert not {"bet_groups", "fee_history", "stream_gaps"} & tables
     assert conn.execute("SELECT pair_label FROM bets").fetchone()[0] == "champion 2027 BUF"
+    assert [g.start_ts[11:19] for g in database.load_gaps(conn, "kalshi")] == ["19:39:39"]

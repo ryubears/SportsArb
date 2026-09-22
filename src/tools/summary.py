@@ -9,8 +9,8 @@ This script opens the database file directly rather than importing the
 db package, so it runs from any folder without setting an import path.
 
 Run with:
-    python3 src/db/summary.py
-    python3 src/db/summary.py --hours 6
+    python3 src/tools/summary.py
+    python3 src/tools/summary.py --hours 6
 """
 
 import argparse
@@ -63,7 +63,7 @@ def print_storage(conn):
     print(f"database {DB_PATH}")
     print(f"size {size / 1e6:,.0f} MB")
     # Listed in pipeline order rather than alphabetically.
-    tables = ["contracts", "bets", "pairs", "quotes", "stream_gaps", "opportunities"]
+    tables = ["contracts", "bets", "pairs", "quotes", "gaps", "opportunities"]
     print_table("tables", ("table", "rows"), [(t, f"{first_value(conn, f'SELECT COUNT(*) FROM {t}'):,}") for t in tables])
 
 
@@ -107,7 +107,7 @@ def print_quotes(conn, now, hours):
             print(f"  quiet hours (under a twentieth of the busiest): {', '.join(h.replace('T', ' ') + ':00' for h in quiet)}")
     gaps = query_rows(conn, """
         SELECT venue, COUNT(*), COALESCE(SUM((julianday(end_ts) - julianday(start_ts)) * 86400), 0), SUM(end_ts IS NULL)
-        FROM stream_gaps WHERE start_ts >= ? GROUP BY venue ORDER BY venue""", (since,))
+        FROM gaps WHERE start_ts >= ? GROUP BY venue ORDER BY venue""", (since,))
     if gaps:
         print("  feed drops in the window: " + ", ".join(
             f"{v} {n} ({secs:.0f}s down{f', {open_} without an end' if open_ else ''})" for v, n, secs, open_ in gaps))

@@ -7,7 +7,7 @@ each contract whose best bid or best ask changed, in price or in size,
 since the last row. Each row still carries the top five levels. Quiet
 contracts produce nothing, busy ones produce at most one row per second.
 When a venue's connection is lost the stretch until the next connection is
-subscribed is stored as a stream gap, and every book from the new
+subscribed is stored as a gap, and every book from the new
 connection is written again, so the scanner can tell a quiet book from
 one that went unseen.
 
@@ -20,25 +20,25 @@ thread, fetch then classify then match, then adds the new pairs' contracts to th
 live connections and removes the closed ones, without reconnecting.
 
 Run with:
-    python3 src/record.py --sport nfl
-    python3 src/record.py --sport nfl --seconds 120 --catalog-minutes 0
-    python3 src/record.py --sport nfl --skip-refresh
-    python3 src/record.py --sport nfl --no-scan
+    python3 -m live.record --sport nfl
+    python3 -m live.record --sport nfl --seconds 120 --catalog-minutes 0
+    python3 -m live.record --sport nfl --skip-refresh
+    python3 -m live.record --sport nfl --no-scan
 
 For a long run on a laptop, stop the Mac from sleeping while it runs:
-    caffeinate -i -s python3 src/record.py --sport nfl
+    caffeinate -i -s python3 -m live.record --sport nfl
 """
 
 import argparse
 import asyncio
-import pipeline
-import scan
 import sys
 import time
 from api import kalshi, polymarket_us
+from catalog import pipeline
 from common.timeutil import now_iso, shift
 from db import database
-from db.models import Quote, StreamGap
+from db.models import Quote, Gap
+from live import scan
 
 # Print immediately even when output goes to a file.
 sys.stdout.reconfigure(line_buffering=True)
@@ -102,7 +102,7 @@ class Recorder:
         Store a venue's connection gap and drop what was known of its books,
         so every book from the new connection is written with a fresh time.
         """
-        database.insert_gap(self.conn, StreamGap(venue, start_ts, end_ts))
+        database.insert_gap(self.conn, Gap(venue, start_ts, end_ts))
         self.gaps[venue] += 1
         self.latest = {key: q for key, q in self.latest.items() if key[0] != venue}
         self.written = {key: best for key, best in self.written.items() if key[0] != venue}

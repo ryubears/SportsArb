@@ -26,3 +26,10 @@ def test_read_file(tmp_path):
     path = tmp_path / "x.json"
     path.write_text('{"team": "BUF"}')
     assert jsonutil.read_file(path) == {"team": "BUF"}
+
+
+def test_float_or_none():
+    assert jsonutil.float_or_none("4.5") == 4.5
+    assert jsonutil.float_or_none(3) == 3.0
+    assert jsonutil.float_or_none(None) is None
+    assert jsonutil.float_or_none("n/a") is None

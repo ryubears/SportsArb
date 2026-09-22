@@ -4,16 +4,16 @@ Instance      i-0a0119ff5a49fe57a (t3.medium, Ubuntu 24.04, region us-east-1)
 Address       54.82.110.237, user ubuntu, repo at ~/SportsArb
 SSH key       ~/.ssh/sportsarb-us.pem
 Security group sg-0a601fd37e4a97089, SSH only from allowed laptop IPs
-Service       sportsarb-recorder (systemd), runs until stopped and restarts itself on any exit, log in ~/SportsArb/data/record.log
+Service       sportsarb-recorder (systemd), runs python3 -m live.record from ~/SportsArb/src until stopped, restarts itself on any exit, log in ~/SportsArb/data/record.log
 
 
 CHECK THE DATA
 
 Quick health check: service state, last status line, drops, rows per venue, open episodes.
-    ssh -i ~/.ssh/sportsarb-us.pem ubuntu@54.82.110.237 'systemctl is-active sportsarb-recorder; tail -1 SportsArb/data/record.log | cut -c1-170; echo "drops: $(grep -c dropped SportsArb/data/record.log)"; sqlite3 SportsArb/data/sportsarb.sqlite "select venue, count(*), count(distinct contract_id), max(ts) from quotes group by 1; select venue, count(*), round(sum((julianday(end_ts)-julianday(start_ts))*86400)) as seconds_down from stream_gaps group by 1; select kind, count(*), round(max(peak_profit),2), sum(annual_pct >= 10) from opportunities group by 1;"'
+    ssh -i ~/.ssh/sportsarb-us.pem ubuntu@54.82.110.237 'systemctl is-active sportsarb-recorder; tail -1 SportsArb/data/record.log | cut -c1-170; echo "drops: $(grep -c dropped SportsArb/data/record.log)"; sqlite3 SportsArb/data/sportsarb.sqlite "select venue, count(*), count(distinct contract_id), max(ts) from quotes group by 1; select venue, count(*), round(sum((julianday(end_ts)-julianday(start_ts))*86400)) as seconds_down from gaps group by 1; select kind, count(*), round(max(peak_profit),2), sum(annual_pct >= 10) from opportunities group by 1;"'
 
 Full summary from the summary script, last 24 hours.
-    ssh -i ~/.ssh/sportsarb-us.pem ubuntu@54.82.110.237 'cd SportsArb && python3 src/db/summary.py --hours 24'
+    ssh -i ~/.ssh/sportsarb-us.pem ubuntu@54.82.110.237 'cd SportsArb && python3 src/tools/summary.py --hours 24'
 
 Watch the log live. Stop with ctrl-c.
     ssh -i ~/.ssh/sportsarb-us.pem ubuntu@54.82.110.237 tail -f SportsArb/data/record.log

@@ -68,3 +68,11 @@ def eastern_date(iso_time):
     Calendar date in US Eastern time for an ISO timestamp, as YYYY-MM-DD.
     """
     return datetime.fromisoformat(iso_time).astimezone(EASTERN).strftime("%Y-%m-%d")
+
+
+def season_from_date(game_date):
+    """
+    Season end year for a game date. Games from August onward belong to the season ending next year.
+    """
+    year, month = int(game_date[:4]), int(game_date[5:7])
+    return year + 1 if month >= 8 else year

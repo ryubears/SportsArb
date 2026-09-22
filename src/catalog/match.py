@@ -8,7 +8,7 @@ a pair's members for the cheapest way to hold yes and the cheapest way
 to hold no.
 
 Run with:
-    python3 src/match.py --sport nfl
+    python3 -m catalog.match --sport nfl
 """
 
 import argparse

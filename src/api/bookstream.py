@@ -7,7 +7,7 @@ a callback. This base class holds what the venues have in common: the
 wanted set, the queue of changes made while the connection runs, and the
 connect, subscribe, read, and reconnect loop. A venue subclass supplies
 how to connect, what to send to subscribe, how to turn a queued change
-into a frame, how to apply one message, and any keepalive the feed needs.
+into a frame, and how to apply one message.
 """
 
 import asyncio
@@ -18,13 +18,15 @@ from common.timeutil import now_iso
 # Pause before each attempt after a failure. The first retry is immediate, since most drops are
 # one off and every second costs data. Repeated failures back off, and the last value repeats.
 RECONNECT_SECONDS = (0, 1, 3, 10)
+OPEN_TIMEOUT = 20           # Seconds allowed for the websocket handshake.
+STALE_SECONDS = 300         # Reconnect after this long without a message that counts as data. Generous, since feeds send nothing while books are idle.
 
 
-def reconnect_pause(failures):
+def reconnect_pause(num_failures):
     """
     Seconds to wait before the next attempt after this many failures in a row.
     """
-    return RECONNECT_SECONDS[min(failures, len(RECONNECT_SECONDS)) - 1]
+    return RECONNECT_SECONDS[min(num_failures, len(RECONNECT_SECONDS)) - 1]
 
 
 class Reconnect(Exception):
@@ -40,12 +42,11 @@ class BookStream:
     once started, reconnecting when the connection drops, goes silent, or
     a subclass asks for it. Every failure starts a gap that ends when the
     next connection is subscribed, reported through on_gap so the recorder
-    can mark the stretch. Subclasses set name and stale_seconds and
-    implement the venue hooks below.
+    can mark the stretch. Subclasses set name and implement the venue hooks below.
     """
 
-    name = "venue"          # Used in log lines.
-    stale_seconds = 120     # Reconnect after this long without a message that counts as data.
+    name = "venue"                  # Used in log lines.
+    stale_seconds = STALE_SECONDS
 
     def __init__(self, contract_ids, on_book, log=print, on_gap=None):
         self.wanted = set(contract_ids)
@@ -53,7 +54,7 @@ class BookStream:
         self.log = log
         self.on_gap = on_gap or (lambda start_ts, end_ts: None)    # Called with the gap's start and end times.
         self.down_since = None      # When the current gap began, or None while connected.
-        self.failures = 0           # Failures in a row, reset once a connection is subscribed.
+        self.num_failures = 0       # Failures in a row, reset once a connection is subscribed.
         self.books = {}
         self.commands = asyncio.Queue()     # Pending ("add" or "remove", [contract ids]) changes.
 
@@ -81,9 +82,17 @@ class BookStream:
 
     def connect(self):
         """
-        Return the websocket connection context manager for this venue.
+        Return the websocket connection context manager for this venue, normally from open_connection.
         """
         raise NotImplementedError
+
+    def open_connection(self, url, headers=None):
+        """
+        The connection every venue uses. No receive queue limit, so a busy
+        loop delays our timestamps instead of stalling the socket, which
+        some feeds answer by closing the connection as a slow consumer.
+        """
+        return websockets.connect(url, additional_headers=headers, open_timeout=OPEN_TIMEOUT, max_size=None, max_queue=None)
 
     async def subscribe(self, ws):
         """
@@ -109,12 +118,6 @@ class BookStream:
         """
         Clear any per connection state before a new connection. Books are cleared by the loop.
         """
-
-    async def keepalive(self, ws):
-        """
-        Send whatever the feed needs to keep the connection open, forever. Nothing by default.
-        """
-        await asyncio.sleep(float("inf"))
 
     # LOOP
 
@@ -158,26 +161,25 @@ class BookStream:
                     if self.down_since:
                         self.on_gap(self.down_since, now_iso())
                         self.down_since = None
-                    self.failures = 0
-                    helpers = [asyncio.create_task(self.keepalive(ws)), asyncio.create_task(self.send_commands(ws))]
+                    self.num_failures = 0
+                    sender = asyncio.create_task(self.send_commands(ws))
                     try:
                         await self.read(ws)
                     finally:
-                        for task in helpers:
-                            task.cancel()
-            except asyncio.TimeoutError:
-                self.log(f"{self.name} stream silent for {self.stale_seconds}s, reconnecting")
+                        sender.cancel()
             except Reconnect as e:
                 self.log(f"{self.name} stream {e}, reconnecting")
+            except asyncio.TimeoutError:
+                self.log(f"{self.name} stream silent for {self.stale_seconds}s, reconnecting")
+            except asyncio.CancelledError:
+                raise
             except (websockets.ConnectionClosed, OSError) as e:
                 # For a closed connection the message carries the close code and reason from each side.
                 self.log(f"{self.name} stream dropped ({type(e).__name__}: {str(e)[:100]}), reconnecting")
-            except asyncio.CancelledError:
-                raise
             except Exception as e:
                 # A rejected handshake or a bad message must never end the stream for good.
                 self.log(f"{self.name} stream failed ({type(e).__name__}: {str(e)[:120]}), reconnecting")
             if self.down_since is None:
                 self.down_since = now_iso()
-            self.failures += 1
-            await asyncio.sleep(reconnect_pause(self.failures))
+            self.num_failures += 1
+            await asyncio.sleep(reconnect_pause(self.num_failures))

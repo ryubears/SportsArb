@@ -3,7 +3,7 @@ Tests for the fee formulas against the venues' documented examples.
 """
 
 import pytest
-from common import fees
+from live import fees
 
 KALSHI_SPORTS = {"fee_type": "quadratic", "fee_multiplier": 1}
 KALSHI_WITH_MAKER = {"fee_type": "quadratic_with_maker_fees", "fee_multiplier": 1}

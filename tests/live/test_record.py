@@ -3,8 +3,8 @@ Tests for the recorder's write rules, its stream management, and its refresh loo
 """
 
 import asyncio
-import record
 from db import database
+from live import record
 
 
 class FakeStream:

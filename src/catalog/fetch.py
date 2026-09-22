@@ -2,16 +2,16 @@
 Fetch open sports markets from both venues into SQLite.
 
 Run with:
-    python3 src/fetch.py --sport nfl
-    python3 src/fetch.py --sport nfl --venue kalshi
+    python3 -m catalog.fetch --sport nfl
+    python3 -m catalog.fetch --sport nfl --venue kalshi
 """
 
 import argparse
 import time
 from api import kalshi, polymarket_us
 from common.timeutil import now_iso
+from common.venues import VENUES
 from db import database
-from venues import VENUES
 
 # How each of our sport keys maps onto the venues' own categories.
 SPORTS = {

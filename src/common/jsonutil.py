@@ -29,3 +29,13 @@ def read_file(path):
     Parse a JSON file.
     """
     return json.loads(Path(path).read_text())
+
+
+def float_or_none(value):
+    """
+    Convert to float, or return None when the value is missing or not numeric.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

@@ -121,7 +121,7 @@ def test_loop_subscribes_and_reconnects_on_silence_gap_and_drop(monkeypatch):
     assert stream.resets >= 4
     assert stream.books == {}                                            # Cleared before the last connection.
     assert len(stream.gaps) == 3 and all(start <= end for start, end in stream.gaps)   # One gap per failure, closed on resubscribe.
-    assert stream.failures == 1                                          # Reset by each resubscribe, then the last connection stalled.
+    assert stream.num_failures == 1                                          # Reset by each resubscribe, then the last connection stalled.
 
 
 def test_reconnect_pause_is_immediate_first_and_backs_off_after():

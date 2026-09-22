@@ -2,8 +2,8 @@
 Polymarket US API client.
 
 Two jobs. The query half reads the public events listing on the gateway
-host and turns every open sports market into a Contract, one per market,
-for the market's long side. The streaming half opens the signed markets
+host, filtered by sport tag, and turns every open market into a Contract,
+one per market, for the market's long side. The streaming half opens the signed markets
 websocket and keeps a live book per market slug, replacing the whole
 book on every message because the feed sends full snapshots. This is
 the only file that knows Polymarket US field names and message formats.
@@ -15,13 +15,13 @@ id and secret live in the data folder, see KEY_ID_FILE and SECRET_KEY_FILE.
 import base64
 import json
 import time
-import websockets
 from api.bookstream import BookStream
-from api.helper import get_json, float_or_none
+from api.http import get_json
+from common.jsonutil import float_or_none
+from common.paths import DATA_DIR
+from common.timeutil import iso
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from db.models import Contract
-from pathlib import Path
-from common.timeutil import iso
 
 GATEWAY = "https://gateway.polymarket.us/v1"    # Public catalog of events and markets.
 API = "https://api.polymarket.us/v1"            # Signed requests for books and trading.
@@ -29,10 +29,8 @@ WS_URL = "wss://api.polymarket.us/v1/ws/markets"
 WS_PATH = "/v1/ws/markets"
 WS_CHUNK = 100          # Market slugs per subscription, the documented maximum.
 WS_DEBOUNCE = True      # Ask the feed to batch updates. Cuts bandwidth by a third, and the recorder writes once a second anyway.
-STALE_SECONDS = 300     # The feed sends nothing while books are idle, so the limit is generous.
-DATA = Path(__file__).resolve().parent.parent.parent / "data"
-KEY_ID_FILE = DATA / "polymarket_us_key_id.txt"
-SECRET_KEY_FILE = DATA / "polymarket_us_secret_key.txt"
+KEY_ID_FILE = DATA_DIR / "polymarket_us_key_id.txt"
+SECRET_KEY_FILE = DATA_DIR / "polymarket_us_secret_key.txt"
 
 
 # SIGNING
@@ -52,13 +50,13 @@ def signed_headers(method, path):
 
 # QUERY
 
-def fetch_events(page_size=500):
+def fetch_events(tag_slug, page_size=500):
     """
-    Every open event with its markets nested inside, following offset pagination.
+    Every open event carrying the tag, with its markets nested inside, following offset pagination.
     """
     events, offset = [], 0
     while True:
-        page = get_json(f"{GATEWAY}/events", {"limit": page_size, "offset": offset, "closed": "false"})["events"]
+        page = get_json(f"{GATEWAY}/events", {"tag_slug": tag_slug, "limit": page_size, "offset": offset, "closed": "false"})["events"]
         events.extend(page)
         if len(page) < page_size:
             return events
@@ -70,10 +68,11 @@ def contracts(sport, tags):
     One Contract per open market on events carrying one of the tag slugs.
     The contract is the market's long side, which is Yes, Over, or the away team.
     """
-    result = []
-    for event in fetch_events():
-        if not any(t.get("slug") in tags for t in event.get("tags", [])):
+    result, seen_events = [], set()
+    for event in (e for tag in tags for e in fetch_events(tag)):
+        if event["slug"] in seen_events:
             continue
+        seen_events.add(event["slug"])
         for m in event.get("markets", []):
             if m.get("closed"):
                 continue
@@ -118,14 +117,12 @@ class PolymarketUSBookStream(BookStream):
     """
 
     name = "polymarket_us"
-    stale_seconds = STALE_SECONDS
 
     def reset(self):
         self.request_id = 0
 
     def connect(self):
-        # No receive queue limit, so a busy loop delays our timestamps instead of stalling the socket.
-        return websockets.connect(WS_URL, additional_headers=signed_headers("GET", WS_PATH), open_timeout=20, max_size=None, max_queue=None)
+        return self.open_connection(WS_URL, signed_headers("GET", WS_PATH))
 
     async def subscribe(self, ws):
         await self.send_subscriptions(ws, sorted(self.wanted))
