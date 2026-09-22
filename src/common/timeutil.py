@@ -76,3 +76,15 @@ def season_from_date(game_date):
     """
     year, month = int(game_date[:4]), int(game_date[5:7])
     return year + 1 if month >= 8 else year
+
+
+def add_business_days(iso_time, days):
+    """
+    The same time of day this many weekdays later, skipping Saturdays and Sundays.
+    """
+    when = datetime.fromisoformat(iso_time)
+    while days > 0:
+        when += timedelta(days=1)
+        if when.weekday() < 5:
+            days -= 1
+    return when.isoformat()

@@ -63,7 +63,7 @@ def print_storage(conn):
     print(f"database {DB_PATH}")
     print(f"size {size / 1e6:,.0f} MB")
     # Listed in pipeline order rather than alphabetically.
-    tables = ["contracts", "bets", "pairs", "quotes", "gaps", "opportunities"]
+    tables = ["contracts", "bets", "pairs", "quotes", "gaps", "opportunities", "trades", "settlements", "ledger", "transfers"]
     print_table("tables", ("table", "rows"), [(t, f"{first_value(conn, f'SELECT COUNT(*) FROM {t}'):,}") for t in tables])
 
 
@@ -144,6 +144,47 @@ def print_opportunities(conn):
                  for l, t, e, s, cap, p, r, a, d, sec, lv in best])
 
 
+def print_trades(conn):
+    total = first_value(conn, "SELECT COUNT(*) FROM trades")
+    if not total:
+        print("\ntrades: none yet, the recorder's paper executor writes them")
+        return
+    covered = conn.execute("SELECT MIN(signal_ts), MAX(signal_ts) FROM trades").fetchone()
+    print(f"\ntrades {total:,} paper trades, from {short_time(covered[0])} to {short_time(covered[1])} UTC")
+    body = query_rows(conn, """
+        SELECT status, COUNT(*), SUM(quantity), SUM(matched), ROUND(SUM(profit), 2), ROUND(SUM(hedge_pnl), 2), ROUND(SUM(profit + hedge_pnl), 2)
+        FROM trades GROUP BY status ORDER BY status""")
+    print_table("by outcome", ("status", "trades", "wanted", "matched", "locked in $", "hedges $", "net $"), body)
+    body = query_rows(conn, """
+        SELECT kind, COUNT(*), ROUND(AVG(100 * edge), 1), ROUND(100.0 * SUM(matched) / SUM(quantity), 0), ROUND(SUM(profit + hedge_pnl), 2),
+               ROUND(AVG(yes_latency_ms)), ROUND(AVG(no_latency_ms))
+        FROM trades GROUP BY kind ORDER BY kind""")
+    print_table("by kind", ("kind", "trades", "avg edge c", "fill %", "net $", "avg yes ms", "avg no ms"), body)
+    best = query_rows(conn, """
+        SELECT label, trade, quantity, yes_filled, no_filled, ROUND(profit + hedge_pnl, 2), hedge, substr(signal_ts, 12, 8)
+        FROM trades ORDER BY profit + hedge_pnl DESC LIMIT 5""")
+    print_table("best", ("bet", "trade", "wanted", "yes", "no", "net $", "hedge", "at"),
+                [(l[:40], t, q, y, n, p, h[:40], a) for l, t, q, y, n, p, h, a in best])
+    worst = query_rows(conn, """
+        SELECT label, trade, quantity, yes_filled, no_filled, ROUND(profit + hedge_pnl, 2), hedge, substr(signal_ts, 12, 8)
+        FROM trades WHERE profit + hedge_pnl < 0 ORDER BY profit + hedge_pnl LIMIT 5""")
+    print_table("worst", ("bet", "trade", "wanted", "yes", "no", "net $", "hedge", "at"),
+                [(l[:40], t, q, y, n, p, h[:40], a) for l, t, q, y, n, p, h, a in worst])
+    settled = query_rows(conn, """
+        SELECT venue, COUNT(*), SUM(held), ROUND(SUM(cost), 2), ROUND(SUM(payout), 2), ROUND(SUM(realized), 2)
+        FROM settlements GROUP BY venue ORDER BY venue""")
+    if settled:
+        print_table("settled legs by venue", ("venue", "legs", "contracts", "cost $", "payout $", "realized $"), settled)
+    open_count = first_value(conn, "SELECT COUNT(*) FROM trades WHERE settled_at IS NULL AND yes_held + no_held > 0")
+    print(f"  {open_count:,} trades still open")
+    balances = query_rows(conn, "SELECT venue, ROUND(SUM(amount), 2) FROM ledger GROUP BY venue ORDER BY venue")
+    if balances:
+        print("  ledger by venue, against the starting balance: " + ", ".join(f"{v} {a:+,.2f}$" for v, a in balances))
+    transfers = query_rows(conn, "SELECT from_venue, to_venue, ROUND(amount), reason, substr(requested_at, 1, 10), substr(arrived_at, 1, 10) FROM transfers ORDER BY id DESC LIMIT 5")
+    if transfers:
+        print_table("transfers", ("from", "to", "amount $", "reason", "requested", "arrived"), [(f, t, a, r, q, v or "in transit") for f, t, a, r, q, v in transfers])
+
+
 # MAIN
 
 if __name__ == "__main__":
@@ -157,3 +198,4 @@ if __name__ == "__main__":
     print_pairs(conn)
     print_quotes(conn, now, args.hours)
     print_opportunities(conn)
+    print_trades(conn)

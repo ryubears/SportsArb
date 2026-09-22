@@ -68,6 +68,20 @@ def fetch_events(series_ticker):
     }, "events")
 
 
+def results(tickers):
+    """
+    Settlement results for the tickers, as {ticker: (result, settled_at)} with
+    result 'yes' or 'no'. Markets not yet finalized are left out.
+    """
+    out = {}
+    for ticker in tickers:
+        m = get_json(f"{BASE}/markets/{ticker}", {}).get("market") or {}
+        if m.get("status") == "finalized" and m.get("result") in ("yes", "no"):
+            out[ticker] = (m["result"], iso(m.get("settlement_ts")))
+        time.sleep(SLEEP)
+    return out
+
+
 def close_time(m):
     """
     When the contract stops trading, or settles if the venue expects that

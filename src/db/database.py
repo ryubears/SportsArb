@@ -10,12 +10,16 @@ SQLite browser. The tables follow the pipeline in order.
     quotes         order book snapshots for paired contracts, by record.py
     gaps           stretches when a venue's feed was down, also by record.py
     opportunities  every episode the live scanner saw, by record.py
+    trades         every paper trade the executor made, by record.py
+    settlements    what each leg of a trade paid out when its contract resolved, by record.py
+    ledger         every paper cash movement per venue, by record.py
+    transfers      paper rebalancing transfers between venues, by record.py
 """
 
 import sqlite3
 from common import jsonutil
 from common.paths import DATA_DIR
-from db.models import Quote, Gap
+from db.models import Gap, Ledger, Quote, Settlement, Trade, Transfer
 from pathlib import Path
 
 DB_PATH = DATA_DIR / "sportsarb.sqlite"
@@ -109,6 +113,75 @@ CREATE TABLE IF NOT EXISTS opportunities (
     days_held      REAL,            -- From the peak until the bet pays out, assuming it is held to resolution.
     return_pct     REAL NOT NULL,   -- Net edge over the capital tied up, as a percent.
     annual_pct     REAL             -- return_pct scaled to a year over days_held, without compounding.
+);
+
+CREATE TABLE IF NOT EXISTS trades (
+    id             INTEGER PRIMARY KEY,
+    label          TEXT NOT NULL,   -- The pair's label.
+    kind           TEXT NOT NULL,
+    trade          TEXT NOT NULL,   -- The two legs in words.
+    signal_ts      TEXT NOT NULL,
+    edge           REAL NOT NULL,   -- Net dollars per contract at the signal.
+    quantity       INTEGER NOT NULL,   -- Contracts wanted on each leg.
+    yes_venue      TEXT NOT NULL,
+    yes_contract   TEXT NOT NULL,
+    yes_polarity   TEXT NOT NULL,   -- The side the contract pays on, so settlement knows whether the leg won.
+    yes_limit      REAL NOT NULL,
+    yes_filled     INTEGER NOT NULL,
+    yes_cost       REAL NOT NULL,   -- Dollars paid including fees.
+    yes_latency_ms INTEGER NOT NULL,
+    yes_fill_ts    TEXT,
+    no_venue       TEXT NOT NULL,
+    no_contract    TEXT NOT NULL,
+    no_polarity    TEXT NOT NULL,
+    no_limit       REAL NOT NULL,
+    no_filled      INTEGER NOT NULL,
+    no_cost        REAL NOT NULL,
+    no_latency_ms  INTEGER NOT NULL,
+    no_fill_ts     TEXT,
+    yes_held       INTEGER NOT NULL,   -- Contracts still held on the yes leg after any flattening.
+    no_held        INTEGER NOT NULL,
+    matched        INTEGER NOT NULL,   -- Contracts held on both sides after any flattening.
+    profit         REAL NOT NULL,   -- Dollars locked in on the matched contracts, after fees.
+    hedge          TEXT NOT NULL,   -- How a mismatch was flattened, in words.
+    hedge_pnl      REAL NOT NULL,   -- Dollars gained or lost by flattening, after fees.
+    status         TEXT NOT NULL,   -- 'filled', 'partial', or 'failed'.
+    pays_at        TEXT NOT NULL,
+    settled_at     TEXT             -- When both legs had resolved and the payouts were booked.
+);
+
+CREATE TABLE IF NOT EXISTS settlements (
+    trade_id     INTEGER NOT NULL,
+    venue        TEXT NOT NULL,
+    contract_id  TEXT NOT NULL,
+    side         TEXT NOT NULL,     -- 'yes' or 'no', the side of the bet this leg held.
+    held         INTEGER NOT NULL,  -- Contracts held at resolution.
+    cost         REAL NOT NULL,     -- Dollars paid for them including fees.
+    result       TEXT NOT NULL,     -- How the contract resolved, 'yes' or 'no'.
+    payout       REAL NOT NULL,     -- Dollars received, one per contract when the held side won.
+    realized     REAL NOT NULL,     -- payout minus cost.
+    settled_at   TEXT NOT NULL,     -- The venue's settlement time.
+    PRIMARY KEY (trade_id, venue, contract_id)
+);
+
+CREATE TABLE IF NOT EXISTS ledger (
+    id           INTEGER PRIMARY KEY,
+    ts           TEXT NOT NULL,
+    venue        TEXT NOT NULL,
+    amount       REAL NOT NULL,     -- Dollars in or out of the venue balance, positive when money arrives.
+    reason       TEXT NOT NULL,     -- 'buy', 'sell', 'payout', 'transfer_out', or 'transfer_in'.
+    trade_id     INTEGER            -- The trade behind a buy, sell, or payout.
+);
+
+CREATE TABLE IF NOT EXISTS transfers (
+    id           INTEGER PRIMARY KEY,
+    from_venue   TEXT NOT NULL,
+    to_venue     TEXT NOT NULL,
+    amount       REAL NOT NULL,
+    requested_at TEXT NOT NULL,
+    expected_at  TEXT NOT NULL,     -- When the money should land, business days after the request.
+    arrived_at   TEXT,              -- Set when the money was credited to the receiving venue.
+    reason       TEXT NOT NULL      -- 'drift' for the weekly check, 'floor' for a venue running low.
 );
 """
 
@@ -266,7 +339,7 @@ def load_pairs(conn, sport):
     for r in conn.execute("SELECT * FROM pairs"):
         pairs[r["label"]] = dict(r, members=[])
     for r in conn.execute("""
-        SELECT b.*, c.start_time, c.close_time FROM bets b JOIN contracts c USING (venue, contract_id)
+        SELECT b.*, c.event_id, c.start_time, c.close_time FROM bets b JOIN contracts c USING (venue, contract_id)
         WHERE c.sport = ? AND b.pair_label IS NOT NULL""", (sport,)):
         if r["pair_label"] in pairs:
             pairs[r["pair_label"]]["members"].append(dict(r))
@@ -321,6 +394,21 @@ def load_gaps(conn, venue, since=None):
     return [Gap(*row) for row in conn.execute(sql + " ORDER BY start_ts", params)]
 
 
+def insert_opportunities(conn, opportunities):
+    """
+    Append Opportunities.
+    """
+    conn.executemany("""
+        INSERT INTO opportunities (label, kind, trade, yes_venue, yes_contract, no_venue, no_contract,
+                                   start_ts, end_ts, seconds, peak_ts, peak_edge, peak_size, peak_profit,
+                                   live, days_held, return_pct, annual_pct)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, [(o.label, o.kind, o.trade, o.yes_venue, o.yes_contract, o.no_venue, o.no_contract,
+           o.start_ts, o.end_ts, o.seconds, o.peak_ts, o.peak_edge, o.peak_size, o.peak_profit,
+           o.live, o.days_held, o.return_pct, o.annual_pct) for o in opportunities])
+    conn.commit()
+
+
 def load_recording_targets(conn, sport, now, horizon, venues, game_started_after):
     """
     Return {venue: [contract_id, ...]} for every contract in a pair that
@@ -344,24 +432,97 @@ def load_recording_targets(conn, sport, now, horizon, venues, game_started_after
     return targets
 
 
-def insert_opportunities(conn, opportunities):
-    """
-    Append Opportunities.
-    """
-    conn.executemany("""
-        INSERT INTO opportunities (label, kind, trade, yes_venue, yes_contract, no_venue, no_contract,
-                                   start_ts, end_ts, seconds, peak_ts, peak_edge, peak_size, peak_profit,
-                                   live, days_held, return_pct, annual_pct)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    """, [(o.label, o.kind, o.trade, o.yes_venue, o.yes_contract, o.no_venue, o.no_contract,
-           o.start_ts, o.end_ts, o.seconds, o.peak_ts, o.peak_edge, o.peak_size, o.peak_profit,
-           o.live, o.days_held, o.return_pct, o.annual_pct) for o in opportunities])
-    conn.commit()
-
-
 def load_fee_infos(conn, sport):
     """
     Return {(venue, contract_id): fee_info} with the fee schedule currently stored for every contract of a sport.
     """
     return {(venue, cid): jsonutil.parse(fee_info, {})
             for venue, cid, fee_info in conn.execute("SELECT venue, contract_id, fee_info FROM contracts WHERE sport = ?", (sport,))}
+
+
+def insert_trade(conn, t):
+    """
+    Append a finished paper Trade and return its id.
+    """
+    cur = conn.execute("""
+        INSERT INTO trades (label, kind, trade, signal_ts, edge, quantity,
+                            yes_venue, yes_contract, yes_polarity, yes_limit, yes_filled, yes_cost, yes_latency_ms, yes_fill_ts,
+                            no_venue, no_contract, no_polarity, no_limit, no_filled, no_cost, no_latency_ms, no_fill_ts,
+                            yes_held, no_held, matched, profit, hedge, hedge_pnl, status, pays_at, settled_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, (t.label, t.kind, t.trade, t.signal_ts, t.edge, t.quantity,
+          t.yes_venue, t.yes_contract, t.yes_polarity, t.yes_limit, t.yes_filled, t.yes_cost, t.yes_latency_ms, t.yes_fill_ts,
+          t.no_venue, t.no_contract, t.no_polarity, t.no_limit, t.no_filled, t.no_cost, t.no_latency_ms, t.no_fill_ts,
+          t.yes_held, t.no_held, t.matched, t.profit, t.hedge, t.hedge_pnl, t.status, t.pays_at, t.settled_at))
+    conn.commit()
+    t.id = cur.lastrowid
+    return t.id
+
+
+def load_open_trades(conn):
+    """
+    Trades that still hold contracts and have not settled.
+    """
+    return [Trade(**dict(r)) for r in conn.execute("SELECT * FROM trades WHERE settled_at IS NULL AND yes_held + no_held > 0 ORDER BY id")]
+
+
+def settle_trade(conn, trade_id, settled_at, settlements):
+    """
+    Store a Settlement per leg and mark the trade settled.
+    """
+    conn.executemany("""
+        INSERT OR REPLACE INTO settlements (trade_id, venue, contract_id, side, held, cost, result, payout, realized, settled_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+    """, [(s.trade_id, s.venue, s.contract_id, s.side, s.held, s.cost, s.result, s.payout, s.realized, s.settled_at) for s in settlements])
+    conn.execute("UPDATE trades SET settled_at = ? WHERE id = ?", (settled_at, trade_id))
+    conn.commit()
+
+
+def event_ids(conn, venue, contract_ids):
+    """
+    Return {contract_id: event_id} for the contracts of one venue.
+    """
+    return {cid: event for cid, event in conn.execute(
+        f"SELECT contract_id, event_id FROM contracts WHERE venue = ? AND contract_id IN ({','.join('?' * len(contract_ids))})",
+        (venue, *contract_ids))} if contract_ids else {}
+
+
+def add_ledger(conn, entry):
+    """
+    Record one Ledger.
+    """
+    conn.execute("INSERT INTO ledger (ts, venue, amount, reason, trade_id) VALUES (?,?,?,?,?)",
+                 (entry.ts, entry.venue, entry.amount, entry.reason, entry.trade_id))
+    conn.commit()
+
+
+def ledger_totals(conn):
+    """
+    Return {venue: net dollars moved} over the whole ledger.
+    """
+    return {venue: total for venue, total in conn.execute("SELECT venue, SUM(amount) FROM ledger GROUP BY venue")}
+
+
+def insert_transfer(conn, transfer):
+    """
+    Store a requested Transfer and set its id.
+    """
+    cur = conn.execute("INSERT INTO transfers (from_venue, to_venue, amount, requested_at, expected_at, reason, arrived_at) VALUES (?,?,?,?,?,?,?)",
+                       (transfer.from_venue, transfer.to_venue, transfer.amount, transfer.requested_at, transfer.expected_at,
+                        transfer.reason, transfer.arrived_at))
+    conn.commit()
+    transfer.id = cur.lastrowid
+    return transfer.id
+
+
+def load_transfers(conn, pending_only=False):
+    """
+    Transfers oldest first, optionally only those not yet arrived.
+    """
+    sql = "SELECT * FROM transfers" + (" WHERE arrived_at IS NULL" if pending_only else "") + " ORDER BY id"
+    return [Transfer(**dict(r)) for r in conn.execute(sql)]
+
+
+def complete_transfer(conn, transfer_id, arrived_at):
+    conn.execute("UPDATE transfers SET arrived_at = ? WHERE id = ?", (arrived_at, transfer_id))
+    conn.commit()

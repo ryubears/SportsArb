@@ -115,3 +115,88 @@ class Gap:
     venue: str
     start_ts: str           # When the connection was lost.
     end_ts: str | None      # When a new connection was subscribed. None while still down.
+
+
+@dataclass
+class Trade:
+    """
+    One paper trade: two legs sent on a scanner signal, what each filled,
+    the profit locked in on the matched contracts, and how any mismatch
+    was flattened.
+    """
+    label: str              # The pair's label.
+    kind: str
+    trade: str              # The two legs in words.
+    signal_ts: str          # When the scanner signalled.
+    edge: float             # Net dollars per contract at the signal.
+    quantity: int           # Contracts wanted on each leg.
+    yes_venue: str
+    yes_contract: str
+    yes_polarity: str       # The side the contract pays on, so settlement knows whether the leg won.
+    yes_limit: float        # The cost per contract seen at the signal, used as the limit.
+    no_venue: str
+    no_contract: str
+    no_polarity: str
+    no_limit: float
+    pays_at: str            # When the slower leg pays out.
+    yes_filled: int = 0
+    yes_cost: float = 0.0   # Dollars paid including fees.
+    yes_latency_ms: int = 0
+    yes_fill_ts: str | None = None
+    no_filled: int = 0
+    no_cost: float = 0.0
+    no_latency_ms: int = 0
+    no_fill_ts: str | None = None
+    yes_held: int = 0       # Contracts still held on the yes leg after any flattening.
+    no_held: int = 0
+    matched: int = 0        # Contracts held on both sides, after any flattening.
+    profit: float = 0.0     # Dollars locked in on the matched contracts, after fees.
+    hedge: str = "none"     # How the mismatch was flattened, in words.
+    hedge_pnl: float = 0.0  # Dollars gained or lost by flattening, after fees.
+    status: str = "sent"    # 'filled', 'partial', or 'failed'.
+    settled_at: str | None = None   # When both legs had resolved and the payouts were booked.
+    id: int | None = None   # The row id once stored.
+
+
+@dataclass
+class Settlement:
+    """
+    What one leg of a trade paid out when its contract resolved.
+    """
+    trade_id: int
+    venue: str
+    contract_id: str
+    side: str               # 'yes' or 'no', the side of the bet this leg held.
+    held: int               # Contracts held at resolution.
+    cost: float             # Dollars paid for them including fees.
+    result: str             # How the contract resolved, 'yes' or 'no'.
+    payout: float           # Dollars received, one per contract when the held side won.
+    realized: float         # payout minus cost.
+    settled_at: str         # The venue's settlement time.
+
+
+@dataclass
+class Ledger:
+    """
+    One cash movement on a venue's paper balance.
+    """
+    ts: str
+    venue: str
+    amount: float           # Dollars in or out, positive when money arrives.
+    reason: str             # 'buy', 'sell', 'payout', 'transfer_out', or 'transfer_in'.
+    trade_id: int | None = None     # The trade behind a buy, sell, or payout.
+
+
+@dataclass
+class Transfer:
+    """
+    A rebalancing transfer between venues.
+    """
+    from_venue: str
+    to_venue: str
+    amount: float
+    requested_at: str
+    expected_at: str        # When the money should land, business days after the request.
+    reason: str             # 'drift' for the weekly check, 'floor' for a venue running low.
+    arrived_at: str | None = None   # Set when the money was credited to the receiving venue.
+    id: int | None = None   # The row id once stored.

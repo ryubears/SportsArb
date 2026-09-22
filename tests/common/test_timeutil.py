@@ -40,3 +40,9 @@ def test_season_from_date_splits_in_august():
     assert timeutil.season_from_date("2026-09-20") == 2027
     assert timeutil.season_from_date("2027-01-10") == 2027
     assert timeutil.season_from_date("2027-08-01") == 2028
+
+
+def test_add_business_days_skips_weekends():
+    assert timeutil.add_business_days("2026-09-21T12:00:00+00:00", 4) == "2026-09-25T12:00:00+00:00"   # Monday to Friday.
+    assert timeutil.add_business_days("2026-09-24T12:00:00+00:00", 4) == "2026-09-30T12:00:00+00:00"   # Thursday to Wednesday.
+    assert timeutil.add_business_days("2026-09-26T12:00:00+00:00", 1) == "2026-09-28T12:00:00+00:00"   # Saturday to Monday.

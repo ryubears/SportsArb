@@ -80,13 +80,16 @@ class Scanner:
     is older than MAX_QUOTE_AGE or missing from the map, which is how the
     recorder says a venue's books went unseen. Groups and fee schedules come
     from the database and are reloaded after each catalog refresh. Every
-    finished episode is stored at once, and the big ones are logged.
+    finished episode is stored at once, and the big ones are logged. With
+    on_signal, the first moment of each episode that the callback accepts
+    becomes a trade, see execute.py.
     """
 
-    def __init__(self, conn, sport, log=print):
+    def __init__(self, conn, sport, log=print, on_signal=None):
         self.conn = conn
         self.sport = sport
         self.log = log
+        self.on_signal = on_signal          # Called once per episode with the trade to make, if it wants it.
         self.episodes = {}                  # label maps to {"start_ts", "peak", "pair"} while an edge is open.
         self.finished = []                  # Opportunities ended since the last summary.
         self.reload()
@@ -143,6 +146,8 @@ class Scanner:
                 episode = self.episodes[label] = {"start_ts": now, "peak": None, "pair": pair}
             if episode["peak"] is None or edge > episode["peak"]["edge"]:
                 episode["peak"] = {"yes": yes, "no": no, "ts": now, "edge": edge, "size": size, "profit": profit}
+            if self.on_signal and not episode.get("traded") and self.on_signal(pair, yes, no, edge, size, self.fee_infos, now):
+                episode["traded"] = True
         elif episode is not None:
             self.close(label, now)
 

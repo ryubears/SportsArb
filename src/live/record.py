@@ -12,7 +12,9 @@ connection is written again, so the scanner can tell a quiet book from
 one that went unseen.
 
 The scanner from scan.py prices pairs from the same in memory books
-as they change and stores every episode it finds in the opportunities table.
+as they change and stores every episode it finds in the opportunities
+table. The paper executor from execute.py trades the scanner's signals
+against the same books and stores every trade in the trades table.
 
 Only futures and games within GAME_WINDOW_DAYS of kickoff are recorded.
 Every CATALOG_MINUTES the recorder refreshes the catalog in a background
@@ -24,6 +26,7 @@ Run with:
     python3 -m live.record --sport nfl --seconds 120 --catalog-minutes 0
     python3 -m live.record --sport nfl --skip-refresh
     python3 -m live.record --sport nfl --no-scan
+    python3 -m live.record --sport nfl --no-trade
 
 For a long run on a laptop, stop the Mac from sleeping while it runs:
     caffeinate -i -s python3 -m live.record --sport nfl
@@ -38,7 +41,7 @@ from catalog import pipeline
 from common.timeutil import now_iso, shift
 from db import database
 from db.models import Quote, Gap
-from live import scan
+from live import execute, scan
 
 # Print immediately even when output goes to a file.
 sys.stdout.reconfigure(line_buffering=True)
@@ -199,13 +202,14 @@ class Streams:
         self.tasks = {}
 
 
-async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True, with_scanner=True):
+async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True, with_scanner=True, with_trading=True):
     """
     Refresh the catalog, start every stream and the flush timer, and keep the
     catalog fresh on a timer. Stops after the given seconds, or never when zero.
     A refresh that fails is logged and tried again at the next interval, so a
     bad fetch never stops the recording. With with_scanner, the live scanner
-    runs on the same books and logs a summary every scan.SUMMARY_SECONDS.
+    runs on the same books and logs a summary every scan.SUMMARY_SECONDS,
+    and with with_trading as well, the paper executor trades its signals.
     """
     if catalog_seconds and refresh_at_start:
         log("refreshing catalog before starting")
@@ -213,8 +217,10 @@ async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True, with
             log(await asyncio.to_thread(pipeline.refresh, sport, log))
         except Exception as e:
             log(f"catalog refresh failed ({e!r}), starting with the stored catalog")
-    scanner = scan.Scanner(conn, sport, log) if with_scanner else None
-    recorder = Recorder(conn, scanner)
+    recorder = Recorder(conn)
+    executor = execute.PaperExecutor(conn, lambda: recorder.latest, log) if with_scanner and with_trading else None
+    scanner = scan.Scanner(conn, sport, log, executor.signal if executor else None) if with_scanner else None
+    recorder.scanner = scanner
     streams = Streams(recorder)
     targets = load_targets(conn, sport)
     log("recording " + ", ".join(f"{len(ids)} {venue}" for venue, ids in targets.items()) + " contracts")
@@ -230,8 +236,12 @@ async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True, with
             recorder.flush()
             if scanner:
                 scanner.sweep(recorder.latest, now_iso())
+                if executor:
+                    executor.tick(now_iso(), time.time())
                 if time.time() - last_summary >= scan.SUMMARY_SECONDS:
                     log(scanner.summary())
+                    if executor:
+                        log(executor.summary())
                     last_summary = time.time()
             if time.time() - last_status >= STATUS_SECONDS:
                 log(recorder.status())
@@ -255,6 +265,10 @@ async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True, with
         if scanner:
             scanner.sweep({}, now_iso())
             log(scanner.summary())
+        if executor:
+            if executor.tasks:
+                await asyncio.gather(*executor.tasks, return_exceptions=True)
+            log(executor.summary())
         log(recorder.status())
 
 
@@ -269,9 +283,10 @@ if __name__ == "__main__":
     ap.add_argument("--skip-refresh", action="store_true",
                     help="start streaming at once from the stored catalog instead of refreshing first")
     ap.add_argument("--no-scan", action="store_true", help="record only, without the live scanner")
+    ap.add_argument("--no-trade", action="store_true", help="scan without paper trading")
     args = ap.parse_args()
     with database.connect() as conn:
         try:
-            asyncio.run(run(conn, args.sport, args.seconds, args.catalog_minutes * 60, not args.skip_refresh, not args.no_scan))
+            asyncio.run(run(conn, args.sport, args.seconds, args.catalog_minutes * 60, not args.skip_refresh, not args.no_scan, not args.no_trade))
         except KeyboardInterrupt:
             print("stopped")

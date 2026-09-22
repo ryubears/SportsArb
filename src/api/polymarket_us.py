@@ -63,6 +63,22 @@ def fetch_events(tag_slug, page_size=500):
         offset += page_size
 
 
+def results(event_slugs):
+    """
+    Settlement results for every market on the events, as {market slug:
+    (result, settled_at)} with result 'yes' when the long side paid out and
+    'no' when it did not. Markets not yet resolved are left out.
+    """
+    out = {}
+    for slug in set(event_slugs):
+        for event in get_json(f"{GATEWAY}/events", {"slug": slug}).get("events", []):
+            for m in event.get("markets", []):
+                long_side = next((s for s in m.get("marketSides", []) if s.get("long")), None)
+                if m.get("status") == "MARKET_STATUS_RESOLVED" and long_side and long_side.get("price") in ("0", "1"):
+                    out[m["slug"]] = ("yes" if long_side["price"] == "1" else "no", iso(m.get("endDate")))
+    return out
+
+
 def contracts(sport, tags):
     """
     One Contract per open market on events carrying one of the tag slugs.
