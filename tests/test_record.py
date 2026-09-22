@@ -50,8 +50,8 @@ def test_flush_writes_only_when_the_best_level_changes(tmp_path):
 
 def test_books_are_trimmed_to_the_kept_levels(tmp_path):
     r = record.Recorder(database.connect(tmp_path / "test.sqlite"))
-    r.on_book("polymarket", "T", [[0.5 - i / 100, 1] for i in range(10)], [[0.51, 1]])
-    assert len(r.latest[("polymarket", "T")].bids) == record.LEVELS
+    r.on_book("polymarket_us", "T", [[0.5 - i / 100, 1] for i in range(10)], [[0.51, 1]])
+    assert len(r.latest[("polymarket_us", "T")].bids) == record.LEVELS
 
 
 def test_status_reports_time_since_each_venue_updated(tmp_path):
@@ -64,15 +64,15 @@ def test_status_reports_time_since_each_venue_updated(tmp_path):
 def test_gap_is_stored_and_the_venues_books_are_written_again(tmp_path):
     conn = database.connect(tmp_path / "test.sqlite")
     r = record.Recorder(conn)
-    r.on_book("polymarket", "P", [[0.5, 1]], [[0.6, 1]])
+    r.on_book("polymarket_us", "P", [[0.5, 1]], [[0.6, 1]])
     r.on_book("kalshi", "K", [[0.5, 1]], [[0.6, 1]])
     r.flush()
-    r.on_gap("polymarket", "2026-09-20T20:37:31+00:00", "2026-09-20T20:37:36+00:00")
+    r.on_gap("polymarket_us", "2026-09-20T20:37:31+00:00", "2026-09-20T20:37:36+00:00")
     assert list(r.latest) == [("kalshi", "K")]
-    assert "polymarket 1 (last 0s ago, 1 gaps)" in r.status()
-    gaps = database.load_gaps(conn, "polymarket")
+    assert "polymarket_us 1 (last 0s ago, 1 gaps)" in r.status()
+    gaps = database.load_gaps(conn, "polymarket_us")
     assert [(g.start_ts, g.end_ts) for g in gaps] == [("2026-09-20T20:37:31+00:00", "2026-09-20T20:37:36+00:00")]
-    r.on_book("polymarket", "P", [[0.5, 1]], [[0.6, 1]])      # The same book again from the new connection.
+    r.on_book("polymarket_us", "P", [[0.5, 1]], [[0.6, 1]])      # The same book again from the new connection.
     r.flush()
     assert r.rows_written == 3
 
@@ -83,23 +83,23 @@ def test_streams_change_subscriptions_in_place(tmp_path):
     async def scenario():
         FakeStream.instances.clear()
         r = record.Recorder(database.connect(tmp_path / "test.sqlite"))
-        streams = record.Streams(r, {"polymarket": FakeStream, "kalshi": FakeStream})
-        streams.start("polymarket", ["a", "b"])
+        streams = record.Streams(r, {"polymarket_us": FakeStream, "kalshi": FakeStream})
+        streams.start("polymarket_us", ["a", "b"])
         streams.start("kalshi", ["k1"])
         await asyncio.sleep(0)
-        summary = streams.update({"polymarket": ["a", "c"], "kalshi": ["k1"]})
-        pm = streams.streams["polymarket"]
+        summary = streams.update({"polymarket_us": ["a", "c"], "kalshi": ["k1"]})
+        pm = streams.streams["polymarket_us"]
         pm.on_book("b", [[0.5, 1]], [[0.6, 1]])    # A late update for the removed contract.
         pm.on_book("a", [[0.5, 1]], [[0.6, 1]])
         await streams.stop_all()
         return summary, pm, r.latest
     summary, pm, latest = asyncio.run(scenario())
-    assert summary == "polymarket +1 -1"
+    assert summary == "polymarket_us +1 -1"
     assert len(FakeStream.instances) == 2                 # No connection was replaced.
     assert all(s.on_gap is not None for s in FakeStream.instances)
     assert (pm.added, pm.removed, pm.wanted) == ([["c"]], [["b"]], {"a", "c"})
-    assert ("polymarket", "b") not in latest
-    assert ("polymarket", "a") in latest
+    assert ("polymarket_us", "b") not in latest
+    assert ("polymarket_us", "a") in latest
 
 
 # REFRESH LOOP

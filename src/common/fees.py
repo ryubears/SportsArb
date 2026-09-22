@@ -9,15 +9,16 @@ Kalshi, kalshi.com fee schedule:
     maker fee = the same with 0.0175, only on series with fee_type quadratic_with_maker_fees.
     The multiplier is stored per contract in fee_info, 1 for sports.
 
-Polymarket, docs.polymarket.com, fees page:
-    fee = shares * rate * price * (1 - price), makers pay nothing.
-    The rate is stored per contract in fee_info, 0.03 or 0.05 for sports.
+Polymarket US, docs.polymarket.us, fees page:
+    taker fee = coefficient * contracts * price * (1 - price), rounded half to even to the cent.
+    The coefficient is stored per contract in fee_info as feeCoefficient, 0.0695 for sports.
 """
 
 import math
 
 KALSHI_TAKER_RATE = 0.07
 KALSHI_MAKER_RATE = 0.0175
+POLYMARKET_US_TAKER_RATE = 0.0695
 
 
 def kalshi_fee(price, contracts, fee_info, maker=False):
@@ -38,20 +39,20 @@ def kalshi_fee(price, contracts, fee_info, maker=False):
     return math.ceil(round(cents, 6)) / 100
 
 
-def polymarket_fee(price, contracts, fee_info):
+def polymarket_us_fee(price, contracts, fee_info):
     """
-    Taker fee in dollars for buying contracts at price on Polymarket.
+    Taker fee in dollars for buying contracts at price on Polymarket US, rounded half to even to the cent.
     """
-    if not fee_info or not fee_info.get("feesEnabled"):
-        return 0.0
-    rate = (fee_info.get("feeSchedule") or {}).get("rate", 0.0)
-    return contracts * rate * price * (1 - price)
+    coefficient = (fee_info or {}).get("feeCoefficient")
+    if coefficient is None:
+        coefficient = POLYMARKET_US_TAKER_RATE
+    return round(coefficient * contracts * price * (1 - price), 2)
 
 
 def fee(venue, price, contracts, fee_info):
     """
     Taker fee in dollars for any venue.
     """
-    if venue == "polymarket":
-        return polymarket_fee(price, contracts, fee_info)
+    if venue == "polymarket_us":
+        return polymarket_us_fee(price, contracts, fee_info)
     return kalshi_fee(price, contracts, fee_info)

@@ -5,7 +5,7 @@ Two jobs. The query half walks sports series to events to markets on the
 public API and turns every open market into a Contract. The streaming
 half opens one websocket with a signed API key, subscribes to order book
 updates, and keeps a live book for each ticker restated from the Yes side
-so it matches Polymarket's shape. Tickers can be added and removed while
+so it matches Polymarket US's shape. Tickers can be added and removed while
 the connection runs. This is the only file that knows Kalshi's field
 names and message formats.
 """
@@ -165,7 +165,7 @@ def update_frame(message_id, sid, tickers, action):
 class KalshiBookStream(BookStream):
     """
     Kalshi's order book channel over a signed connection. Books are given
-    from the Yes side, best first, so they look the same as Polymarket's. A
+    from the Yes side, best first, so they look the same as Polymarket US's. A
     resting No order at price p is a Yes ask at 1 minus p. Every message
     counts as data because the feed has no keepalive replies, and the
     stale limit is generous because the feed sends nothing while books

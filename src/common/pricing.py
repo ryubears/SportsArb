@@ -109,7 +109,7 @@ def best_trade(members, quotes, fee_infos):
 
 def trade_words(yes, no):
     """
-    The two legs in words, for example 'yes: K buy, no: PM buy other side'.
+    The two legs in words, for example 'yes: K buy, no: PMUS buy other side'.
     """
     def leg(member, side):
         action = "buy" if member["polarity"] == side else "buy other side"

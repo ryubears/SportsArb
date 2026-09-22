@@ -23,10 +23,10 @@ class Contract:
     One tradable Yes side outcome, described the same way for every venue.
     """
     venue: str
-    contract_id: str        # Kalshi market ticker, or Polymarket outcome token id.
-    market_id: str          # Kalshi market ticker, or Polymarket conditionId.
-    event_id: str           # Kalshi event ticker, or Polymarket event slug.
-    series_id: str | None   # Kalshi series ticker. Polymarket has none.
+    contract_id: str        # Kalshi market ticker, or Polymarket US market slug.
+    market_id: str          # Kalshi market ticker, or Polymarket US market id.
+    event_id: str           # Kalshi event ticker, or Polymarket US event slug.
+    series_id: str | None   # Kalshi series ticker, or Polymarket US series slug.
     sport: str
     event_title: str | None
     title: str

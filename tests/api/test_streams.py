@@ -2,94 +2,8 @@
 Tests for the venue stream frames and book handling that need no network.
 """
 
-import asyncio
-import json
 import pytest
-from api import bookstream, kalshi, polymarket
-
-
-class FakeSocket:
-    """
-    Collects the frames a stream sends.
-    """
-
-    def __init__(self):
-        self.frames = []
-
-    async def send(self, raw):
-        self.frames.append(json.loads(raw))
-
-
-def test_polymarket_subscribe_opens_with_one_chunk_and_queues_the_rest(monkeypatch):
-    monkeypatch.setattr(polymarket, "WS_CHUNK", 2)
-    stream = polymarket.PolymarketBookStream(["a", "b", "c", "d", "e"], lambda *args: None)
-    stream.reset()
-    ws = FakeSocket()
-    asyncio.run(stream.subscribe(ws))
-    assert ws.frames == [{"assets_ids": ["a", "b"], "type": "market"}]
-    assert stream.pending == {"a", "b"}
-    assert stream.commands.get_nowait() == ("add", ["c", "d", "e"])
-
-
-def test_polymarket_adds_wait_for_the_last_chunks_snapshots(monkeypatch):
-    monkeypatch.setattr(polymarket, "WS_CHUNK", 2)
-    monkeypatch.setattr(polymarket, "WS_CHUNK_SECONDS", 0.3)
-    stream = polymarket.PolymarketBookStream(["a", "b", "c", "d", "e"], lambda *args: None)
-    stream.reset()
-    stream.pending = {"a", "b"}
-    ws = FakeSocket()
-
-    async def scenario():
-        sender = asyncio.create_task(stream.send_command(ws, "add", ["c", "d", "e"]))
-        await asyncio.sleep(0.15)
-        sent_before = len(ws.frames)
-        stream.books["a"] = stream.books["b"] = {}     # The first chunk's snapshots land.
-        await asyncio.sleep(0.15)
-        sent_after = len(ws.frames)
-        await sender
-        return sent_before, sent_after
-
-    sent_before, sent_after = asyncio.run(scenario())
-    assert sent_before == 0 and sent_after == 1              # Waited for snapshots, then sent the next chunk.
-    assert ws.frames[0] == {"assets_ids": ["c", "d"], "operation": "subscribe"}
-    assert ws.frames[1] == {"assets_ids": ["e"], "operation": "subscribe"}    # Sent once the wait timed out.
-    assert stream.pending == {"e"}
-
-
-def test_polymarket_removes_are_sent_at_once(monkeypatch):
-    monkeypatch.setattr(polymarket, "WS_CHUNK", 2)
-    stream = polymarket.PolymarketBookStream(["a"], lambda *args: None)
-    stream.reset()
-    ws = FakeSocket()
-    asyncio.run(stream.send_command(ws, "remove", ["x", "y", "z"]))
-    assert ws.frames == [{"assets_ids": ["x", "y"], "operation": "unsubscribe"}, {"assets_ids": ["z"], "operation": "unsubscribe"}]
-
-
-def test_polymarket_stream_queues_only_real_changes():
-    stream = polymarket.PolymarketBookStream(["a", "b"], lambda *args: None)
-    stream.add(["b", "c"])
-    stream.remove(["a", "zzz"])
-    assert stream.wanted == {"b", "c"}
-    assert stream.commands.get_nowait() == ("add", ["c"])
-    assert stream.commands.get_nowait() == ("remove", ["a"])
-    assert stream.commands.empty()
-
-
-def test_polymarket_stream_applies_snapshot_and_change():
-    seen = []
-    stream = polymarket.PolymarketBookStream(["t"], lambda token, bids, asks: seen.append((token, bids, asks)))
-    stream.apply({"event_type": "book", "asset_id": "t", "bids": [{"price": "0.48", "size": "10"}], "asks": [{"price": "0.50", "size": "5"}]})
-    stream.apply({"event_type": "price_change", "price_changes": [{"asset_id": "t", "price": "0.49", "size": "7", "side": "BUY"},
-                                                                  {"asset_id": "other", "price": "0.1", "size": "1", "side": "BUY"}]})
-    assert seen[0] == ("t", [[0.48, 10.0]], [[0.5, 5.0]])
-    assert seen[1] == ("t", [[0.49, 7.0], [0.48, 10.0]], [[0.5, 5.0]])
-    assert len(seen) == 2
-
-
-def test_polymarket_pong_does_not_count_as_data():
-    stream = polymarket.PolymarketBookStream(["t"], lambda *args: None)
-    assert stream.handle("PONG") is False
-    assert stream.handle('{"event_type": "price_change", "price_changes": []}') is True
+from api import bookstream, kalshi, polymarket_us
 
 
 def test_kalshi_close_time_takes_the_earlier_of_close_and_expected_expiration():
@@ -122,3 +36,13 @@ def test_kalshi_stream_asks_to_reconnect_on_a_sequence_gap():
     stream.handle('{"type": "ok", "seq": 2, "msg": {}}')
     with pytest.raises(bookstream.Reconnect):
         stream.handle('{"type": "ok", "seq": 4, "msg": {}}')
+
+
+def test_polymarket_us_stream_replaces_the_book_from_each_message():
+    seen = []
+    stream = polymarket_us.PolymarketUSBookStream(["s"], lambda slug, bids, asks: seen.append((slug, bids, asks)))
+    stream.reset()
+    assert stream.handle('{"requestId": "md-1", "subscriptionType": "SUBSCRIPTION_TYPE_MARKET_DATA"}') is False
+    stream.handle('{"marketData": {"marketSlug": "s", "bids": [{"px": {"value": "0.30"}, "qty": "5"}, {"px": {"value": "0.31"}, "qty": "2"}], "offers": [{"px": {"value": "0.33"}, "qty": "1"}]}}')
+    stream.handle('{"marketData": {"marketSlug": "other", "bids": [], "offers": []}}')
+    assert seen == [("s", [[0.31, 2.0], [0.30, 5.0]], [[0.33, 1.0]])]
