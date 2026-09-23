@@ -49,7 +49,7 @@ def test_settlement_pays_the_winning_leg_only_and_records_each_leg(tmp_path):
     # The bet resolved yes. The Polymarket US leg held the yes side and is paid a dollar each. The Kalshi leg held no and gets nothing.
     assert (legs["polymarket_us"]["payout"], legs["polymarket_us"]["realized"]) == (50, pytest.approx(50 - 22.5))
     assert (legs["kalshi"]["payout"], legs["kalshi"]["realized"]) == (0, pytest.approx(-23.5))
-    assert cash.amounts == pytest.approx({"polymarket_us": 5000 + 50, "kalshi": 5000})
+    assert cash.amounts == pytest.approx({"polymarket_us": 10000 + 50, "kalshi": 10000})
     assert [tuple(r) for r in conn.execute("SELECT venue, amount, reason, trade_id FROM ledger")] == [("polymarket_us", 50.0, "payout", trade.id)]
     assert logs == [f"settled {trade.label}: polymarket_us yes yes pays 50$, kalshi no yes pays 0$, realized +4.00$"]
     assert s.summary() == "settled: 1 trades for +4.00$, 0 still open"

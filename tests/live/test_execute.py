@@ -68,7 +68,7 @@ def test_unchanged_books_fill_both_legs_and_lock_in_the_edge(tmp_path, quick):
     assert t["profit"] == pytest.approx(50 * (1 - 0.45 - 0.47))
     assert (t["hedge"], t["hedge_pnl"], t["yes_held"], t["no_held"]) == ("none", 0, 50, 50)
     assert t["pays_at"] == "2026-09-20T21:00:00+00:00"
-    assert cash.amounts == pytest.approx({"polymarket_us": 5000 - 50 * 0.45, "kalshi": 5000 - 50 * 0.47})
+    assert cash.amounts == pytest.approx({"polymarket_us": 10000 - 50 * 0.45, "kalshi": 10000 - 50 * 0.47})
     assert [tuple(r) for r in conn.execute("SELECT venue, amount, reason, trade_id FROM ledger ORDER BY id")] == [
         ("polymarket_us", pytest.approx(-22.5), "buy", 1), ("kalshi", pytest.approx(-23.5), "buy", 1)]
     assert logs[0].startswith("paper filled: game_winner 2026-09-20 CAR@ATL CAR")
@@ -90,7 +90,7 @@ def test_a_shrunken_leg_is_completed_on_the_other_venue_when_that_is_cheaper(tmp
     assert t["hedge"] == "bought 20 of 30 on kalshi, 10 exposed"
     assert t["hedge_pnl"] == pytest.approx(20 * (1 - 0.45 - 0.47))
     assert (t["matched"], t["status"], t["yes_held"], t["no_held"]) == (40, "partial", 50, 40)
-    assert cash["kalshi"] == pytest.approx(5000 - 40 * 0.47)
+    assert cash["kalshi"] == pytest.approx(10000 - 40 * 0.47)
 
 
 def test_a_leg_with_no_book_is_flattened_by_selling_the_other_back(tmp_path, quick):
@@ -102,8 +102,8 @@ def test_a_leg_with_no_book_is_flattened_by_selling_the_other_back(tmp_path, qui
     assert t["hedge"] == "sold back 50 of 50 on polymarket_us, no leg no book"
     assert t["hedge_pnl"] == pytest.approx(50 * (0.44 - 0.45))
     assert (t["yes_held"], t["no_held"]) == (0, 0)
-    assert cash["polymarket_us"] == pytest.approx(5000 - 50 * 0.45 + 50 * 0.44)
-    assert cash["kalshi"] == pytest.approx(5000)
+    assert cash["polymarket_us"] == pytest.approx(10000 - 50 * 0.45 + 50 * 0.44)
+    assert cash["kalshi"] == pytest.approx(10000)
 
 
 def test_rejected_orders_fail_without_a_hedge(tmp_path, quick, monkeypatch):
@@ -113,13 +113,13 @@ def test_rejected_orders_fail_without_a_hedge(tmp_path, quick, monkeypatch):
     run(ex)
     t = stored(conn)[0]
     assert (t["status"], t["matched"], t["hedge"]) == ("failed", 0, "yes leg rejected, no leg rejected")
-    assert cash.amounts == pytest.approx({"polymarket_us": 5000, "kalshi": 5000})
+    assert cash.amounts == pytest.approx({"polymarket_us": 10000, "kalshi": 10000})
 
 
 def test_signal_is_refused_for_thin_edges_and_slow_payouts(tmp_path, quick):
     latest = books()
     conn, cash, ex = executor(tmp_path, latest)
-    assert ex.signal(PAIR, YES, NO, 0.01, 100, FEES, NOW) is False
+    assert ex.signal(PAIR, YES, NO, 0.005, 100, FEES, NOW) is False
     future = dict(YES, start_time=None, close_time="2027-02-14T00:00:00+00:00")
     assert ex.signal(PAIR, future, dict(NO, start_time=None, close_time="2027-02-14T00:00:00+00:00"), 0.05, 100, FEES, NOW) is False
     assert ex.tasks == set() and stored(conn) == []

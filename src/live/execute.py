@@ -30,8 +30,8 @@ from live import fees
 from live.pricing import ladder, trade_words
 from live.scan import resolution_time
 
-MIN_EDGE = 0.02             # Net dollars per contract a signal must show before orders are sent.
-MAX_QUANTITY = 200          # Contracts per trade.
+MIN_EDGE = 0.01             # Net dollars per contract a signal must show before orders are sent.
+MAX_QUANTITY = 1000         # Contracts per trade. Both legs together cost about a dollar a contract, so this caps a trade near 1,000 dollars.
 RESOLVE_HOURS = 24          # Only pairs paying out within this many hours are traded.
 FILL_SHARE = 0.5            # The share of visible size at a level assumed to be ours. Other takers get the rest.
 REJECT_PROBABILITY = 0.03   # The share of orders a venue rejects outright, for rate limits and errors.

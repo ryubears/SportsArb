@@ -1,16 +1,18 @@
 """
 Paper cash per venue, backed by the ledger.
 
-Each venue's balance is the starting amount plus every ledger entry for
-it, so it survives a restart. Money for an order in flight is reserved
-without a ledger entry and released when the order comes back, so two
-signals in the same moment cannot both spend the same dollars.
+Every ledger entry records the balance it left behind, so a venue's
+balance is simply its newest entry and survives a restart without
+replaying the history. A venue with no entries starts at BALANCE. Money
+for an order in flight is reserved without a ledger entry and released
+when the order comes back, so two signals in the same moment cannot both
+spend the same dollars.
 """
 
 from common.venues import VENUES
 from db import database
 
-BALANCE = 5000.0    # Paper dollars per venue at the start.
+BALANCE = 10000.0   # Paper dollars per venue at the start.
 
 
 class Balances:
@@ -20,8 +22,8 @@ class Balances:
 
     def __init__(self, conn, start=BALANCE):
         self.conn = conn
-        totals = database.ledger_totals(conn)
-        self.amounts = {venue: start + totals.get(venue, 0.0) for venue in VENUES}
+        last = database.last_balances(conn)
+        self.amounts = {venue: last.get(venue, start) for venue in VENUES}
 
     def __getitem__(self, venue):
         return self.amounts[venue]
@@ -40,9 +42,10 @@ class Balances:
 
     def book(self, entry):
         """
-        Apply a Ledger entry to its venue and store it.
+        Apply a Ledger entry to its venue and store it with the balance it leaves.
         """
         self.amounts[entry.venue] += entry.amount
+        entry.balance = self.amounts[entry.venue]
         database.add_ledger(self.conn, entry)
 
     def richest(self):

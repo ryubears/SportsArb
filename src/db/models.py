@@ -185,6 +185,7 @@ class Ledger:
     amount: float           # Dollars in or out, positive when money arrives.
     reason: str             # 'buy', 'sell', 'payout', 'transfer_out', or 'transfer_in'.
     trade_id: int | None = None     # The trade behind a buy, sell, or payout.
+    balance: float | None = None    # The venue's balance after this entry, so the newest entry gives the balance.
 
 
 @dataclass

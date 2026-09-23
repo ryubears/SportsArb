@@ -111,6 +111,8 @@ def test_old_databases_are_migrated_to_pairs(tmp_path):
         CREATE TABLE fee_history (venue TEXT, contract_id TEXT, seen_at TEXT, fee_info TEXT);
         CREATE TABLE stream_gaps (venue TEXT, start_ts TEXT, end_ts TEXT, PRIMARY KEY (venue, start_ts));
         INSERT INTO stream_gaps VALUES ('kalshi', '2026-09-21T19:39:39+00:00', '2026-09-21T19:39:41+00:00');
+        CREATE TABLE ledger (id INTEGER PRIMARY KEY, ts TEXT, venue TEXT, amount REAL, reason TEXT, trade_id INTEGER);
+        INSERT INTO ledger (ts, venue, amount, reason, trade_id) VALUES ('t1', 'kalshi', -23.5, 'buy', 1), ('t2', 'kalshi', 50, 'payout', 1);
     """)
     old.commit(); old.close()
     conn = database.connect(path)
@@ -119,3 +121,5 @@ def test_old_databases_are_migrated_to_pairs(tmp_path):
     assert not {"bet_groups", "fee_history", "stream_gaps"} & tables
     assert conn.execute("SELECT pair_label FROM bets").fetchone()[0] == "champion 2027 BUF"
     assert [g.start_ts[11:19] for g in database.load_gaps(conn, "kalshi")] == ["19:39:39"]
+    assert [r[0] for r in conn.execute("SELECT balance FROM ledger ORDER BY id")] == [10000 - 23.5, 10000 + 26.5]   # Replayed from the start.
+    assert database.last_balances(conn) == {"kalshi": 10026.5}

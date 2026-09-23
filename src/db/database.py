@@ -170,7 +170,8 @@ CREATE TABLE IF NOT EXISTS ledger (
     venue        TEXT NOT NULL,
     amount       REAL NOT NULL,     -- Dollars in or out of the venue balance, positive when money arrives.
     reason       TEXT NOT NULL,     -- 'buy', 'sell', 'payout', 'transfer_out', or 'transfer_in'.
-    trade_id     INTEGER            -- The trade behind a buy, sell, or payout.
+    trade_id     INTEGER,           -- The trade behind a buy, sell, or payout.
+    balance      REAL NOT NULL      -- The venue's balance after this entry, so the newest entry gives the balance.
 );
 
 CREATE TABLE IF NOT EXISTS transfers (
@@ -217,6 +218,15 @@ def migrate(conn):
     if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'stream_gaps'").fetchone():
         conn.execute("INSERT OR REPLACE INTO gaps (venue, start_ts, end_ts) SELECT venue, start_ts, end_ts FROM stream_gaps")
         conn.execute("DROP TABLE stream_gaps")
+    ledger_columns = [r[1] for r in conn.execute("PRAGMA table_info(ledger)")]
+    if ledger_columns and "balance" not in ledger_columns:
+        # Older ledgers only held the movements. Replay them from the starting balance to fill in the running balance.
+        from live.balances import BALANCE
+        conn.execute("ALTER TABLE ledger ADD COLUMN balance REAL NOT NULL DEFAULT 0")
+        running = {}
+        for row_id, venue, amount in conn.execute("SELECT id, venue, amount FROM ledger ORDER BY id").fetchall():
+            running[venue] = running.get(venue, BALANCE) + amount
+            conn.execute("UPDATE ledger SET balance = ? WHERE id = ?", (running[venue], row_id))
     columns = [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]
     if "scope" in columns:
         conn.execute("DROP TABLE opportunities")
@@ -504,18 +514,19 @@ def event_ids(conn, venue, contract_ids):
 
 def add_ledger(conn, entry):
     """
-    Record one Ledger.
+    Record one Ledger entry, with the balance it left behind.
     """
-    conn.execute("INSERT INTO ledger (ts, venue, amount, reason, trade_id) VALUES (?,?,?,?,?)",
-                 (entry.ts, entry.venue, entry.amount, entry.reason, entry.trade_id))
+    conn.execute("INSERT INTO ledger (ts, venue, amount, reason, trade_id, balance) VALUES (?,?,?,?,?,?)",
+                 (entry.ts, entry.venue, entry.amount, entry.reason, entry.trade_id, entry.balance))
     conn.commit()
 
 
-def ledger_totals(conn):
+def last_balances(conn):
     """
-    Return {venue: net dollars moved} over the whole ledger.
+    Return {venue: balance} from each venue's newest ledger entry.
     """
-    return {venue: total for venue, total in conn.execute("SELECT venue, SUM(amount) FROM ledger GROUP BY venue")}
+    return {venue: balance for venue, balance in conn.execute(
+        "SELECT venue, balance FROM ledger WHERE id IN (SELECT MAX(id) FROM ledger GROUP BY venue)")}
 
 
 def insert_transfer(conn, transfer):

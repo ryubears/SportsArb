@@ -177,9 +177,9 @@ def print_trades(conn):
         print_table("settled legs by venue", ("venue", "legs", "contracts", "cost $", "payout $", "realized $"), settled)
     open_count = first_value(conn, "SELECT COUNT(*) FROM trades WHERE settled_at IS NULL AND yes_held + no_held > 0")
     print(f"  {open_count:,} trades still open")
-    balances = query_rows(conn, "SELECT venue, ROUND(SUM(amount), 2) FROM ledger GROUP BY venue ORDER BY venue")
+    balances = query_rows(conn, "SELECT venue, ROUND(balance, 2) FROM ledger WHERE id IN (SELECT MAX(id) FROM ledger GROUP BY venue) ORDER BY venue")
     if balances:
-        print("  ledger by venue, against the starting balance: " + ", ".join(f"{v} {a:+,.2f}$" for v, a in balances))
+        print("  balances from the ledger: " + ", ".join(f"{v} {a:,.2f}$" for v, a in balances))
     transfers = query_rows(conn, "SELECT from_venue, to_venue, ROUND(amount), reason, substr(requested_at, 1, 10), substr(arrived_at, 1, 10) FROM transfers ORDER BY id DESC LIMIT 5")
     if transfers:
         print_table("transfers", ("from", "to", "amount $", "reason", "requested", "arrived"), [(f, t, a, r, q, v or "in transit") for f, t, a, r, q, v in transfers])
