@@ -2,12 +2,13 @@
 Turn Kalshi contracts into Bets.
 
 The series ticker says the kind, the event ticker holds the season or the
-game, and the market ticker holds the team. This is the only file that
-knows Kalshi's ticker layout.
+game, and the market ticker holds the team. Player props name the player
+in the title, before the colon. This is the only file that knows Kalshi's
+ticker layout.
 """
 
 import re
-from catalog.classify.teams import team_from_code
+from catalog.classify.teams import player_key, team_from_code
 from common.timeutil import season_from_date
 from datetime import datetime
 from db.models import Bet
@@ -23,6 +24,23 @@ FUTURE_SERIES = {
 }
 DIVISION_SERIES = re.compile(r"^KXNFL(AFC|NFC)(EAST|WEST|NORTH|SOUTH)$")
 GAME_SERIES = {"KXNFLGAME": "game_winner", "KXNFLSPREAD": "spread", "KXNFLTOTAL": "total"}
+# Player props on one game. Every one but the first touchdown carries a line, stored as the strict threshold.
+PLAYER_SERIES = {
+    "KXNFLRECYDS": "player_receiving_yards",
+    "KXNFLRSHYDS": "player_rushing_yards",
+    "KXNFLPASSYDS": "player_passing_yards",
+    "KXNFLREC": "player_receptions",
+    "KXNFLPASSTDS": "player_passing_touchdowns",
+    "KXNFLTD": "player_touchdowns",
+    "KXNFLFIRSTTD": "player_first_touchdown",
+    "KXNFLPASSCOMP": "player_passing_completions",
+    "KXNFLPASSATT": "player_passing_attempts",
+    "KXNFLPASSINT": "player_interceptions_thrown",
+    "KXNFLRSHATT": "player_rushing_attempts",
+    "KXNFLRRYDS": "player_scrimmage_yards",
+    "KXNFLLONGREC": "player_longest_reception",
+}
+PLAYER_TITLE = re.compile(r"^(.+?): ")     # 'Bijan Robinson: 100+ receiving yards'.
 EVENT_TAIL = re.compile(r"^([A-Z]*)(\d{2})([A-Z]*)$")
 
 
@@ -80,6 +98,18 @@ def classify(row):
             return Bet(kind=kind, subject=subject, line=row["line"], polarity="yes", **common)
         if kind == "total":
             return Bet(kind=kind, subject=None, line=row["line"], polarity="yes", **common) if row["line"] is not None else None
+
+    if series in PLAYER_SERIES:
+        game_date, away, home = parse_game(event_tail)
+        m = PLAYER_TITLE.match(row["title"] or "")
+        if not game_date or not (away and home) or not m or "D/ST" in m.group(1):
+            return None
+        kind = PLAYER_SERIES[series]
+        line = None if kind == "player_first_touchdown" else row["line"]
+        if kind != "player_first_touchdown" and line is None:
+            return None
+        return Bet(kind=kind, season=season_from_date(game_date), game_date=game_date, team_a=away, team_b=home,
+                   subject=player_key(m.group(1)), line=line, polarity="yes", **base)
 
     kind = FUTURE_SERIES.get(series) or ("division_champion" if DIVISION_SERIES.match(series) else None)
     if not kind:

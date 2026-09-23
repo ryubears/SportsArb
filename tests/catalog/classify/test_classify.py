@@ -24,3 +24,10 @@ def test_classify_all_routes_by_venue_and_counts_the_rest():
     bets, unclassified = classify.classify_all(rows)
     assert [(b.venue, b.kind, b.subject) for b in bets] == [("kalshi", "champion", "BUF"), ("polymarket_us", "champion", "BUF")]
     assert [r["contract_id"] for r in unclassified] == ["x", "old"]
+
+
+def test_player_key_drops_punctuation_and_suffixes():
+    assert teams.player_key("A.J. Brown") == teams.player_key("AJ Brown") == "aj brown"
+    assert teams.player_key("Aaron Jones Sr.") == "aaron jones"
+    assert teams.player_key("Michael Penix Jr.") == "michael penix"
+    assert teams.player_key("Ja'Marr Chase") == "jamarr chase"

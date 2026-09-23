@@ -29,6 +29,7 @@ KIND_NOTES = {
     "spread": "If the game does not start within 48 hours, Kalshi settles at a fair price. Polymarket US waits up to two weeks for a rescheduled game.",
     "total": "If the game does not start within 48 hours, Kalshi settles at a fair price. Polymarket US waits up to two weeks for a rescheduled game.",
 }
+PLAYER_NOTE = "Both venues settle to the pre-game fair price if the player never takes a snap and count overtime. Polymarket US ignores stat corrections made after the game."
 
 
 def identity(bet):
@@ -62,6 +63,8 @@ def flags(rows):
         found.append(f"close times {days_between(closes[0], closes[-1]):.0f} days apart")
     if rows[0]["kind"] in KIND_NOTES:
         found.append(KIND_NOTES[rows[0]["kind"]])
+    if rows[0]["kind"].startswith("player_"):
+        found.append(PLAYER_NOTE)
     return found
 
 

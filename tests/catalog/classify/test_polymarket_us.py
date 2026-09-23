@@ -63,3 +63,23 @@ def test_glued_codes_cover_every_odd_team_name():
 def test_skips_props_and_awards():
     assert polymarket_us.classify(row("nfl-phi-ten-2026-09-20", "x", "football_player_touchdowns", 0.5)) is None
     assert polymarket_us.classify(row("nfl-mvp-2027-02-11-w", "tec-nfl-mvp-2027-02-11-w-abc", "futures", start_time=None)) is None
+
+
+def test_player_props_shift_the_at_least_line_by_a_half():
+    yards = polymarket_us.classify(row("nfl-atl-gb-2026-09-24", "astatc-nfl-atl-gb-2026-09-24-recyd-bijrob-gte40", "football_player_receiving_yards", 40.0,
+                                       start_time="2026-09-25T00:15:00+00:00") | {"title": "Will Bijan Robinson record 40+ receiving yards?"})
+    tds = polymarket_us.classify(row("nfl-atl-gb-2026-09-24", "astatc-nfl-atl-gb-2026-09-24-td-bijrob-gte1", "football_player_touchdowns", 1.0,
+                                     start_time="2026-09-25T00:15:00+00:00") | {"title": "Will Bijan Robinson record 1+ touchdowns?"})
+    first = polymarket_us.classify(row("nfl-atl-gb-2026-09-24", "astatc-nfl-atl-gb-2026-09-24-firsttd-bijrob", "football_player_first_touchdown",
+                                       start_time="2026-09-25T00:15:00+00:00") | {"title": "Will Bijan Robinson score the first touchdown?"})
+    picks = polymarket_us.classify(row("nfl-atl-gb-2026-09-24", "astatc-nfl-atl-gb-2026-09-24-int-jorlov-gte1", "football_player_interceptions_thrown", 1.0,
+                                       start_time="2026-09-25T00:15:00+00:00") | {"title": "Will Jordan Love throw 1+ interceptions?"})
+    assert bet_fields(yards) == ("player_receiving_yards", 2027, "2026-09-24", "ATL", "GB", "bijan robinson", 39.5, "yes")
+    assert bet_fields(tds) == ("player_touchdowns", 2027, "2026-09-24", "ATL", "GB", "bijan robinson", 0.5, "yes")
+    assert bet_fields(first) == ("player_first_touchdown", 2027, "2026-09-24", "ATL", "GB", "bijan robinson", None, "yes")
+    assert (picks.kind, picks.subject, picks.line) == ("player_interceptions_thrown", "jordan love", 0.5)
+
+
+def test_player_props_skip_titles_without_a_player():
+    assert polymarket_us.classify(row("nfl-atl-gb-2026-09-24", "astatc-nfl-atl-gb-2026-09-24-firsttd-none", "football_player_first_touchdown",
+                                      start_time="2026-09-25T00:15:00+00:00") | {"title": "Will no touchdown be scored?"}) is None

@@ -5,12 +5,13 @@ Every contract is a market's long side. The event slug names the game or
 the future, the market slug ends with the team for futures, and the line
 is the away team's handicap for spreads. The venue's titles on positive
 spread lines contradict its own prices, so only the slug and the signed
-line are trusted. This is the only file that knows Polymarket US's slug
-layout.
+line are trusted. Player props name the player in the title and carry an
+'at least N' line, restated as the strict threshold N minus a half. This
+is the only file that knows Polymarket US's slug layout.
 """
 
 import re
-from catalog.classify.teams import ALIASES, team_from_code
+from catalog.classify.teams import ALIASES, player_key, team_from_code
 from common.timeutil import eastern_date, season_from_date
 from db.models import Bet
 
@@ -22,6 +23,22 @@ GAME_KINDS = {
     "football_team_full_game_spread": "spread",
     "football_team_full_game_total": "total",
 }
+PLAYER_KINDS = {
+    "football_player_receiving_yards": "player_receiving_yards",
+    "football_player_rushing_yards": "player_rushing_yards",
+    "football_player_passing_yards": "player_passing_yards",
+    "football_player_receptions": "player_receptions",
+    "football_player_passing_touchdowns": "player_passing_touchdowns",
+    "football_player_touchdowns": "player_touchdowns",
+    "football_player_first_touchdown": "player_first_touchdown",
+    "football_player_passing_completions": "player_passing_completions",
+    "football_player_passing_attempts": "player_passing_attempts",
+    "football_player_interceptions_thrown": "player_interceptions_thrown",
+    "football_player_rushing_attempts": "player_rushing_attempts",
+    "football_player_scrimmage_yards": "player_scrimmage_yards",
+    "football_player_longest_reception": "player_longest_reception",
+}
+PLAYER_TITLE = re.compile(r"^Will (.+?) (?:record|score|throw) ")     # 'Will Bijan Robinson record 40+ receiving yards?'.
 FUTURE_KINDS = {
     "champ": "champion",
     "afcchamp": "conf_champion", "nfcchamp": "conf_champion",
@@ -68,11 +85,21 @@ def classify(row):
     m = GAME_EVENT.match(row["event_id"])
     if m:
         away, home = team_from_code(m.group(1)), team_from_code(m.group(2))
-        kind = GAME_KINDS.get(row["market_type"])
+        kind = GAME_KINDS.get(row["market_type"]) or PLAYER_KINDS.get(row["market_type"])
         if not (away and home and kind and row["start_time"]):
             return None
         game_date = eastern_date(row["start_time"])
         common = dict(season=season_from_date(game_date), game_date=game_date, team_a=away, team_b=home, **base)
+        if kind in PLAYER_KINDS.values():
+            # 'At least N' pays on N or more, which is strictly more than N minus a half.
+            name = PLAYER_TITLE.match(row["title"] or "")
+            if not name:
+                return None
+            if kind == "player_first_touchdown":
+                return Bet(kind=kind, subject=player_key(name.group(1)), line=None, polarity="yes", **common)
+            if row["line"] is None:
+                return None
+            return Bet(kind=kind, subject=player_key(name.group(1)), line=row["line"] - 0.5, polarity="yes", **common)
         if kind == "game_winner":
             return Bet(kind=kind, subject=away, line=None, polarity="yes", **common)
         if row["line"] is None:

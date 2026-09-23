@@ -58,3 +58,12 @@ def test_two_kalshi_contracts_alone_do_not_form_a_pair():
     game = dict(kind="game_winner", game_date="2026-09-20", team_a="CAR", team_b="ATL", subject="CAR")
     pairs, unmatched = match.match([bet("kalshi", "k_car", polarity="yes", **game), bet("kalshi", "k_atl", polarity="no", **game)])
     assert pairs == [] and len(unmatched) == 2
+
+
+def test_player_props_pair_across_venues_and_carry_the_rules_note():
+    prop = dict(kind="player_receiving_yards", game_date="2026-09-24", team_a="ATL", team_b="GB", subject="bijan robinson", line=39.5)
+    pairs, unmatched = match.match([bet("kalshi", "k", **prop), bet("polymarket_us", "us", **prop),
+                                    bet("polymarket_us", "us50", **dict(prop, line=49.5))])
+    assert len(pairs) == 1 and [b["contract_id"] for b in unmatched] == ["us50"]
+    assert pairs[0].label == "player_receiving_yards 2026-09-24 ATL@GB bijan robinson 39.5"
+    assert match.PLAYER_NOTE in pairs[0].flags

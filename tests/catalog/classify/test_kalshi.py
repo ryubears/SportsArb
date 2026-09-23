@@ -59,3 +59,21 @@ def test_futures():
 def test_skips_unknown_series_and_missing_lines():
     assert kalshi.classify(row("KXNFLRECYDS", "KXNFLRECYDS-26SEP20", "KXNFLRECYDS-26SEP20-X")) is None
     assert kalshi.classify(row("KXNFLWINS", "KXNFLWINS-27BUF", "KXNFLWINS-27BUF-10")) is None
+
+
+def test_player_props_name_the_player_and_keep_the_strict_line():
+    yards = kalshi.classify(row("KXNFLRECYDS", "KXNFLRECYDS-26SEP24ATLGB", "KXNFLRECYDS-26SEP24ATLGB-ATLBROBINSON7-100",
+                                title="Bijan Robinson: 100+ receiving yards", line=99.5))
+    first = kalshi.classify(row("KXNFLFIRSTTD", "KXNFLFIRSTTD-26SEP24ATLGB", "KXNFLFIRSTTD-26SEP24ATLGB-ATLBROBINSON7",
+                                title="Bijan Robinson: 1st Touchdown"))
+    senior = kalshi.classify(row("KXNFLRSHYDS", "KXNFLRSHYDS-26SEP24ATLGB", "KXNFLRSHYDS-26SEP24ATLGB-GBAJONES33-40",
+                                 title="Aaron Jones Sr.: 40+ rushing yards", line=39.5))
+    assert bet_fields(yards) == ("player_receiving_yards", 2027, "2026-09-24", "ATL", "GB", "bijan robinson", 99.5, "yes")
+    assert bet_fields(first) == ("player_first_touchdown", 2027, "2026-09-24", "ATL", "GB", "bijan robinson", None, "yes")
+    assert (senior.subject, senior.line) == ("aaron jones", 39.5)
+
+
+def test_player_props_skip_team_units_and_missing_lines():
+    assert kalshi.classify(row("KXNFLTD", "KXNFLTD-26SEP24ATLGB", "KXNFLTD-26SEP24ATLGB-ATLATLDST-1", title="ATL Falcons D/ST: 1+ touchdowns", line=0.5)) is None
+    assert kalshi.classify(row("KXNFLRECYDS", "KXNFLRECYDS-26SEP24ATLGB", "KXNFLRECYDS-26SEP24ATLGB-ATLBROBINSON7-100",
+                               title="Bijan Robinson: 100+ receiving yards")) is None
