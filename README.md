@@ -68,12 +68,20 @@ which the settler uses.
 
 ### Live loop (`src/live`)
 
-**record.py** is the process that runs. It holds the newest book for every
-paired contract in memory and once a second writes a row, with five levels
-a side, for each contract whose top of book changed. Quiet contracts write
-nothing, busy ones at most one row a second. It also drives the scanner,
-the executor, the settler, and the rebalancer below, and logs a status
-line every minute.
+**run.py** is the process that runs. Its `Session` wires the recorder, the
+venue connections, the scanner, and the paper executor with its settler
+and rebalancer together, and a one-second timer ticks it: flush the changed
+books, price them, settle and rebalance, and log a status line every
+minute and each component's summary every ten. The same loop starts the
+hourly catalog refresh in a background thread and applies the result to
+the live connections.
+
+**record.py** holds the newest book for every paired contract in memory
+and, on each tick, writes a row with five levels a side for each contract
+whose top of book changed. Quiet contracts write nothing, busy ones at most
+one row a second. **streams.py** owns the connections behind it, one per
+venue, or several when a venue caps how much one connection may carry,
+and moves contracts between them as the catalog changes.
 
 **scan.py** prices every pair whose member's book just changed. Using
 **pricing.py** it walks the ladders to find the cheapest way to hold yes and
@@ -123,7 +131,7 @@ that beat a 10% annual return, and paper trades by outcome and kind.
 The recorder runs on a t3.medium in us-east-1, the region Kalshi's
 matching engine runs in, where a signed round trip is about 35 ms to
 Kalshi and 30 ms to Polymarket US. A systemd service, `sportsarb-recorder`,
-starts `python3 -m live.record --sport nfl` from `~/SportsArb/src` on boot
+starts `python3 -m live.run --sport nfl` from `~/SportsArb/src` on boot
 and restarts it on any exit. The venue API keys live in `data/`, which is
 gitignored, and are copied to the instance by `scp` only. Deploying is
 `git pull` on the instance followed by a service restart, which refreshes
@@ -199,7 +207,7 @@ Build the catalog and run the recorder locally, from `src/`:
 ```bash
 cd src
 python3 -m catalog.pipeline --sport nfl
-python3 -m live.record --sport nfl
+python3 -m live.run --sport nfl
 ```
 
 `--no-trade` scans without paper trading, `--no-scan` only records, and
@@ -218,10 +226,10 @@ python3 src/tools/summary.py --hours 24
 src/
   api/        venue clients and the shared websocket book stream
   catalog/    fetch, classify (one parser per venue), match, pipeline
-  common/     paths, time helpers, json helpers, the venue list
+  common/     paths, time helpers, json helpers, the venue list, the logger
   db/         models and the SQLite schema
-  live/       record, scan, pricing, fees, execute, balances, settle, rebalance
+  live/       run, record, streams, scan, pricing, fees, execute, balances, settle, rebalance
   tools/      summary report
-tests/        mirrors src, 105 tests, run with pytest
+tests/        mirrors src, 107 tests, run with pytest
 commands.txt  operating the AWS instance
 ```
