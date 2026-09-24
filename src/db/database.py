@@ -9,11 +9,11 @@ SQLite browser. The tables follow the pipeline in order.
     pairs          the contracts on both venues for one bet, by match.py
     quotes         order book snapshots for paired contracts, by record.py
     gaps           stretches when a venue's feed was down, also by record.py
-    opportunities  every episode the live scanner saw, by record.py
-    trades         every paper trade the executor made, by record.py
-    settlements    what each leg of a trade paid out when its contract resolved, by record.py
-    ledger         every paper cash movement per venue, by record.py
-    transfers      paper rebalancing transfers between venues, by record.py
+    opportunities  every episode the live scanner saw, by scan.py
+    trades         every paper trade the executor made, by execute.py
+    settlements    what each leg of a trade paid out when its contract resolved, by settle.py
+    ledger         every paper cash movement per venue, by balances.py
+    transfers      paper rebalancing transfers between venues, by rebalance.py
 """
 
 import sqlite3

@@ -78,9 +78,9 @@ def print_contracts(conn, now):
 
 def print_pairs(conn):
     body = query_rows(conn, """
-        SELECT kind, venues, COUNT(*), SUM(contracts), SUM(game_date IS NOT NULL)
-        FROM pairs GROUP BY kind, venues ORDER BY kind, COUNT(*) DESC""")
-    print_table("pairs", ("kind", "venues", "pairs", "contracts", "games"), body)
+        SELECT kind, COUNT(*), SUM(contracts), SUM(game_date IS NOT NULL)
+        FROM pairs GROUP BY kind ORDER BY kind""")
+    print_table("pairs", ("kind", "pairs", "contracts", "games"), body)
     print(f"  total {first_value(conn, 'SELECT COUNT(*) FROM pairs'):,}, "
           f"last matched {short_time(first_value(conn, 'SELECT MAX(matched_at) FROM pairs'))}")
 

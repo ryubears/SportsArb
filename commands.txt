@@ -4,7 +4,7 @@ Instance      i-0a0119ff5a49fe57a (t3.medium, Ubuntu 24.04, region us-east-1)
 Address       54.82.110.237, user ubuntu, repo at ~/SportsArb
 SSH key       ~/.ssh/sportsarb-us.pem
 Security group sg-0a601fd37e4a97089, SSH only from allowed laptop IPs
-Service       sportsarb-recorder (systemd), runs python3 -m live.record from ~/SportsArb/src until stopped, restarts itself on any exit, log in ~/SportsArb/data/record.log
+Service       sportsarb-recorder (systemd), runs python3 -m live.run from ~/SportsArb/src until stopped, restarts itself on any exit, log in ~/SportsArb/data/record.log
 
 
 CHECK THE DATA

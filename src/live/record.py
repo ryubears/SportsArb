@@ -2,66 +2,31 @@
 Record live order books for every paired contract.
 
 Both venues push every book change over a websocket. The recorder keeps
-the latest book per contract in memory and once a second writes a row for
-each contract whose best bid or best ask changed, in price or in size,
+the latest book per contract in memory and, when run.py asks, writes a row
+for each contract whose best bid or best ask changed, in price or in size,
 since the last row. Each row still carries the top five levels. Quiet
-contracts produce nothing, busy ones produce at most one row per second.
+contracts produce nothing, busy ones produce at most one row per flush.
 When a venue's connection is lost the stretch until the next connection is
-subscribed is stored as a gap, and every book from the new
-connection is written again, so the scanner can tell a quiet book from
-one that went unseen.
+subscribed is stored as a gap, and every book from the new connection is
+written again, so the scanner can tell a quiet book from one that went
+unseen.
 
-The scanner from scan.py prices pairs from the same in memory books
-as they change and stores every episode it finds in the opportunities
-table. The paper executor from execute.py trades the scanner's signals
-against the same books, settle.py pays the trades out when their contracts
-resolve, and rebalance.py keeps the two paper balances level.
+With a scanner from scan.py, every change at the top of a book is priced
+as it lands, from the same in memory books.
 
 Only futures and games within GAME_WINDOW_DAYS of kickoff are recorded.
-Every CATALOG_MINUTES the recorder refreshes the catalog in a background
-thread, fetch then classify then match, then adds the new pairs' contracts to the
-live connections and removes the closed ones, without reconnecting.
-
-Run with:
-    python3 -m live.record --sport nfl
-    python3 -m live.record --sport nfl --seconds 120 --catalog-minutes 0
-    python3 -m live.record --sport nfl --skip-refresh
-    python3 -m live.record --sport nfl --no-scan
-    python3 -m live.record --sport nfl --no-trade
-
-For a long run on a laptop, stop the Mac from sleeping while it runs:
-    caffeinate -i -s python3 -m live.record --sport nfl
+The process that runs all this is run.py.
 """
 
-import argparse
-import asyncio
-import sys
 import time
-from api import kalshi, polymarket_us
-from catalog import pipeline
 from common.timeutil import now_iso, shift
+from common.venues import VENUES
 from db import database
 from db.models import Quote, Gap
-from live import balances, execute, rebalance, scan, settle
-
-# Print immediately even when output goes to a file.
-sys.stdout.reconfigure(line_buffering=True)
 
 LEVELS = 5              # Price levels kept per side.
-FLUSH_SECONDS = 1.0     # How often changed books are written.
-STATUS_SECONDS = 60     # How often a status line is printed.
 GAME_WINDOW_DAYS = 7    # Games further out than this are not recorded.
 GAME_HOURS = 5          # A game contract stays recorded this long after kickoff, whatever its close time says.
-CATALOG_MINUTES = 60    # How often the catalog is refreshed and subscriptions updated. Zero disables it.
-
-STREAMS = {"kalshi": kalshi.KalshiBookStream, "polymarket_us": polymarket_us.PolymarketUSBookStream}
-
-
-def log(message):
-    """
-    Print a message with the current UTC time in front.
-    """
-    print(f"{now_iso()[11:19]} {message}")
 
 
 def load_targets(conn, sport):
@@ -69,7 +34,7 @@ def load_targets(conn, sport):
     The contracts to record right now, as {venue: [contract_id, ...]}.
     """
     now = now_iso()
-    return database.load_recording_targets(conn, sport, now, shift(now, days=GAME_WINDOW_DAYS), list(STREAMS),
+    return database.load_recording_targets(conn, sport, now, shift(now, days=GAME_WINDOW_DAYS), list(VENUES),
                                            shift(now, hours=-GAME_HOURS))
 
 
@@ -84,9 +49,9 @@ class Recorder:
         self.scanner = scanner
         self.latest = {}        # (venue, contract_id) maps to the newest Quote seen.
         self.written = {}       # (venue, contract_id) maps to the best levels last written to the database.
-        self.updates = {venue: 0 for venue in STREAMS}
-        self.last_update = {venue: None for venue in STREAMS}       # Wall clock seconds of the newest update per venue.
-        self.gaps = {venue: 0 for venue in STREAMS}
+        self.updates = {venue: 0 for venue in VENUES}
+        self.last_update = {venue: None for venue in VENUES}       # Wall clock seconds of the newest update per venue.
+        self.gaps = {venue: 0 for venue in VENUES}
         self.rows_written = 0
 
     def on_book(self, venue, contract_id, bids, asks):
@@ -143,196 +108,3 @@ class Recorder:
             t = self.last_update[venue]
             parts.append(f"{venue} {n} (last {f'{time.time() - t:.0f}s ago' if t else 'never'}, {self.gaps[venue]} gaps)")
         return f"tracking {len(self.latest)} books, updates {', '.join(parts)}, rows written {self.rows_written}"
-
-
-class Streams:
-    """
-    The BookStreams for every venue, each on its own long lived connection.
-    A venue whose stream class sets a capacity gets as many connections as
-    its contracts need, filled in order. Changes to the wanted contracts are
-    applied to the live connections in place.
-    """
-
-    def __init__(self, recorder, stream_classes=STREAMS):
-        self.recorder = recorder
-        self.stream_classes = stream_classes
-        self.streams = {venue: [] for venue in stream_classes}
-        self.tasks = []
-
-    def on_book(self, venue, contract_id, bids, asks):
-        """
-        Pass a book update to the recorder, unless the contract was removed and the feed has not caught up.
-        """
-        if any(contract_id in stream.wanted for stream in self.streams[venue]):
-            self.recorder.on_book(venue, contract_id, bids, asks)
-
-    def capacity(self, venue):
-        return getattr(self.stream_classes[venue], "capacity", None)
-
-    def open(self, venue, contract_ids):
-        """
-        Open one more connection for a venue, carrying these contracts.
-        """
-        stream = self.stream_classes[venue](list(contract_ids), lambda cid, b, a: self.on_book(venue, cid, b, a), log,
-                                            on_gap=lambda start_ts, end_ts: self.recorder.on_gap(venue, start_ts, end_ts))
-        self.streams[venue].append(stream)
-        self.tasks.append(asyncio.create_task(stream.run()))
-        return stream
-
-    def start(self, venue, contract_ids):
-        """
-        Open a venue's connections for these contracts, one per capacity when it has one.
-        """
-        ids = sorted(contract_ids)
-        size = self.capacity(venue) or max(len(ids), 1)
-        for i in range(0, max(len(ids), 1), size):
-            self.open(venue, ids[i:i + size])
-
-    def place(self, venue, contract_ids):
-        """
-        Add contracts to the venue's connections with room, opening new ones when they are full.
-        """
-        ids = sorted(contract_ids)
-        capacity = self.capacity(venue)
-        for stream in self.streams[venue]:
-            room = len(ids) if capacity is None else max(capacity - len(stream.wanted), 0)
-            if room:
-                stream.add(ids[:room])
-                ids = ids[room:]
-            if not ids:
-                return
-        while ids:
-            size = capacity or len(ids)
-            self.open(venue, ids[:size])
-            ids = ids[size:]
-
-    def update(self, targets):
-        """
-        Add contracts that are new and remove the ones that left the target
-        list, on the live connections. Returns a summary of the changes.
-        """
-        changes = []
-        for venue, contract_ids in targets.items():
-            wanted = set().union(*(stream.wanted for stream in self.streams[venue]))
-            new, gone = set(contract_ids) - wanted, wanted - set(contract_ids)
-            for stream in self.streams[venue]:
-                stream.remove(gone & stream.wanted)
-            self.recorder.forget(venue, gone)
-            self.place(venue, new)
-            if new or gone:
-                changes.append(f"{venue} +{len(new)} -{len(gone)}")
-        return ", ".join(changes) or "no changes"
-
-    async def stop_all(self):
-        """
-        Cancel every connection and wait for them to finish.
-        """
-        for task in self.tasks:
-            task.cancel()
-        for task in self.tasks:
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        self.tasks = []
-
-
-async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True, with_scanner=True, with_trading=True):
-    """
-    Refresh the catalog, start every stream and the flush timer, and keep the
-    catalog fresh on a timer. Stops after the given seconds, or never when zero.
-    A refresh that fails is logged and tried again at the next interval, so a
-    bad fetch never stops the recording. With with_scanner, the live scanner
-    runs on the same books and logs a summary every scan.SUMMARY_SECONDS,
-    and with with_trading as well, the paper executor trades its signals.
-    """
-    if catalog_seconds and refresh_at_start:
-        log("refreshing catalog before starting")
-        try:
-            log(await asyncio.to_thread(pipeline.refresh, sport, log))
-        except Exception as e:
-            log(f"catalog refresh failed ({e!r}), starting with the stored catalog")
-    recorder = Recorder(conn)
-    trading = with_scanner and with_trading
-    cash = balances.Balances(conn) if trading else None
-    executor = execute.PaperExecutor(conn, cash, lambda: recorder.latest, log) if trading else None
-    settler = settle.Settler(conn, cash, log) if trading else None
-    rebalancer = rebalance.Rebalancer(conn, cash, log) if trading else None
-    scanner = scan.Scanner(conn, sport, log, executor.signal if executor else None) if with_scanner else None
-    recorder.scanner = scanner
-    streams = Streams(recorder)
-    targets = load_targets(conn, sport)
-    log("recording " + ", ".join(f"{len(ids)} {venue}" for venue, ids in targets.items()) + " contracts")
-    if not any(targets.values()):
-        log("nothing to record, run pipeline.py first")
-    for venue, contract_ids in targets.items():
-        streams.start(venue, contract_ids)
-        if len(streams.streams[venue]) > 1:
-            log(f"{venue} needs {len(streams.streams[venue])} connections for {len(contract_ids)} contracts")
-    started = last_status = last_catalog = last_summary = time.time()
-    refresh = None      # The background catalog refresh while one is running.
-    try:
-        while not seconds or time.time() - started < seconds:
-            await asyncio.sleep(FLUSH_SECONDS)
-            recorder.flush()
-            if scanner:
-                scanner.sweep(recorder.latest, now_iso())
-                if trading:
-                    settler.tick(now_iso(), time.time())
-                    rebalancer.tick(now_iso())
-                if time.time() - last_summary >= scan.SUMMARY_SECONDS:
-                    log(scanner.summary())
-                    if trading:
-                        log(executor.summary())
-                        log(settler.summary())
-                        if rebalancer.summary():
-                            log(rebalancer.summary())
-                    last_summary = time.time()
-            if time.time() - last_status >= STATUS_SECONDS:
-                log(recorder.status())
-                last_status = time.time()
-            if catalog_seconds and refresh is None and time.time() - last_catalog >= catalog_seconds:
-                refresh = asyncio.create_task(asyncio.to_thread(pipeline.refresh, sport, log))
-            if refresh is not None and refresh.done():
-                if refresh.exception():
-                    log(f"catalog refresh failed ({refresh.exception()!r}), keeping current subscriptions")
-                else:
-                    log(f"catalog refreshed, {refresh.result()}")
-                    log(f"subscriptions {streams.update(load_targets(conn, sport))}")
-                    if scanner:
-                        scanner.reload()
-                refresh, last_catalog = None, time.time()
-    finally:
-        if refresh is not None:
-            refresh.cancel()
-        await streams.stop_all()
-        recorder.flush()
-        if scanner:
-            scanner.sweep({}, now_iso())
-            log(scanner.summary())
-        if trading:
-            if executor.tasks:
-                await asyncio.gather(*executor.tasks, return_exceptions=True)
-            log(executor.summary())
-            log(settler.summary())
-        log(recorder.status())
-
-
-# MAIN
-
-if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Record live order books for paired contracts.")
-    ap.add_argument("--sport", default="nfl")
-    ap.add_argument("--seconds", type=int, default=0, help="stop after this many seconds, 0 means run forever")
-    ap.add_argument("--catalog-minutes", type=int, default=CATALOG_MINUTES,
-                    help="minutes between catalog refreshes, 0 means never refresh")
-    ap.add_argument("--skip-refresh", action="store_true",
-                    help="start streaming at once from the stored catalog instead of refreshing first")
-    ap.add_argument("--no-scan", action="store_true", help="record only, without the live scanner")
-    ap.add_argument("--no-trade", action="store_true", help="scan without paper trading")
-    args = ap.parse_args()
-    with database.connect() as conn:
-        try:
-            asyncio.run(run(conn, args.sport, args.seconds, args.catalog_minutes * 60, not args.skip_refresh, not args.no_scan, not args.no_trade))
-        except KeyboardInterrupt:
-            print("stopped")
