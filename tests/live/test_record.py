@@ -88,7 +88,7 @@ def test_streams_change_subscriptions_in_place(tmp_path):
         streams.start("kalshi", ["k1"])
         await asyncio.sleep(0)
         summary = streams.update({"polymarket_us": ["a", "c"], "kalshi": ["k1"]})
-        pm = streams.streams["polymarket_us"]
+        (pm,) = streams.streams["polymarket_us"]
         pm.on_book("b", [[0.5, 1]], [[0.6, 1]])    # A late update for the removed contract.
         pm.on_book("a", [[0.5, 1]], [[0.6, 1]])
         await streams.stop_all()
@@ -100,6 +100,33 @@ def test_streams_change_subscriptions_in_place(tmp_path):
     assert (pm.added, pm.removed, pm.wanted) == ([["c"]], [["b"]], {"a", "c"})
     assert ("polymarket_us", "b") not in latest
     assert ("polymarket_us", "a") in latest
+
+
+class SmallStream(FakeStream):
+    """
+    A venue that allows two contracts per connection.
+    """
+    capacity = 2
+
+
+def test_streams_open_more_connections_when_a_venue_has_a_capacity(tmp_path):
+    async def scenario():
+        FakeStream.instances.clear()
+        r = record.Recorder(database.connect(tmp_path / "test.sqlite"))
+        streams = record.Streams(r, {"polymarket_us": SmallStream, "kalshi": FakeStream})
+        streams.start("polymarket_us", ["a", "b", "c"])
+        streams.start("kalshi", ["k1", "k2", "k3"])
+        await asyncio.sleep(0)
+        first = [sorted(s.wanted) for s in streams.streams["polymarket_us"]]
+        summary = streams.update({"polymarket_us": ["b", "c", "d", "e", "f"], "kalshi": ["k1", "k2", "k3"]})
+        after = [sorted(s.wanted) for s in streams.streams["polymarket_us"]]
+        await streams.stop_all()
+        return first, summary, after, len(streams.streams["kalshi"])
+    first, summary, after, kalshi_connections = asyncio.run(scenario())
+    assert first == [["a", "b"], ["c"]]                  # Split at the capacity.
+    assert summary == "polymarket_us +3 -1"
+    assert after == [["b", "d"], ["c", "e"], ["f"]]      # Room on the open connections is used first, then a third opens.
+    assert kalshi_connections == 1                        # No capacity, one connection whatever the size.
 
 
 # REFRESH LOOP

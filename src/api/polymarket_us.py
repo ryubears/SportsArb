@@ -28,6 +28,7 @@ API = "https://api.polymarket.us/v1"            # Signed requests for books and 
 WS_URL = "wss://api.polymarket.us/v1/ws/markets"
 WS_PATH = "/v1/ws/markets"
 WS_CHUNK = 100          # Market slugs per subscription, the documented maximum.
+WS_SUBSCRIPTIONS = 10   # Subscriptions per connection. The feed refuses an eleventh with 'max subscriptions per connection reached'.
 WS_DEBOUNCE = True      # Ask the feed to batch updates. Cuts bandwidth by a third, and the recorder writes once a second anyway.
 KEY_ID_FILE = DATA_DIR / "polymarket_us_key_id.txt"
 SECRET_KEY_FILE = DATA_DIR / "polymarket_us_secret_key.txt"
@@ -129,10 +130,12 @@ class PolymarketUSBookStream(BookStream):
     book, so the local copy is replaced rather than patched. Subscriptions
     are sent in groups of WS_CHUNK slugs, batched when WS_DEBOUNCE is set.
     The feed documents no unsubscribe, so removed slugs are simply ignored
-    until the next connect.
+    until the next connect. A connection carries at most capacity slugs,
+    so the recorder opens more connections for a larger set.
     """
 
     name = "polymarket_us"
+    capacity = WS_CHUNK * WS_SUBSCRIPTIONS
 
     def reset(self):
         self.request_id = 0
@@ -162,6 +165,8 @@ class PolymarketUSBookStream(BookStream):
         m = json.loads(raw)
         data = m.get("marketData")
         if not data:
+            if m.get("error"):
+                self.log(f"polymarket_us stream error {m['error']} on {m.get('requestId')}")
             return False
         slug = data.get("marketSlug")
         if slug not in self.wanted:

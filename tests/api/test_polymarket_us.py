@@ -20,3 +20,12 @@ def test_levels_drop_empty_sizes_and_sort_best_first():
     assert polymarket_us.levels(entries, reverse=True) == [[0.42, 3.0], [0.41, 1.0]]
     assert polymarket_us.levels(entries, reverse=False) == [[0.41, 1.0], [0.42, 3.0]]
     assert polymarket_us.levels(None, reverse=True) == []
+
+
+def test_error_frames_are_logged_and_do_not_count_as_data():
+    logs = []
+    stream = polymarket_us.PolymarketUSBookStream(["s"], lambda *args: None, logs.append)
+    stream.reset()
+    assert stream.handle('{"requestId": "md-11", "error": "max subscriptions per connection reached"}') is False
+    assert logs == ["polymarket_us stream error max subscriptions per connection reached on md-11"]
+    assert polymarket_us.PolymarketUSBookStream.capacity == 1000
