@@ -1,8 +1,9 @@
 """
 Print a summary of everything in the database.
 
-Row counts and time ranges for each table, recording health for the
-recent window, pairs by kind, and the opportunities found so far. Reads
+Row counts and time ranges for each table, pairs by kind, and for the
+recent window the recording health, the opportunities found, and the
+paper trades made. Reads
 only, so it is safe to run while the recorder is writing.
 
 This script opens the database file directly rather than importing the
@@ -84,12 +85,11 @@ def print_pairs(conn):
           f"last matched {short_time(first_value(conn, 'SELECT MAX(matched_at) FROM pairs'))}")
 
 
-def print_quotes(conn, now, hours):
+def print_quotes(conn, since, hours):
     total, first, last = conn.execute("SELECT COUNT(*), MIN(ts), MAX(ts) FROM quotes").fetchone()
     print(f"\nquotes {total:,} rows from {short_time(first)} to {short_time(last)} UTC")
     if not total:
         return
-    since = (datetime.fromisoformat(now) - timedelta(hours=hours)).isoformat()
     body = query_rows(conn, """
         SELECT venue, COUNT(*), COUNT(DISTINCT contract_id), MAX(ts)
         FROM quotes WHERE ts >= ? GROUP BY venue ORDER BY venue""", (since,))
@@ -119,62 +119,69 @@ def print_quotes(conn, now, hours):
                 [(v, c[:60], f"{n:,}") for v, c, n in busiest])
 
 
-def print_opportunities(conn):
+def print_opportunities(conn, since, hours):
     total = first_value(conn, "SELECT COUNT(*) FROM opportunities")
+    recent = first_value(conn, "SELECT COUNT(*) FROM opportunities WHERE start_ts >= ?", (since,))
     if not total:
         print("\nopportunities: none yet, the recorder's scanner writes them")
         return
     covered = conn.execute("SELECT MIN(start_ts), MAX(end_ts) FROM opportunities").fetchone()
-    print(f"\nopportunities {total:,} episodes, covering {short_time(covered[0])} to {short_time(covered[1])} UTC")
+    print(f"\nopportunities {total:,} episodes in all, covering {short_time(covered[0])} to {short_time(covered[1])} UTC, "
+          f"{recent:,} in the last {hours} hours")
+    if not recent:
+        return
     # Capital required is the fillable size times the cost of both legs and fees, which is one dollar minus the edge.
     body = query_rows(conn, """
         SELECT kind, COUNT(*), SUM(live), ROUND(100 * MAX(peak_edge), 1), ROUND(MAX(peak_profit), 2),
                ROUND(MAX(peak_size * (1 - peak_edge))), ROUND(MAX(return_pct), 2), ROUND(MAX(annual_pct)),
                ROUND(AVG(days_held), 1), SUM(annual_pct >= 10)
-        FROM opportunities GROUP BY kind ORDER BY kind""")
-    print_table("by kind", ("kind", "episodes", "live", "best edge c", "best profit $", "max capital $",
+        FROM opportunities WHERE start_ts >= ? GROUP BY kind ORDER BY kind""", (since,))
+    print_table(f"by kind, last {hours} hours", ("kind", "episodes", "live", "best edge c", "best profit $", "max capital $",
                             "best return %", "best annual %", "avg days held", "beat 10%/yr"), body)
     best = query_rows(conn, """
         SELECT label, trade, ROUND(100 * peak_edge, 1), ROUND(peak_size), ROUND(peak_size * (1 - peak_edge)),
                ROUND(peak_profit, 2), ROUND(return_pct, 2), ROUND(annual_pct), ROUND(days_held, 1), ROUND(seconds), live
-        FROM opportunities WHERE annual_pct >= 10 ORDER BY peak_profit DESC LIMIT 8""")
-    print_table("largest that beat the target",
+        FROM opportunities WHERE start_ts >= ? AND annual_pct >= 10 ORDER BY peak_profit DESC LIMIT 8""", (since,))
+    print_table(f"largest that beat the target, last {hours} hours",
                 ("bet", "trade", "edge c", "size", "capital $", "profit $", "return %", "annual %", "days held", "seconds", "live"),
                 [(l[:40], t, e, f"{s:,.0f}", f"{cap:,.0f}", p, r, f"{a:,.0f}", d, f"{sec:,.0f}", "yes" if lv else "")
                  for l, t, e, s, cap, p, r, a, d, sec, lv in best])
 
 
-def print_trades(conn):
+def print_trades(conn, since, hours):
     total = first_value(conn, "SELECT COUNT(*) FROM trades")
+    recent = first_value(conn, "SELECT COUNT(*) FROM trades WHERE signal_ts >= ?", (since,))
     if not total:
         print("\ntrades: none yet, the recorder's paper executor writes them")
         return
     covered = conn.execute("SELECT MIN(signal_ts), MAX(signal_ts) FROM trades").fetchone()
-    print(f"\ntrades {total:,} paper trades, from {short_time(covered[0])} to {short_time(covered[1])} UTC")
-    body = query_rows(conn, """
-        SELECT status, COUNT(*), SUM(quantity), SUM(matched), ROUND(SUM(profit), 2), ROUND(SUM(hedge_pnl), 2), ROUND(SUM(profit + hedge_pnl), 2)
-        FROM trades GROUP BY status ORDER BY status""")
-    print_table("by outcome", ("status", "trades", "wanted", "matched", "locked in $", "hedges $", "net $"), body)
-    body = query_rows(conn, """
-        SELECT kind, COUNT(*), ROUND(AVG(100 * edge), 1), ROUND(100.0 * SUM(matched) / SUM(quantity), 0), ROUND(SUM(profit + hedge_pnl), 2),
-               ROUND(AVG(yes_latency_ms)), ROUND(AVG(no_latency_ms))
-        FROM trades GROUP BY kind ORDER BY kind""")
-    print_table("by kind", ("kind", "trades", "avg edge c", "fill %", "net $", "avg yes ms", "avg no ms"), body)
-    best = query_rows(conn, """
-        SELECT label, trade, quantity, yes_filled, no_filled, ROUND(profit + hedge_pnl, 2), hedge, substr(signal_ts, 12, 8)
-        FROM trades ORDER BY profit + hedge_pnl DESC LIMIT 5""")
-    print_table("best", ("bet", "trade", "wanted", "yes", "no", "net $", "hedge", "at"),
-                [(l[:40], t, q, y, n, p, h[:40], a) for l, t, q, y, n, p, h, a in best])
-    worst = query_rows(conn, """
-        SELECT label, trade, quantity, yes_filled, no_filled, ROUND(profit + hedge_pnl, 2), hedge, substr(signal_ts, 12, 8)
-        FROM trades WHERE profit + hedge_pnl < 0 ORDER BY profit + hedge_pnl LIMIT 5""")
-    print_table("worst", ("bet", "trade", "wanted", "yes", "no", "net $", "hedge", "at"),
-                [(l[:40], t, q, y, n, p, h[:40], a) for l, t, q, y, n, p, h, a in worst])
+    print(f"\ntrades {total:,} paper trades in all, from {short_time(covered[0])} to {short_time(covered[1])} UTC, "
+          f"{recent:,} in the last {hours} hours")
+    if recent:
+        body = query_rows(conn, """
+            SELECT status, COUNT(*), SUM(quantity), SUM(matched), ROUND(SUM(profit), 2), ROUND(SUM(hedge_pnl), 2), ROUND(SUM(profit + hedge_pnl), 2)
+            FROM trades WHERE signal_ts >= ? GROUP BY status ORDER BY status""", (since,))
+        print_table(f"by outcome, last {hours} hours", ("status", "trades", "wanted", "matched", "locked in $", "hedges $", "net $"), body)
+        body = query_rows(conn, """
+            SELECT kind, COUNT(*), ROUND(AVG(100 * edge), 1), ROUND(100.0 * SUM(matched) / SUM(quantity), 0), ROUND(SUM(profit + hedge_pnl), 2),
+                   ROUND(AVG(yes_latency_ms)), ROUND(AVG(no_latency_ms))
+            FROM trades WHERE signal_ts >= ? GROUP BY kind ORDER BY kind""", (since,))
+        print_table(f"by kind, last {hours} hours", ("kind", "trades", "avg edge c", "fill %", "net $", "avg yes ms", "avg no ms"), body)
+        best = query_rows(conn, """
+            SELECT label, trade, quantity, yes_filled, no_filled, ROUND(profit + hedge_pnl, 2), hedge, substr(signal_ts, 12, 8)
+            FROM trades WHERE signal_ts >= ? ORDER BY profit + hedge_pnl DESC LIMIT 5""", (since,))
+        print_table("best", ("bet", "trade", "wanted", "yes", "no", "net $", "hedge", "at"),
+                    [(l[:40], t, q, y, n, p, h[:40], a) for l, t, q, y, n, p, h, a in best])
+        worst = query_rows(conn, """
+            SELECT label, trade, quantity, yes_filled, no_filled, ROUND(profit + hedge_pnl, 2), hedge, substr(signal_ts, 12, 8)
+            FROM trades WHERE signal_ts >= ? AND profit + hedge_pnl < 0 ORDER BY profit + hedge_pnl LIMIT 5""", (since,))
+        print_table("worst", ("bet", "trade", "wanted", "yes", "no", "net $", "hedge", "at"),
+                    [(l[:40], t, q, y, n, p, h[:40], a) for l, t, q, y, n, p, h, a in worst])
     settled = query_rows(conn, """
         SELECT venue, COUNT(*), SUM(held), ROUND(SUM(cost), 2), ROUND(SUM(payout), 2), ROUND(SUM(realized), 2)
-        FROM settlements GROUP BY venue ORDER BY venue""")
+        FROM settlements WHERE settled_at >= ? GROUP BY venue ORDER BY venue""", (since,))
     if settled:
-        print_table("settled legs by venue", ("venue", "legs", "contracts", "cost $", "payout $", "realized $"), settled)
+        print_table(f"settled legs by venue, last {hours} hours", ("venue", "legs", "contracts", "cost $", "payout $", "realized $"), settled)
     open_count = first_value(conn, "SELECT COUNT(*) FROM trades WHERE settled_at IS NULL AND yes_held + no_held > 0")
     print(f"  {open_count:,} trades still open")
     balances = query_rows(conn, "SELECT venue, ROUND(balance, 2) FROM ledger WHERE id IN (SELECT MAX(id) FROM ledger GROUP BY venue) ORDER BY venue")
@@ -189,13 +196,14 @@ def print_trades(conn):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Summarize the SportsArb database.")
-    ap.add_argument("--hours", type=int, default=24, help="size of the recent window for quote stats")
+    ap.add_argument("--hours", type=int, default=24, help="size of the recent window for quotes, opportunities, trades, and settlements")
     args = ap.parse_args()
     now = datetime.now(timezone.utc).isoformat()
+    since = (datetime.fromisoformat(now) - timedelta(hours=args.hours)).isoformat()
     conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=30)
     print_storage(conn)
     print_contracts(conn, now)
     print_pairs(conn)
-    print_quotes(conn, now, args.hours)
-    print_opportunities(conn)
-    print_trades(conn)
+    print_quotes(conn, since, args.hours)
+    print_opportunities(conn, since, args.hours)
+    print_trades(conn, since, args.hours)
