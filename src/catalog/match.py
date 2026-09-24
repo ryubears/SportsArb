@@ -74,7 +74,7 @@ def make_pair(rows):
     """
     first = rows[0]
     members = [Bet(r["venue"], r["contract_id"], r["kind"], r["season"], r["game_date"], r["team_a"], r["team_b"],
-                   r["subject"], r["line"], r["polarity"], label(first)) for r in rows]
+                   r["subject"], r["line"], r["polarity"]) for r in rows]
     return Pair(label=label(first), kind=first["kind"], season=first["season"], game_date=first["game_date"],
                 team_a=first["team_a"], team_b=first["team_b"], subject=first["subject"], line=first["line"],
                 members=members, flags=flags(rows))

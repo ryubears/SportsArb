@@ -64,7 +64,7 @@ def print_storage(conn):
     print(f"database {DB_PATH}")
     print(f"size {size / 1e6:,.0f} MB")
     # Listed in pipeline order rather than alphabetically.
-    tables = ["contracts", "bets", "pairs", "quotes", "gaps", "opportunities", "trades", "settlements", "ledger", "transfers"]
+    tables = ["contracts", "bets", "pairs", "quotes", "gaps", "opportunities", "trades", "ledger", "transfers"]
     print_table("tables", ("table", "rows"), [(t, f"{first_value(conn, f'SELECT COUNT(*) FROM {t}'):,}") for t in tables])
 
 
@@ -79,9 +79,9 @@ def print_contracts(conn, now):
 def print_pairs(conn):
     body = query_rows(conn, """
         SELECT kind, COUNT(*), SUM(contracts), SUM(game_date IS NOT NULL)
-        FROM pairs GROUP BY kind ORDER BY kind""")
+        FROM pairs WHERE id IN (SELECT pair_id FROM bets WHERE pair_id IS NOT NULL) GROUP BY kind ORDER BY kind""")
     print_table("pairs", ("kind", "pairs", "contracts", "games"), body)
-    print(f"  total {first_value(conn, 'SELECT COUNT(*) FROM pairs'):,}, "
+    print(f"  total {first_value(conn, 'SELECT COUNT(*) FROM pairs WHERE id IN (SELECT pair_id FROM bets WHERE pair_id IS NOT NULL)'):,}, "
           f"last matched {short_time(first_value(conn, 'SELECT MAX(matched_at) FROM pairs'))}")
 
 
@@ -132,16 +132,16 @@ def print_opportunities(conn, since, hours):
         return
     # Capital required is the fillable size times the cost of both legs and fees, which is one dollar minus the edge.
     body = query_rows(conn, """
-        SELECT kind, COUNT(*), SUM(live), ROUND(100 * MAX(peak_edge), 1), ROUND(MAX(peak_profit), 2),
+        SELECT p.kind, COUNT(*), SUM(live), ROUND(100 * MAX(peak_edge), 1), ROUND(MAX(peak_profit), 2),
                ROUND(MAX(peak_size * (1 - peak_edge))), ROUND(MAX(return_pct), 2), ROUND(MAX(annual_pct)),
                ROUND(AVG(days_held), 1), SUM(annual_pct >= 10)
-        FROM opportunities WHERE start_ts >= ? GROUP BY kind ORDER BY kind""", (since,))
+        FROM opportunities o JOIN pairs p ON p.id = o.pair_id WHERE start_ts >= ? GROUP BY p.kind ORDER BY p.kind""", (since,))
     print_table(f"by kind, last {hours} hours", ("kind", "episodes", "live", "best edge c", "best profit $", "max capital $",
                             "best return %", "best annual %", "avg days held", "beat 10%/yr"), body)
     best = query_rows(conn, """
-        SELECT label, trade, ROUND(100 * peak_edge, 1), ROUND(peak_size), ROUND(peak_size * (1 - peak_edge)),
+        SELECT p.label, trade, ROUND(100 * peak_edge, 1), ROUND(peak_size), ROUND(peak_size * (1 - peak_edge)),
                ROUND(peak_profit, 2), ROUND(return_pct, 2), ROUND(annual_pct), ROUND(days_held, 1), ROUND(seconds), live
-        FROM opportunities WHERE start_ts >= ? AND annual_pct >= 10 ORDER BY peak_profit DESC LIMIT 8""", (since,))
+        FROM opportunities o JOIN pairs p ON p.id = o.pair_id WHERE start_ts >= ? AND annual_pct >= 10 ORDER BY peak_profit DESC LIMIT 8""", (since,))
     print_table(f"largest that beat the target, last {hours} hours",
                 ("bet", "trade", "edge c", "size", "capital $", "profit $", "return %", "annual %", "days held", "seconds", "live"),
                 [(l[:40], t, e, f"{s:,.0f}", f"{cap:,.0f}", p, r, f"{a:,.0f}", d, f"{sec:,.0f}", "yes" if lv else "")
@@ -163,23 +163,27 @@ def print_trades(conn, since, hours):
             FROM trades WHERE signal_ts >= ? GROUP BY status ORDER BY status""", (since,))
         print_table(f"by outcome, last {hours} hours", ("status", "trades", "wanted", "matched", "locked in $", "hedges $", "net $"), body)
         body = query_rows(conn, """
-            SELECT kind, COUNT(*), ROUND(AVG(100 * edge), 1), ROUND(100.0 * SUM(matched) / SUM(quantity), 0), ROUND(SUM(profit + hedge_pnl), 2),
+            SELECT p.kind, COUNT(*), ROUND(AVG(100 * edge), 1), ROUND(100.0 * SUM(matched) / SUM(quantity), 0), ROUND(SUM(profit + hedge_pnl), 2),
                    ROUND(AVG(yes_latency_ms)), ROUND(AVG(no_latency_ms))
-            FROM trades WHERE signal_ts >= ? GROUP BY kind ORDER BY kind""", (since,))
+            FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE signal_ts >= ? GROUP BY p.kind ORDER BY p.kind""", (since,))
         print_table(f"by kind, last {hours} hours", ("kind", "trades", "avg edge c", "fill %", "net $", "avg yes ms", "avg no ms"), body)
         best = query_rows(conn, """
-            SELECT label, trade, quantity, yes_filled, no_filled, ROUND(profit + hedge_pnl, 2), hedge, substr(signal_ts, 12, 8)
-            FROM trades WHERE signal_ts >= ? ORDER BY profit + hedge_pnl DESC LIMIT 5""", (since,))
+            SELECT p.label, trade, quantity, yes_filled, no_filled, ROUND(profit + hedge_pnl, 2), hedge, substr(signal_ts, 12, 8)
+            FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE signal_ts >= ? ORDER BY profit + hedge_pnl DESC LIMIT 5""", (since,))
         print_table("best", ("bet", "trade", "wanted", "yes", "no", "net $", "hedge", "at"),
                     [(l[:40], t, q, y, n, p, h[:40], a) for l, t, q, y, n, p, h, a in best])
         worst = query_rows(conn, """
-            SELECT label, trade, quantity, yes_filled, no_filled, ROUND(profit + hedge_pnl, 2), hedge, substr(signal_ts, 12, 8)
-            FROM trades WHERE signal_ts >= ? AND profit + hedge_pnl < 0 ORDER BY profit + hedge_pnl LIMIT 5""", (since,))
+            SELECT p.label, trade, quantity, yes_filled, no_filled, ROUND(profit + hedge_pnl, 2), hedge, substr(signal_ts, 12, 8)
+            FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE signal_ts >= ? AND profit + hedge_pnl < 0 ORDER BY profit + hedge_pnl LIMIT 5""", (since,))
         print_table("worst", ("bet", "trade", "wanted", "yes", "no", "net $", "hedge", "at"),
                     [(l[:40], t, q, y, n, p, h[:40], a) for l, t, q, y, n, p, h, a in worst])
     settled = query_rows(conn, """
-        SELECT venue, COUNT(*), SUM(held), ROUND(SUM(cost), 2), ROUND(SUM(payout), 2), ROUND(SUM(realized), 2)
-        FROM settlements WHERE settled_at >= ? GROUP BY venue ORDER BY venue""", (since,))
+        SELECT venue, COUNT(*), SUM(held), ROUND(SUM(cost), 2), ROUND(SUM(payout), 2), ROUND(SUM(payout - cost), 2) FROM (
+            SELECT yes_venue AS venue, yes_held AS held, yes_cost AS cost, yes_payout AS payout, yes_settled_at AS settled_at
+            FROM trades WHERE yes_result IS NOT NULL
+            UNION ALL
+            SELECT no_venue, no_held, no_cost, no_payout, no_settled_at FROM trades WHERE no_result IS NOT NULL)
+        WHERE settled_at >= ? GROUP BY venue ORDER BY venue""", (since,))
     if settled:
         print_table(f"settled legs by venue, last {hours} hours", ("venue", "legs", "contracts", "cost $", "payout $", "realized $"), settled)
     open_count = first_value(conn, "SELECT COUNT(*) FROM trades WHERE settled_at IS NULL AND yes_held + no_held > 0")
@@ -196,7 +200,7 @@ def print_trades(conn, since, hours):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Summarize the SportsArb database.")
-    ap.add_argument("--hours", type=int, default=24, help="size of the recent window for quotes, opportunities, trades, and settlements")
+    ap.add_argument("--hours", type=int, default=24, help="size of the recent window for quotes, opportunities, and trades")
     args = ap.parse_args()
     now = datetime.now(timezone.utc).isoformat()
     since = (datetime.fromisoformat(now) - timedelta(hours=args.hours)).isoformat()

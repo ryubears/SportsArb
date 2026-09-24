@@ -10,8 +10,7 @@ SQLite browser. The tables follow the pipeline in order.
     quotes         order book snapshots for paired contracts, by record.py
     gaps           stretches when a venue's feed was down, also by record.py
     opportunities  every episode the live scanner saw, by scan.py
-    trades         every paper trade the executor made, by execute.py
-    settlements    what each leg of a trade paid out when its contract resolved, by settle.py
+    trades         every paper trade the executor made, by execute.py, and what each leg paid out, by settle.py
     ledger         every paper cash movement per venue, by balances.py
     transfers      paper rebalancing transfers between venues, by rebalance.py
 """
@@ -19,7 +18,7 @@ SQLite browser. The tables follow the pipeline in order.
 import sqlite3
 from common import jsonutil
 from common.paths import DATA_DIR
-from db.models import Gap, Ledger, Quote, Settlement, Trade, Transfer
+from db.models import Gap, Ledger, Quote, Trade, Transfer
 from pathlib import Path
 
 DB_PATH = DATA_DIR / "sportsarb.sqlite"
@@ -59,12 +58,15 @@ CREATE TABLE IF NOT EXISTS bets (
     subject      TEXT,            -- The team the contract is about, when there is one.
     line         REAL,            -- Spread margin, total points, or wins threshold.
     polarity     TEXT NOT NULL,   -- 'yes' or 'no', see models.Bet.
-    pair_label   TEXT,            -- The pair this bet belongs to, set by match.py.
+    pair_id      INTEGER,         -- The pair this bet belongs to, set by match.py. Null while only one venue lists the bet.
     PRIMARY KEY (venue, contract_id)
 );
 
+-- A pair keeps its id across matches, found by its label, and its row stays once no bet points at it any more,
+-- so the opportunities and trades that refer to it always resolve. A pair is current when a bet points at it.
 CREATE TABLE IF NOT EXISTS pairs (
-    label        TEXT PRIMARY KEY,   -- The bet's identity in words, for example 'spread 2026-09-20 CAR@ATL ATL 4.5'.
+    id           INTEGER PRIMARY KEY,
+    label        TEXT NOT NULL UNIQUE,   -- The bet's identity in words, for example 'spread 2026-09-20 CAR@ATL ATL 4.5'.
     kind         TEXT NOT NULL,
     season       INTEGER,
     game_date    TEXT,
@@ -95,8 +97,8 @@ CREATE TABLE IF NOT EXISTS gaps (
 );
 
 CREATE TABLE IF NOT EXISTS opportunities (
-    label          TEXT NOT NULL,   -- The pair's label.
-    kind           TEXT NOT NULL,
+    id             INTEGER PRIMARY KEY,
+    pair_id        INTEGER NOT NULL,   -- The pair, see pairs.
     trade          TEXT NOT NULL,   -- The two legs in words.
     yes_venue      TEXT NOT NULL,   -- Where the yes exposure was cheapest at the peak.
     yes_contract   TEXT NOT NULL,
@@ -117,8 +119,7 @@ CREATE TABLE IF NOT EXISTS opportunities (
 
 CREATE TABLE IF NOT EXISTS trades (
     id             INTEGER PRIMARY KEY,
-    label          TEXT NOT NULL,   -- The pair's label.
-    kind           TEXT NOT NULL,
+    pair_id        INTEGER NOT NULL,   -- The pair, see pairs.
     trade          TEXT NOT NULL,   -- The two legs in words.
     signal_ts      TEXT NOT NULL,
     edge           REAL NOT NULL,   -- Net dollars per contract at the signal.
@@ -147,21 +148,13 @@ CREATE TABLE IF NOT EXISTS trades (
     hedge_pnl      REAL NOT NULL,   -- Dollars gained or lost by flattening, after fees.
     status         TEXT NOT NULL,   -- 'sent' while in flight, then 'filled', 'partial', or 'failed'.
     pays_at        TEXT NOT NULL,
+    yes_result     TEXT,            -- How the yes leg's contract resolved, 'yes' or 'no', once known.
+    yes_payout     REAL,            -- Dollars received on the yes leg, one per contract held when its side won.
+    yes_settled_at TEXT,            -- The venue's settlement time for the yes leg.
+    no_result      TEXT,
+    no_payout      REAL,
+    no_settled_at  TEXT,
     settled_at     TEXT             -- When both legs had resolved and the payouts were booked.
-);
-
-CREATE TABLE IF NOT EXISTS settlements (
-    trade_id     INTEGER NOT NULL,
-    venue        TEXT NOT NULL,
-    contract_id  TEXT NOT NULL,
-    side         TEXT NOT NULL,     -- 'yes' or 'no', the side of the bet this leg held.
-    held         INTEGER NOT NULL,  -- Contracts held at resolution.
-    cost         REAL NOT NULL,     -- Dollars paid for them including fees.
-    result       TEXT NOT NULL,     -- How the contract resolved, 'yes' or 'no'.
-    payout       REAL NOT NULL,     -- Dollars received, one per contract when the held side won.
-    realized     REAL NOT NULL,     -- payout minus cost.
-    settled_at   TEXT NOT NULL,     -- The venue's settlement time.
-    PRIMARY KEY (trade_id, venue, contract_id)
 );
 
 CREATE TABLE IF NOT EXISTS ledger (
@@ -210,11 +203,8 @@ def migrate(conn):
     Bring older databases up to the current schema. Derived tables are
     dropped when their columns changed, since a match rebuilds them.
     """
-    bet_columns = [r[1] for r in conn.execute("PRAGMA table_info(bets)")]
-    if "group_label" in bet_columns:
-        conn.execute("ALTER TABLE bets RENAME COLUMN group_label TO pair_label")
-    elif "pair_label" not in bet_columns:
-        conn.execute("ALTER TABLE bets ADD COLUMN pair_label TEXT")
+    if "group_label" in [r[1] for r in conn.execute("PRAGMA table_info(bets)")]:
+        conn.execute("ALTER TABLE bets RENAME COLUMN group_label TO pair_label")     # Turned into pair_id below.
     conn.execute("DROP TABLE IF EXISTS bet_groups")
     conn.execute("DROP TABLE IF EXISTS fee_history")
     if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'stream_gaps'").fetchone():
@@ -229,13 +219,57 @@ def migrate(conn):
         for row_id, venue, amount in conn.execute("SELECT id, venue, amount FROM ledger ORDER BY id").fetchall():
             running[venue] = running.get(venue, BALANCE) + amount
             conn.execute("UPDATE ledger SET balance = ? WHERE id = ?", (running[venue], row_id))
+    trade_columns = [r[1] for r in conn.execute("PRAGMA table_info(trades)")]
+    if trade_columns and "yes_result" not in trade_columns:
+        for column, kind in (("yes_result", "TEXT"), ("yes_payout", "REAL"), ("yes_settled_at", "TEXT"),
+                             ("no_result", "TEXT"), ("no_payout", "REAL"), ("no_settled_at", "TEXT")):
+            conn.execute(f"ALTER TABLE trades ADD COLUMN {column} {kind}")
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'settlements'").fetchone():
+        # Settlements used to be a table of legs. Fold each leg into its trade's columns.
+        for trade_id, side, result, payout, settled_at in conn.execute(
+                "SELECT trade_id, side, result, payout, settled_at FROM settlements").fetchall():
+            conn.execute(f"UPDATE trades SET {side}_result = ?, {side}_payout = ?, {side}_settled_at = ? WHERE id = ?",
+                         (result, payout, settled_at, trade_id))
+        conn.execute("DROP TABLE settlements")
     columns = [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]
     if "scope" in columns:
         conn.execute("DROP TABLE opportunities")
     if "source" in columns:
         # Rows from the retired replay scanner stay as part of the log, without the column that told them apart.
         conn.execute("ALTER TABLE opportunities DROP COLUMN source")
+    migrate_pair_ids(conn)
     conn.executescript(SCHEMA)
+
+
+def migrate_pair_ids(conn):
+    """
+    Pairs used to be keyed by their label, copied onto bets, opportunities,
+    and trades. Give them an id and point the other tables at it. Episodes
+    and trades of pairs that had already left the catalog get a bare pair
+    row, so their id resolves.
+    """
+    if "id" not in [r[1] for r in conn.execute("PRAGMA table_info(pairs)")]:
+        conn.execute("ALTER TABLE pairs RENAME TO pairs_old")
+        conn.executescript(SCHEMA)
+        conn.execute("""INSERT INTO pairs (label, kind, season, game_date, team_a, team_b, subject, line, venues, contracts, flags, matched_at)
+                        SELECT label, kind, season, game_date, team_a, team_b, subject, line, venues, contracts, flags, matched_at FROM pairs_old""")
+        conn.execute("DROP TABLE pairs_old")
+    if "pair_label" in [r[1] for r in conn.execute("PRAGMA table_info(bets)")]:
+        conn.execute("ALTER TABLE bets ADD COLUMN pair_id INTEGER")
+        conn.execute("UPDATE bets SET pair_id = (SELECT id FROM pairs WHERE label = bets.pair_label)")
+        conn.execute("ALTER TABLE bets DROP COLUMN pair_label")
+    for table, first_ts in (("opportunities", "start_ts"), ("trades", "signal_ts")):
+        old_columns = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+        if "label" not in old_columns:
+            continue
+        conn.execute(f"""INSERT OR IGNORE INTO pairs (label, kind, venues, contracts, flags, matched_at)
+                         SELECT label, kind, '', 0, '[]', MIN({first_ts}) FROM {table} GROUP BY label""")
+        conn.execute(f"ALTER TABLE {table} RENAME TO {table}_old")
+        conn.executescript(SCHEMA)
+        shared = [c for c, in conn.execute(f"SELECT name FROM pragma_table_info('{table}')") if c in old_columns]
+        conn.execute(f"""INSERT INTO {table} ({', '.join(shared)}, pair_id)
+                         SELECT {', '.join('o.' + c for c in shared)}, p.id FROM {table}_old o JOIN pairs p ON p.label = o.label""")
+        conn.execute(f"DROP TABLE {table}_old")
 
 
 # CONTRACTS
@@ -322,7 +356,7 @@ def load_recording_targets(conn, sport, now, horizon, venues, game_started_after
         rows = conn.execute("""
             SELECT c.contract_id FROM contracts c
             JOIN bets b ON b.venue = c.venue AND b.contract_id = c.contract_id
-            JOIN pairs p ON p.label = b.pair_label
+            JOIN pairs p ON p.id = b.pair_id
             WHERE c.venue = ? AND c.sport = ?
               AND (c.close_time IS NULL OR c.close_time > ? OR (c.start_time IS NOT NULL AND c.start_time > ?))
               AND (b.game_date IS NULL OR b.game_date <= ?)
@@ -343,10 +377,10 @@ def replace_bets(conn, sport, bets):
     """, (sport,))
     conn.executemany("""
         INSERT INTO bets (venue, contract_id, kind, season, game_date,
-                          team_a, team_b, subject, line, polarity, pair_label)
+                          team_a, team_b, subject, line, polarity, pair_id)
         VALUES (?,?,?,?,?,?,?,?,?,?,?)
     """, [(b.venue, b.contract_id, b.kind, b.season, b.game_date,
-           b.team_a, b.team_b, b.subject, b.line, b.polarity, b.pair_label) for b in bets])
+           b.team_a, b.team_b, b.subject, b.line, b.polarity, b.pair_id) for b in bets])
     conn.commit()
 
 
@@ -370,38 +404,43 @@ def load_bets(conn, sport, venue=None):
 
 def replace_pairs(conn, sport, pairs, matched_at):
     """
-    Drop every pair belonging to the sport, then insert the new ones and
-    write each member's pair label on its bet row.
+    Store the sport's pairs and point each member's bet row at its pair.
+    A pair that was stored before keeps its id, found by its label, and
+    each Pair and member Bet gets its id set. Pairs that no bet points at
+    any more stay in the table, they are just no longer current.
     """
     conn.execute("""
-        UPDATE bets SET pair_label = NULL WHERE (venue, contract_id) IN
+        UPDATE bets SET pair_id = NULL WHERE (venue, contract_id) IN
             (SELECT venue, contract_id FROM contracts WHERE sport = ?)
     """, (sport,))
-    conn.execute("DELETE FROM pairs WHERE label NOT IN (SELECT pair_label FROM bets WHERE pair_label IS NOT NULL)")
-    conn.executemany("""
-        INSERT OR REPLACE INTO pairs (label, kind, season, game_date, team_a, team_b, subject, line,
-                                      venues, contracts, flags, matched_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-    """, [(p.label, p.kind, p.season, p.game_date, p.team_a, p.team_b, p.subject, p.line,
-           ",".join(p.venues), len(p.members), jsonutil.dump(p.flags), matched_at) for p in pairs])
-    conn.executemany("UPDATE bets SET pair_label = ? WHERE venue = ? AND contract_id = ?",
-                     [(p.label, m.venue, m.contract_id) for p in pairs for m in p.members])
+    for p in pairs:
+        conn.execute("""
+            INSERT INTO pairs (label, kind, season, game_date, team_a, team_b, subject, line, venues, contracts, flags, matched_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT (label) DO UPDATE SET kind = excluded.kind, season = excluded.season, game_date = excluded.game_date,
+                team_a = excluded.team_a, team_b = excluded.team_b, subject = excluded.subject, line = excluded.line,
+                venues = excluded.venues, contracts = excluded.contracts, flags = excluded.flags, matched_at = excluded.matched_at
+        """, (p.label, p.kind, p.season, p.game_date, p.team_a, p.team_b, p.subject, p.line,
+              ",".join(p.venues), len(p.members), jsonutil.dump(p.flags), matched_at))
+        p.id = conn.execute("SELECT id FROM pairs WHERE label = ?", (p.label,)).fetchone()[0]
+        for m in p.members:
+            m.pair_id = p.id
+    conn.executemany("UPDATE bets SET pair_id = ? WHERE venue = ? AND contract_id = ?",
+                     [(p.id, m.venue, m.contract_id) for p in pairs for m in p.members])
     conn.commit()
 
 
 def load_pairs(conn, sport):
     """
-    Return {label: pair row dict with a 'members' list of bet row dicts} for one sport.
+    Return {id: pair row dict with a 'members' list of bet row dicts} for
+    the current pairs of one sport, the ones with bets pointing at them.
     """
-    pairs = {}
-    for r in conn.execute("SELECT * FROM pairs"):
-        pairs[r["label"]] = dict(r, members=[])
+    members = {}
     for r in conn.execute("""
         SELECT b.*, c.event_id, c.start_time, c.close_time FROM bets b JOIN contracts c USING (venue, contract_id)
-        WHERE c.sport = ? AND b.pair_label IS NOT NULL""", (sport,)):
-        if r["pair_label"] in pairs:
-            pairs[r["pair_label"]]["members"].append(dict(r))
-    return pairs
+        WHERE c.sport = ? AND b.pair_id IS NOT NULL""", (sport,)):
+        members.setdefault(r["pair_id"], []).append(dict(r))
+    return {r["id"]: dict(r, members=members[r["id"]]) for r in conn.execute("SELECT * FROM pairs") if r["id"] in members}
 
 
 # QUOTES
@@ -463,11 +502,11 @@ def insert_opportunities(conn, opportunities):
     Append Opportunities.
     """
     conn.executemany("""
-        INSERT INTO opportunities (label, kind, trade, yes_venue, yes_contract, no_venue, no_contract,
+        INSERT INTO opportunities (pair_id, trade, yes_venue, yes_contract, no_venue, no_contract,
                                    start_ts, end_ts, seconds, peak_ts, peak_edge, peak_size, peak_profit,
                                    live, days_held, return_pct, annual_pct)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    """, [(o.label, o.kind, o.trade, o.yes_venue, o.yes_contract, o.no_venue, o.no_contract,
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, [(o.pair_id, o.trade, o.yes_venue, o.yes_contract, o.no_venue, o.no_contract,
            o.start_ts, o.end_ts, o.seconds, o.peak_ts, o.peak_edge, o.peak_size, o.peak_profit,
            o.live, o.days_held, o.return_pct, o.annual_pct) for o in opportunities])
     conn.commit()
@@ -480,12 +519,12 @@ def insert_trade(conn, t):
     Append a finished paper Trade and return its id.
     """
     cur = conn.execute("""
-        INSERT INTO trades (label, kind, trade, signal_ts, edge, quantity,
+        INSERT INTO trades (pair_id, trade, signal_ts, edge, quantity,
                             yes_venue, yes_contract, yes_polarity, yes_limit, yes_filled, yes_cost, yes_latency_ms, yes_fill_ts,
                             no_venue, no_contract, no_polarity, no_limit, no_filled, no_cost, no_latency_ms, no_fill_ts,
                             yes_held, no_held, matched, profit, hedge, hedge_pnl, status, pays_at, settled_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    """, (t.label, t.kind, t.trade, t.signal_ts, t.edge, t.quantity,
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, (t.pair_id, t.trade, t.signal_ts, t.edge, t.quantity,
           t.yes_venue, t.yes_contract, t.yes_polarity, t.yes_limit, t.yes_filled, t.yes_cost, t.yes_latency_ms, t.yes_fill_ts,
           t.no_venue, t.no_contract, t.no_polarity, t.no_limit, t.no_filled, t.no_cost, t.no_latency_ms, t.no_fill_ts,
           t.yes_held, t.no_held, t.matched, t.profit, t.hedge, t.hedge_pnl, t.status, t.pays_at, t.settled_at))
@@ -510,23 +549,21 @@ def update_trade(conn, t):
 
 def load_open_trades(conn):
     """
-    Trades that are done, still hold contracts, and have not settled.
+    Trades that are done, still hold contracts, and have not settled, with their pair's label for log lines.
     """
-    return [Trade(**dict(r)) for r in conn.execute(
-        "SELECT * FROM trades WHERE status != 'sent' AND settled_at IS NULL AND yes_held + no_held > 0 ORDER BY id")]
+    return [Trade(**dict(r)) for r in conn.execute("""
+        SELECT t.*, p.label FROM trades t JOIN pairs p ON p.id = t.pair_id
+        WHERE t.status != 'sent' AND t.settled_at IS NULL AND t.yes_held + t.no_held > 0 ORDER BY t.id""")]
 
 
-# SETTLEMENTS
-
-def settle_trade(conn, trade_id, settled_at, settlements):
+def settle_trade(conn, t):
     """
-    Store a Settlement per leg and mark the trade settled.
+    Write what each leg of a Trade paid out and mark it settled.
     """
-    conn.executemany("""
-        INSERT OR REPLACE INTO settlements (trade_id, venue, contract_id, side, held, cost, result, payout, realized, settled_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?)
-    """, [(s.trade_id, s.venue, s.contract_id, s.side, s.held, s.cost, s.result, s.payout, s.realized, s.settled_at) for s in settlements])
-    conn.execute("UPDATE trades SET settled_at = ? WHERE id = ?", (settled_at, trade_id))
+    conn.execute("""
+        UPDATE trades SET yes_result = ?, yes_payout = ?, yes_settled_at = ?, no_result = ?, no_payout = ?, no_settled_at = ?, settled_at = ?
+        WHERE id = ?
+    """, (t.yes_result, t.yes_payout, t.yes_settled_at, t.no_result, t.no_payout, t.no_settled_at, t.settled_at, t.id))
     conn.commit()
 
 

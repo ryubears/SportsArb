@@ -43,7 +43,7 @@ def stored(conn):
     The Opportunities in the database, oldest first.
     """
     return [Opportunity(*row) for row in conn.execute("""
-        SELECT label, kind, trade, yes_venue, yes_contract, no_venue, no_contract, start_ts, end_ts, seconds, peak_ts,
+        SELECT pair_id, trade, yes_venue, yes_contract, no_venue, no_contract, start_ts, end_ts, seconds, peak_ts,
                peak_edge, peak_size, peak_profit, live, days_held, return_pct, annual_pct FROM opportunities ORDER BY start_ts""")]
 
 
@@ -153,7 +153,7 @@ def test_episode_opens_peaks_and_closes_from_book_changes(tmp_path):
     assert s.episodes == {}                                     # One book is not a trade.
     latest[("polymarket_us", "pm")] = book("polymarket_us", "pm", TL % (0, 2), 0.44, 0.45)
     s.on_book("polymarket_us", "pm", latest, TL % (0, 2))          # Buy yes at 0.45, no at 1 - 0.53: 2c edge.
-    assert list(s.episodes) == [LABEL]
+    assert [s.pairs[i]["label"] for i in s.episodes] == [LABEL]
     latest[("polymarket_us", "pm")] = book("polymarket_us", "pm", TL % (0, 3), 0.40, 0.41)
     s.on_book("polymarket_us", "pm", latest, TL % (0, 3))          # 12c edge, a new peak.
     latest[("kalshi", "k")] = book("kalshi", "k", TL % (0, 5), 0.40, 0.41)

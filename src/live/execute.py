@@ -115,7 +115,7 @@ class PaperExecutor:
         for l in legs:
             l["quantity"] = quantity
             self.cash.reserve(l["member"]["venue"], quantity * l["limit"])
-        trade = Trade(label=pair["label"], kind=pair["kind"], trade=trade_words(yes, no), signal_ts=now, edge=edge, quantity=quantity,
+        trade = Trade(pair_id=pair["id"], label=pair["label"], trade=trade_words(yes, no), signal_ts=now, edge=edge, quantity=quantity,
                       yes_venue=yes["venue"], yes_contract=yes["contract_id"], yes_polarity=yes["polarity"], yes_limit=legs[0]["limit"],
                       no_venue=no["venue"], no_contract=no["contract_id"], no_polarity=no["polarity"], no_limit=legs[1]["limit"], pays_at=pays_at)
         database.insert_trade(self.conn, trade)

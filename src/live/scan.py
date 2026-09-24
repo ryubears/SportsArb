@@ -51,8 +51,7 @@ def finish(pair, peak, start_ts, end_ts):
     days_held = max(seconds_between(peak["ts"], pays_at) / 86400, 1 / 24) if pays_at else None
     return_pct = 100 * peak["edge"] / (1 - peak["edge"])
     return Opportunity(
-        label=pair["label"],
-        kind=pair["kind"],
+        pair_id=pair["id"],
         trade=trade_words(peak["yes"], peak["no"]),
         yes_venue=peak["yes"]["venue"],
         yes_contract=peak["yes"]["contract_id"],
@@ -90,8 +89,8 @@ class Scanner:
         self.sport = sport
         self.log = log
         self.on_signal = on_signal          # Called once per episode with the trade to make, if it wants it.
-        self.episodes = {}                  # label maps to {"start_ts", "peak", "pair"} while an edge is open.
-        self.finished = []                  # Opportunities ended since the last summary.
+        self.episodes = {}                  # pair id maps to {"start_ts", "peak", "pair"} while an edge is open.
+        self.finished = []                  # (kind, Opportunity) for episodes ended since the last summary.
         self.reload()
 
     def reload(self):
@@ -101,12 +100,12 @@ class Scanner:
         self.fee_infos = defaultdict(dict, database.load_fee_infos(self.conn, self.sport))
         self.pairs = database.load_pairs(self.conn, self.sport)
         by_contract = defaultdict(list)
-        for label, pair in self.pairs.items():
+        for pair_id, pair in self.pairs.items():
             for m in pair["members"]:
-                by_contract[(m["venue"], m["contract_id"])].append(label)
+                by_contract[(m["venue"], m["contract_id"])].append(pair_id)
         self.by_contract = dict(by_contract)
-        for label in [label for label in self.episodes if label not in self.pairs]:
-            self.close(label, now_iso())
+        for pair_id in [pair_id for pair_id in self.episodes if pair_id not in self.pairs]:
+            self.close(pair_id, now_iso())
 
     def price(self, pair, latest, now):
         """
@@ -123,52 +122,52 @@ class Scanner:
         """
         Price every pair this contract belongs to.
         """
-        for label in self.by_contract.get((venue, contract_id), ()):
-            self.update(label, latest, now)
+        for pair_id in self.by_contract.get((venue, contract_id), ()):
+            self.update(pair_id, latest, now)
 
     def sweep(self, latest, now):
         """
         Price every open episode again, so ones whose books went stale or unseen end.
         """
-        for label in list(self.episodes):
-            self.update(label, latest, now)
+        for pair_id in list(self.episodes):
+            self.update(pair_id, latest, now)
 
-    def update(self, label, latest, now):
+    def update(self, pair_id, latest, now):
         """
         Open, extend, or end the episode for one pair from the current books.
         """
-        pair = self.pairs[label]
+        pair = self.pairs[pair_id]
         result = self.price(pair, latest, now)
-        episode = self.episodes.get(label)
+        episode = self.episodes.get(pair_id)
         if result is not None and result[2] > 0:
             yes, no, edge, size, profit = result
             if episode is None:
-                episode = self.episodes[label] = {"start_ts": now, "peak": None, "pair": pair}
+                episode = self.episodes[pair_id] = {"start_ts": now, "peak": None, "pair": pair}
             if episode["peak"] is None or edge > episode["peak"]["edge"]:
                 episode["peak"] = {"yes": yes, "no": no, "ts": now, "edge": edge, "size": size, "profit": profit}
             if self.on_signal and not episode.get("traded") and self.on_signal(pair, yes, no, edge, size, self.fee_infos, now):
                 episode["traded"] = True
         elif episode is not None:
-            self.close(label, now)
+            self.close(pair_id, now)
 
-    def close(self, label, now):
+    def close(self, pair_id, now):
         """
         End an episode, store it, and log it when it was worth something.
         """
-        episode = self.episodes.pop(label)
+        episode = self.episodes.pop(pair_id)
         o = finish(episode["pair"], episode["peak"], episode["start_ts"], now)
         database.insert_opportunities(self.conn, [o])
-        self.finished.append(o)
+        self.finished.append((episode["pair"]["kind"], o))
         if o.peak_profit >= LOG_PROFIT_DOLLARS:
-            self.log(f"episode {o.label}: {o.trade}, {100 * o.peak_edge:.1f}c x {o.peak_size:.0f} = {o.peak_profit:.2f}$, lasted {o.seconds:.1f}s")
+            self.log(f"episode {episode['pair']['label']}: {o.trade}, {100 * o.peak_edge:.1f}c x {o.peak_size:.0f} = {o.peak_profit:.2f}$, lasted {o.seconds:.1f}s")
 
     def summary(self):
         """
         One line per kind for the episodes ended since the last summary, then forget them.
         """
         by_kind = defaultdict(list)
-        for o in self.finished:
-            by_kind[o.kind].append(o)
+        for kind, o in self.finished:
+            by_kind[kind].append(o)
         parts = []
         for kind, os in sorted(by_kind.items()):
             best = max(os, key=lambda o: o.peak_profit)

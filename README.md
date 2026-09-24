@@ -16,8 +16,8 @@ the two paper balances level. No real orders are sent.
 
 Everything lives in `src/` and reads or writes one SQLite file,
 `data/sportsarb.sqlite`. The tables follow the pipeline in order:
-contracts, bets, pairs, quotes, gaps, opportunities, trades, settlements,
-ledger, transfers. Every table has a model in `db/models.py` and its
+contracts, bets, pairs, quotes, gaps, opportunities, trades, ledger,
+transfers. Every table has a model in `db/models.py` and its
 schema in `db/database.py`.
 
 ### Catalog (`src/catalog`)
@@ -113,8 +113,8 @@ the same dollars. Every cash movement is a `Ledger` row that records the
 balance it left behind, so a restart reads the newest row instead of
 replaying history. Every ten minutes the settler asks the venues how the
 contracts of trades past their payout time resolved, pays the winning leg
-a dollar a contract, and stores a `Settlement` per leg with the realized
-result, which is what a tax return needs. On Mondays the rebalancer
+a dollar a contract, and writes each leg's result, payout, and settlement
+time on the trade, which is what a tax return needs. On Mondays the rebalancer
 compares the venues and, when one sits more than 25% above the average,
 sends the excess to the other as a `Transfer` that takes four business
 days, during which the money is on neither venue.

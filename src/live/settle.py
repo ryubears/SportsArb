@@ -3,15 +3,15 @@ Settle paper trades once their contracts have resolved.
 
 Every SETTLE_SECONDS the settler looks for trades past their payout time,
 asks each venue how the held contracts resolved, pays the winning legs a
-dollar a contract through the shared Balances, and stores a Settlement per
-leg with the realized result. A trade settles only once every held leg
+dollar a contract through the shared Balances, and writes each leg's
+result and payout on the trade. A trade settles only once every held leg
 has a result, so a venue that is slow to resolve just delays it.
 """
 
 import asyncio
 from api import kalshi, polymarket_us
 from db import database
-from db.models import Ledger, Settlement
+from db.models import Ledger
 
 SETTLE_SECONDS = 600    # How often trades past their payout time are checked with the venues.
 RESULTS = {"kalshi": kalshi.results, "polymarket_us": polymarket_us.results}    # How each venue reports how a contract resolved.
@@ -43,7 +43,7 @@ class Settler:
     async def settle(self, now):
         """
         Ask the venues how the contracts of trades past their payout time
-        resolved, pay the winning legs, and store a settlement per leg.
+        resolved, pay the winning legs, and write each leg's result on the trade.
         """
         due = [t for t in database.load_open_trades(self.conn) if t.pays_at <= now]
         if not due:
@@ -63,28 +63,25 @@ class Settler:
                 continue
             results.update({(venue, cid): r for cid, r in found.items()})
         for t in due:
-            legs = []
-            for side in ("yes", "no"):
-                held = getattr(t, f"{side}_held")
-                if not held:
-                    continue
-                key = (getattr(t, f"{side}_venue"), getattr(t, f"{side}_contract"))
-                if key not in results:
-                    break
-                result, settled_at = results[key]
-                cost = getattr(t, f"{side}_cost")
-                payout = float(held) if leg_won(side, getattr(t, f"{side}_polarity"), result) else 0.0
-                legs.append(Settlement(t.id, key[0], key[1], side, held, cost, result, payout, payout - cost, settled_at or now))
-            else:
-                settled_at = max(l.settled_at for l in legs)
-                for l in legs:
-                    if l.payout:
-                        self.cash.book(Ledger(settled_at, l.venue, l.payout, "payout", t.id))
-                database.settle_trade(self.conn, t.id, settled_at, legs)
-                realized = sum(l.realized for l in legs)
-                self.settled.append((t, realized))
-                self.log(f"settled {t.label}: " + ", ".join(f"{l.venue} {l.side} {l.result} pays {l.payout:.0f}$" for l in legs)
-                         + f", realized {realized:+.2f}$")
+            legs = [side for side in ("yes", "no") if getattr(t, f"{side}_held")]
+            if any((getattr(t, f"{side}_venue"), getattr(t, f"{side}_contract")) not in results for side in legs):
+                continue
+            for side in legs:
+                result, settled_at = results[(getattr(t, f"{side}_venue"), getattr(t, f"{side}_contract"))]
+                won = leg_won(side, getattr(t, f"{side}_polarity"), result)
+                setattr(t, f"{side}_result", result)
+                setattr(t, f"{side}_payout", float(getattr(t, f"{side}_held")) if won else 0.0)
+                setattr(t, f"{side}_settled_at", settled_at or now)
+            t.settled_at = max(getattr(t, f"{side}_settled_at") for side in legs)
+            for side in legs:
+                if getattr(t, f"{side}_payout"):
+                    self.cash.book(Ledger(t.settled_at, getattr(t, f"{side}_venue"), getattr(t, f"{side}_payout"), "payout", t.id))
+            database.settle_trade(self.conn, t)
+            realized = sum(getattr(t, f"{side}_payout") - getattr(t, f"{side}_cost") for side in legs)
+            self.settled.append((t, realized))
+            self.log(f"settled {t.label}: " + ", ".join(
+                f"{getattr(t, f'{side}_venue')} {side} {getattr(t, f'{side}_result')} pays {getattr(t, f'{side}_payout'):.0f}$" for side in legs)
+                + f", realized {realized:+.2f}$")
 
     def tick(self, now, clock):
         """

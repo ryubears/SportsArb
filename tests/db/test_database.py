@@ -34,10 +34,12 @@ def test_bets_pairs_quotes_and_targets(tmp_path):
     g = Pair("champion 2027 BUF", "champion", 2027, None, None, None, "BUF", None, bets, ["note"])
     database.replace_pairs(conn, "nfl", [g], "2026-01-01T00:00:00+00:00")
     pairs = database.load_pairs(conn, "nfl")
-    assert list(pairs) == ["champion 2027 BUF"]
-    assert pairs["champion 2027 BUF"]["venues"] == "kalshi,polymarket_us"
-    assert sorted(m["contract_id"] for m in pairs["champion 2027 BUF"]["members"]) == ["k", "pm"]
-    assert pairs["champion 2027 BUF"]["members"][0]["close_time"] == "2027-01-01T00:00:00+00:00"
+    assert list(pairs) == [g.id] and g.id == 1 and [m.pair_id for m in g.members] == [1, 1]
+    assert (pairs[1]["label"], pairs[1]["venues"]) == ("champion 2027 BUF", "kalshi,polymarket_us")
+    assert sorted(m["contract_id"] for m in pairs[1]["members"]) == ["k", "pm"]
+    assert pairs[1]["members"][0]["close_time"] == "2027-01-01T00:00:00+00:00"
+    database.replace_pairs(conn, "nfl", [g], "2026-01-02T00:00:00+00:00")
+    assert g.id == 1 and tuple(conn.execute("SELECT COUNT(*), MAX(matched_at) FROM pairs").fetchone()) == (1, "2026-01-02T00:00:00+00:00")   # The same pair keeps its id.
 
     venues = ["polymarket_us", "kalshi"]
     targets = database.load_recording_targets(conn, "nfl", "2026-06-01T00:00:00+00:00", "2026-06-08T00:00:00+00:00", venues, "2026-05-31T19:00:00+00:00")
@@ -76,7 +78,7 @@ def test_gaps_are_stored_in_time_order_and_filtered_by_since(tmp_path):
 
 def test_opportunities_append_and_an_old_source_column_is_dropped(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
-    o = Opportunity("label", "spread", "yes: K buy, no: PMUS buy", "kalshi", "k", "polymarket_us", "pm", "t0", "t1", 60, "t0", 0.02, 100, 2.0, 0, 10.0, 2.04, 74.5)
+    o = Opportunity(1, "yes: K buy, no: PMUS buy", "kalshi", "k", "polymarket_us", "pm", "t0", "t1", 60, "t0", 0.02, 100, 2.0, 0, 10.0, 2.04, 74.5)
     database.insert_opportunities(conn, [o])
     database.insert_opportunities(conn, [o])
     assert conn.execute("SELECT COUNT(*) FROM opportunities").fetchone()[0] == 2
@@ -87,7 +89,7 @@ def test_opportunities_append_and_an_old_source_column_is_dropped(tmp_path):
     assert conn.execute("SELECT COUNT(*) FROM opportunities").fetchone()[0] == 2
 
 
-def test_replace_pairs_clears_labels_of_pairs_that_disappeared(tmp_path):
+def test_replace_pairs_unlinks_pairs_that_disappeared_but_keeps_their_rows(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
     database.upsert_contracts(conn, [contract("polymarket_us", "pm"), contract("kalshi", "k")], "2026-01-01T00:00:00+00:00")
     bets = [Bet(v, cid, "champion", 2027, None, None, None, "BUF", None, "yes") for v, cid in (("polymarket_us", "pm"), ("kalshi", "k"))]
@@ -96,7 +98,8 @@ def test_replace_pairs_clears_labels_of_pairs_that_disappeared(tmp_path):
     database.replace_pairs(conn, "nfl", [g], "2026-01-01T00:00:00+00:00")
     database.replace_pairs(conn, "nfl", [], "2026-01-02T00:00:00+00:00")
     assert database.load_pairs(conn, "nfl") == {}
-    assert conn.execute("SELECT COUNT(*) FROM bets WHERE pair_label IS NOT NULL").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM bets WHERE pair_id IS NOT NULL").fetchone()[0] == 0
+    assert [tuple(r) for r in conn.execute("SELECT id, label FROM pairs")] == [(1, "champion 2027 BUF")]       # Trades may still refer to it.
 
 
 def test_old_databases_are_migrated_to_pairs(tmp_path):
@@ -119,7 +122,48 @@ def test_old_databases_are_migrated_to_pairs(tmp_path):
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert "pairs" in tables and "gaps" in tables
     assert not {"bet_groups", "fee_history", "stream_gaps"} & tables
-    assert conn.execute("SELECT pair_label FROM bets").fetchone()[0] == "champion 2027 BUF"
+    assert "pair_label" not in [r[1] for r in conn.execute("PRAGMA table_info(bets)")]
+    assert conn.execute("SELECT pair_id FROM bets").fetchone()[0] is None      # No pairs table yet, the next match sets it.
     assert [g.start_ts[11:19] for g in database.load_gaps(conn, "kalshi")] == ["19:39:39"]
     assert [r[0] for r in conn.execute("SELECT balance FROM ledger ORDER BY id")] == [10000 - 23.5, 10000 + 26.5]   # Replayed from the start.
     assert database.last_balances(conn) == {"kalshi": 10026.5}
+
+
+def test_old_settlement_rows_are_folded_into_their_trades(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.sqlite"
+    old = sqlite3.connect(path)
+    old.executescript("""
+        CREATE TABLE pairs (label TEXT PRIMARY KEY, kind TEXT NOT NULL, season INTEGER, game_date TEXT, team_a TEXT, team_b TEXT, subject TEXT,
+                            line REAL, venues TEXT NOT NULL, contracts INTEGER NOT NULL, flags TEXT NOT NULL, matched_at TEXT NOT NULL);
+        INSERT INTO pairs VALUES ('spread 2026-09-27 KC@MIA KC 30.5', 'spread', 2027, '2026-09-27', 'KC', 'MIA', 'KC', 30.5, 'kalshi,polymarket_us', 2, '[]', 'm');
+        CREATE TABLE bets (venue TEXT, contract_id TEXT, kind TEXT, season INTEGER, game_date TEXT, team_a TEXT, team_b TEXT,
+                           subject TEXT, line REAL, polarity TEXT, pair_label TEXT, PRIMARY KEY (venue, contract_id));
+        INSERT INTO bets VALUES ('kalshi', 'k', 'spread', 2027, '2026-09-27', 'KC', 'MIA', 'KC', 30.5, 'yes', 'spread 2026-09-27 KC@MIA KC 30.5');
+        CREATE TABLE opportunities (label TEXT, kind TEXT, trade TEXT, yes_venue TEXT, yes_contract TEXT, no_venue TEXT, no_contract TEXT,
+            start_ts TEXT, end_ts TEXT, seconds REAL, peak_ts TEXT, peak_edge REAL, peak_size REAL, peak_profit REAL, live INTEGER,
+            days_held REAL, return_pct REAL, annual_pct REAL);
+        INSERT INTO opportunities VALUES ('spread 2026-09-27 KC@MIA KC 30.5', 'spread', 't', 'kalshi', 'k', 'polymarket_us', 'pm', 's', 'e', 60, 's', 0.005, 1000, 5, 0, 3, 0.5, 55),
+                                         ('l', 'spread', 't', 'kalshi', 'k', 'polymarket_us', 'pm', 'gone', 'e', 60, 's', 0.005, 1000, 5, 0, 3, 0.5, 55);
+        CREATE TABLE trades (id INTEGER PRIMARY KEY, label TEXT, kind TEXT, trade TEXT, signal_ts TEXT, edge REAL, quantity INTEGER,
+            yes_venue TEXT, yes_contract TEXT, yes_polarity TEXT, yes_limit REAL, yes_filled INTEGER, yes_cost REAL, yes_latency_ms INTEGER, yes_fill_ts TEXT,
+            no_venue TEXT, no_contract TEXT, no_polarity TEXT, no_limit REAL, no_filled INTEGER, no_cost REAL, no_latency_ms INTEGER, no_fill_ts TEXT,
+            yes_held INTEGER, no_held INTEGER, matched INTEGER, profit REAL, hedge TEXT, hedge_pnl REAL, status TEXT, pays_at TEXT, settled_at TEXT);
+        INSERT INTO trades VALUES (1, 'l', 'spread', 't', 's', 0.02, 5, 'polymarket_us', 'pm', 'yes', 0.45, 5, 2.25, 50, 'f', 'kalshi', 'k', 'yes', 0.47, 5, 2.35, 50, 'f',
+            5, 5, 5, 0.4, 'none', 0, 'filled', 'p', '2026-09-20T20:10:00+00:00');
+        CREATE TABLE settlements (trade_id INTEGER, venue TEXT, contract_id TEXT, side TEXT, held INTEGER, cost REAL, result TEXT, payout REAL, realized REAL, settled_at TEXT);
+        INSERT INTO settlements VALUES (1, 'polymarket_us', 'pm', 'yes', 5, 2.25, 'yes', 5, 2.75, '2026-09-20T20:10:00+00:00'),
+                                       (1, 'kalshi', 'k', 'no', 5, 2.35, 'yes', 0, -2.35, '2026-09-20T20:09:00+00:00');
+    """)
+    old.commit(); old.close()
+    conn = database.connect(path)
+    assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'settlements'").fetchone() is None
+    row = conn.execute("SELECT yes_result, yes_payout, yes_settled_at, no_result, no_payout, no_settled_at, settled_at FROM trades").fetchone()
+    assert tuple(row) == ("yes", 5, "2026-09-20T20:10:00+00:00", "yes", 0, "2026-09-20T20:09:00+00:00", "2026-09-20T20:10:00+00:00")
+    assert database.load_open_trades(conn) == []
+    # Pairs got ids. The stored pair kept its row, the trade's and the second episode's pairs, long gone from the catalog, got bare rows.
+    assert [tuple(r) for r in conn.execute("SELECT id, label, contracts FROM pairs ORDER BY id")] == [
+        (1, "spread 2026-09-27 KC@MIA KC 30.5", 2), (2, "l", 0)]
+    assert conn.execute("SELECT pair_id FROM bets").fetchone()[0] == 1
+    assert [tuple(r) for r in conn.execute("SELECT id, pair_id, start_ts FROM opportunities ORDER BY id")] == [(1, 1, "s"), (2, 2, "gone")]
+    assert [tuple(r) for r in conn.execute("SELECT id, pair_id FROM trades")] == [(1, 2)]

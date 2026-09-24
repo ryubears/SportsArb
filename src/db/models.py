@@ -43,15 +43,16 @@ class Bet:
     subject: str | None     # The team the contract is about, when there is one.
     line: float | None      # Spread margin, total points, or wins threshold.
     polarity: str           # 'yes' pays when the bet's statement is true, 'no' pays when it is false.
-    pair_label: str | None = None    # The pair this bet belongs to, set by match.py.
+    pair_id: int | None = None       # The pair this bet belongs to, set when the pairs are stored.
 
 
 @dataclass
 class Pair:
     """
     The contracts on both venues that describe one bet. The label is the
-    bet's identity in words and serves as its key. Members are Bets, two or
-    three of them, since a venue may list both sides of a game as contracts.
+    bet's identity in words, and the id is what the other tables refer to.
+    Members are Bets, two or three of them, since a venue may list both
+    sides of a game as contracts.
     """
     label: str              # For example 'spread 2026-09-20 CAR@ATL ATL 4.5'.
     kind: str
@@ -63,6 +64,7 @@ class Pair:
     line: float | None
     members: list           # Bets, one per contract.
     flags: list[str]        # Things a human should check before trusting the pair.
+    id: int | None = None   # The row id once stored.
 
     @property
     def venues(self):
@@ -87,8 +89,7 @@ class Opportunity:
     A stretch of time when one pair could be traded for a profit after
     fees, by buying yes exposure on one contract and no exposure on another.
     """
-    label: str              # The pair's label.
-    kind: str
+    pair_id: int            # The pair, see pairs.
     trade: str              # The two legs in words.
     yes_venue: str          # Where the yes exposure was cheapest at the peak.
     yes_contract: str
@@ -105,6 +106,7 @@ class Opportunity:
     days_held: float | None     # From the peak until the bet pays out, if held to resolution.
     return_pct: float       # Net edge over the capital tied up, as a percent.
     annual_pct: float | None    # return_pct scaled to a year over days_held, without compounding.
+    id: int | None = None       # The row id once stored.
 
 
 @dataclass
@@ -124,8 +126,7 @@ class Trade:
     the profit locked in on the matched contracts, and how any mismatch
     was flattened.
     """
-    label: str              # The pair's label.
-    kind: str
+    pair_id: int            # The pair, see pairs.
     trade: str              # The two legs in words.
     signal_ts: str          # When the scanner signalled.
     edge: float             # Net dollars per contract at the signal.
@@ -154,25 +155,15 @@ class Trade:
     hedge: str = "none"     # How the mismatch was flattened, in words.
     hedge_pnl: float = 0.0  # Dollars gained or lost by flattening, after fees.
     status: str = "sent"    # 'sent' while in flight, then 'filled', 'partial', or 'failed'.
+    yes_result: str | None = None   # How the yes leg's contract resolved, 'yes' or 'no', once known.
+    yes_payout: float | None = None # Dollars received on the yes leg, one per contract held when its side won.
+    yes_settled_at: str | None = None   # The venue's settlement time for the yes leg.
+    no_result: str | None = None
+    no_payout: float | None = None
+    no_settled_at: str | None = None
     settled_at: str | None = None   # When both legs had resolved and the payouts were booked.
     id: int | None = None   # The row id once stored.
-
-
-@dataclass
-class Settlement:
-    """
-    What one leg of a trade paid out when its contract resolved.
-    """
-    trade_id: int
-    venue: str
-    contract_id: str
-    side: str               # 'yes' or 'no', the side of the bet this leg held.
-    held: int               # Contracts held at resolution.
-    cost: float             # Dollars paid for them including fees.
-    result: str             # How the contract resolved, 'yes' or 'no'.
-    payout: float           # Dollars received, one per contract when the held side won.
-    realized: float         # payout minus cost.
-    settled_at: str         # The venue's settlement time.
+    label: str | None = None    # The pair's label for log lines, read from the pairs table rather than stored here.
 
 
 @dataclass

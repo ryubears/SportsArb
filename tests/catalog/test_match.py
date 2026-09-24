@@ -30,8 +30,7 @@ def test_same_bet_on_two_venues_forms_one_pair():
     g = pairs[0]
     assert g.label == "champion 2027 BUF"
     assert g.venues == ["kalshi", "polymarket_us"]
-    assert sorted((m.venue, m.contract_id, m.polarity, m.pair_label) for m in g.members) == [
-        ("kalshi", "k", "yes", "champion 2027 BUF"), ("polymarket_us", "us", "yes", "champion 2027 BUF")]
+    assert sorted((m.venue, m.contract_id, m.polarity) for m in g.members) == [("kalshi", "k", "yes"), ("polymarket_us", "us", "yes")]
 
 
 def test_bets_on_a_single_venue_are_left_out():

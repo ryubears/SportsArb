@@ -25,7 +25,7 @@ Paper trading: the executor, settlement, and transfer lines from the log, then t
     ssh -i ~/.ssh/sportsarb-us.pem ubuntu@54.82.110.237 'grep -E "paper|settled|transfer" SportsArb/data/record.log | tail -30; sqlite3 -header -column SportsArb/data/sportsarb.sqlite "select status, count(*) as trades, sum(matched) as matched, round(sum(profit + hedge_pnl), 2) as net from trades group by 1; select venue, round(sum(amount), 2) as ledger from ledger group by 1; select count(*) as open_trades from trades where settled_at is null and yes_held + no_held > 0;"'
 
 Largest episodes in the database.
-    ssh -i ~/.ssh/sportsarb-us.pem ubuntu@54.82.110.237 'sqlite3 -header -column SportsArb/data/sportsarb.sqlite "select label, trade, round(100*peak_edge,1) as edge_c, round(peak_size) as size, round(peak_profit,2) as profit, round(seconds) as secs, substr(peak_ts,12,8) as at_utc from opportunities order by peak_profit desc limit 15"'
+    ssh -i ~/.ssh/sportsarb-us.pem ubuntu@54.82.110.237 'sqlite3 -header -column SportsArb/data/sportsarb.sqlite "select p.label, trade, round(100*peak_edge,1) as edge_c, round(peak_size) as size, round(peak_profit,2) as profit, round(seconds) as secs, substr(peak_ts,12,8) as at_utc from opportunities o join pairs p on p.id = o.pair_id order by peak_profit desc limit 15"'
 
 Copy the database home for analysis. The recorder keeps running.
     rsync -avz -e "ssh -i ~/.ssh/sportsarb-us.pem" ubuntu@54.82.110.237:SportsArb/data/sportsarb.sqlite* ~/Projects/SportsArb/data/aws/
