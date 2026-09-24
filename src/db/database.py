@@ -187,6 +187,8 @@ CREATE TABLE IF NOT EXISTS transfers (
 """
 
 
+# CONNECTION
+
 def connect(db_path=None):
     """
     Open the database, creating the file and tables if needed. Uses DB_PATH unless a path is given.
@@ -235,6 +237,8 @@ def migrate(conn):
         conn.execute("ALTER TABLE opportunities DROP COLUMN source")
     conn.executescript(SCHEMA)
 
+
+# CONTRACTS
 
 def upsert_contracts(conn, contracts, fetched_at):
     """
@@ -287,6 +291,48 @@ def load_contracts(conn, sport=None, venue=None):
     return [dict(r) for r in conn.execute(sql, params)]
 
 
+def load_fee_infos(conn, sport):
+    """
+    Return {(venue, contract_id): fee_info} with the fee schedule currently stored for every contract of a sport.
+    """
+    return {(venue, cid): jsonutil.parse(fee_info, {})
+            for venue, cid, fee_info in conn.execute("SELECT venue, contract_id, fee_info FROM contracts WHERE sport = ?", (sport,))}
+
+
+def event_ids(conn, venue, contract_ids):
+    """
+    Return {contract_id: event_id} for the contracts of one venue.
+    """
+    return {cid: event for cid, event in conn.execute(
+        f"SELECT contract_id, event_id FROM contracts WHERE venue = ? AND contract_id IN ({','.join('?' * len(contract_ids))})",
+        (venue, *contract_ids))} if contract_ids else {}
+
+
+def load_recording_targets(conn, sport, now, horizon, venues, game_started_after):
+    """
+    Return {venue: [contract_id, ...]} for every contract in a pair that
+    is still open and is either a future or a game starting before the
+    horizon. A game contract also counts as open
+    while its game may still be in play, meaning it started after
+    game_started_after, in case a venue's close time is the kickoff even
+    though its markets trade through the game.
+    """
+    targets = {}
+    for venue in venues:
+        rows = conn.execute("""
+            SELECT c.contract_id FROM contracts c
+            JOIN bets b ON b.venue = c.venue AND b.contract_id = c.contract_id
+            JOIN pairs p ON p.label = b.pair_label
+            WHERE c.venue = ? AND c.sport = ?
+              AND (c.close_time IS NULL OR c.close_time > ? OR (c.start_time IS NOT NULL AND c.start_time > ?))
+              AND (b.game_date IS NULL OR b.game_date <= ?)
+        """, (venue, sport, now, game_started_after, horizon[:10]))
+        targets[venue] = [r[0] for r in rows]
+    return targets
+
+
+# BETS
+
 def replace_bets(conn, sport, bets):
     """
     Drop every bet belonging to the sport's contracts, then insert the new ones.
@@ -319,6 +365,8 @@ def load_bets(conn, sport, venue=None):
         params.append(venue)
     return [dict(r) for r in conn.execute(sql, params)]
 
+
+# PAIRS
 
 def replace_pairs(conn, sport, pairs, matched_at):
     """
@@ -356,6 +404,8 @@ def load_pairs(conn, sport):
     return pairs
 
 
+# QUOTES
+
 def insert_quotes(conn, quotes):
     """
     Append Quotes. Bids and asks are stored as JSON text.
@@ -384,6 +434,8 @@ def load_quotes(conn, venue, contract_ids, since=None):
     return out
 
 
+# GAPS
+
 def insert_gap(conn, gap):
     """
     Record a stretch when a venue's feed was down.
@@ -404,6 +456,8 @@ def load_gaps(conn, venue, since=None):
     return [Gap(*row) for row in conn.execute(sql + " ORDER BY start_ts", params)]
 
 
+# OPPORTUNITIES
+
 def insert_opportunities(conn, opportunities):
     """
     Append Opportunities.
@@ -419,36 +473,7 @@ def insert_opportunities(conn, opportunities):
     conn.commit()
 
 
-def load_recording_targets(conn, sport, now, horizon, venues, game_started_after):
-    """
-    Return {venue: [contract_id, ...]} for every contract in a pair that
-    is still open and is either a future or a game starting before the
-    horizon. A game contract also counts as open
-    while its game may still be in play, meaning it started after
-    game_started_after, in case a venue's close time is the kickoff even
-    though its markets trade through the game.
-    """
-    targets = {}
-    for venue in venues:
-        rows = conn.execute("""
-            SELECT c.contract_id FROM contracts c
-            JOIN bets b ON b.venue = c.venue AND b.contract_id = c.contract_id
-            JOIN pairs p ON p.label = b.pair_label
-            WHERE c.venue = ? AND c.sport = ?
-              AND (c.close_time IS NULL OR c.close_time > ? OR (c.start_time IS NOT NULL AND c.start_time > ?))
-              AND (b.game_date IS NULL OR b.game_date <= ?)
-        """, (venue, sport, now, game_started_after, horizon[:10]))
-        targets[venue] = [r[0] for r in rows]
-    return targets
-
-
-def load_fee_infos(conn, sport):
-    """
-    Return {(venue, contract_id): fee_info} with the fee schedule currently stored for every contract of a sport.
-    """
-    return {(venue, cid): jsonutil.parse(fee_info, {})
-            for venue, cid, fee_info in conn.execute("SELECT venue, contract_id, fee_info FROM contracts WHERE sport = ?", (sport,))}
-
+# TRADES
 
 def insert_trade(conn, t):
     """
@@ -491,6 +516,8 @@ def load_open_trades(conn):
         "SELECT * FROM trades WHERE status != 'sent' AND settled_at IS NULL AND yes_held + no_held > 0 ORDER BY id")]
 
 
+# SETTLEMENTS
+
 def settle_trade(conn, trade_id, settled_at, settlements):
     """
     Store a Settlement per leg and mark the trade settled.
@@ -503,14 +530,7 @@ def settle_trade(conn, trade_id, settled_at, settlements):
     conn.commit()
 
 
-def event_ids(conn, venue, contract_ids):
-    """
-    Return {contract_id: event_id} for the contracts of one venue.
-    """
-    return {cid: event for cid, event in conn.execute(
-        f"SELECT contract_id, event_id FROM contracts WHERE venue = ? AND contract_id IN ({','.join('?' * len(contract_ids))})",
-        (venue, *contract_ids))} if contract_ids else {}
-
+# LEDGER
 
 def add_ledger(conn, entry):
     """
@@ -528,6 +548,8 @@ def last_balances(conn):
     return {venue: balance for venue, balance in conn.execute(
         "SELECT venue, balance FROM ledger WHERE id IN (SELECT MAX(id) FROM ledger GROUP BY venue)")}
 
+
+# TRANSFERS
 
 def insert_transfer(conn, transfer):
     """
