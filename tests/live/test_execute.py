@@ -75,6 +75,19 @@ def test_unchanged_books_fill_both_legs_and_lock_in_the_edge(tmp_path, quick):
     assert ex.summary().startswith("paper: 1 trades (1 filled, 0 partial, 0 failed), locked in 4.00$, hedges +0.00$; total 1 trades, 4.00$")
 
 
+def test_an_order_sweeps_the_levels_that_keep_the_edge_floor_and_skips_a_one_lot_top(tmp_path, quick):
+    latest = books()
+    latest[("polymarket_us", "pm")] = Quote("polymarket_us", "pm", NOW, [[0.44, 100]], [[0.45, 1], [0.46, 100], [0.50, 100]])
+    conn, cash, ex = executor(tmp_path, latest)
+    assert run(ex) == [True]
+    t = stored(conn)[0]
+    # The 1-lot at 0.45 fills nothing for us. The 100 at 0.46 still leave 7 cents against 0.47, so the limit reaches it.
+    # The 0.50 level would leave 3 cents and is left out. Half of the 100 contracts inside the limit is the quantity.
+    assert (t["yes_limit"], t["no_limit"], t["quantity"]) == (0.46, 0.47, 50)
+    assert (t["status"], t["yes_filled"], t["no_filled"], t["matched"]) == ("filled", 50, 50, 50)
+    assert t["yes_cost"] == pytest.approx(50 * 0.46) and t["profit"] == pytest.approx(50 * (1 - 0.46 - 0.47))
+
+
 def test_a_shrunken_leg_is_completed_on_the_other_venue_when_that_is_cheaper(tmp_path, quick):
     latest = books()
     conn, cash, ex = executor(tmp_path, latest)
@@ -104,6 +117,38 @@ def test_a_leg_with_no_book_is_flattened_by_selling_the_other_back(tmp_path, qui
     assert (t["yes_held"], t["no_held"]) == (0, 0)
     assert cash["polymarket_us"] == pytest.approx(10000 - 50 * 0.45 + 50 * 0.44)
     assert cash["kalshi"] == pytest.approx(10000)
+
+
+def test_exposure_is_flattened_on_a_later_tick_once_a_book_allows_it(tmp_path, quick):
+    latest = books()
+    logs = []
+    conn, cash, ex = executor(tmp_path, latest, logs.append)
+
+    def kalshi_vanishes_and_polymarket_loses_its_bids():
+        latest.pop(("kalshi", "k"))
+        latest[("polymarket_us", "pm")] = Quote("polymarket_us", "pm", NOW, [], [[0.45, 100]])
+
+    run(ex, kalshi_vanishes_and_polymarket_loses_its_bids)
+    t = stored(conn)[0]
+    assert (t["yes_held"], t["no_held"], t["hedge"]) == (50, 0, "50 exposed, no book to flatten, no leg no book")
+    assert [tr.id for tr, _ in ex.exposed] == [t["id"]]
+
+    async def later():
+        ex.tick(NOW)                                            # Still no book, nothing to do.
+        await asyncio.gather(*ex.tasks)
+        latest.update(books(k_bid=0.53, k_ask=0.54, size=40))   # Kalshi is back with 40 on the ask, 20 for us.
+        ex.tick("2026-09-20T17:31:00+00:00")
+        await asyncio.gather(*ex.tasks)
+        ex.tick("2026-09-20T21:30:00+00:00")                    # Past the payout, the rest is left to settle.
+        await asyncio.gather(*ex.tasks)
+    asyncio.run(later())
+    t = stored(conn)[0]
+    assert (t["yes_held"], t["no_held"], t["matched"], t["status"]) == (50, 20, 20, "partial")
+    assert t["hedge"] == "50 exposed, no book to flatten, no leg no book, then bought 20 of 50 on kalshi, 30 exposed at 17:31:00"
+    assert t["hedge_pnl"] == pytest.approx(20 * (1 - 0.45 - 0.47))
+    assert logs[-1] == "paper flattened game_winner 2026-09-20 CAR@ATL CAR: bought 20 of 50 on kalshi, 30 exposed, 30 still exposed, hedge +1.60$"
+    assert ex.exposed == []
+    assert cash["kalshi"] == pytest.approx(10000 - 20 * 0.47)
 
 
 def test_rejected_orders_fail_without_a_hedge(tmp_path, quick, monkeypatch):

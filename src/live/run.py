@@ -89,7 +89,8 @@ class Session:
         self.recorder.flush()
         if self.scanner:
             self.scanner.sweep(self.recorder.latest, now)
-        if self.settler:
+        if self.executor:
+            self.executor.tick(now)
             self.settler.tick(now, time.time())
             self.rebalancer.tick(now)
         if self.scanner and time.time() - self.last_summary >= scan.SUMMARY_SECONDS:

@@ -28,6 +28,15 @@ def test_ladder_depends_on_which_side_the_contract_pays():
     assert pricing.ladder(q, "no", "yes") == [(0.47, 100)]
 
 
+def test_depth_stops_where_the_edge_falls_under_the_floor():
+    fee = ("polymarket_us", {"feeCoefficient": 0})
+    leg_a = [(0.45, 1), (0.46, 100), (0.50, 100)]     # Hold yes: 8, 7, then 3 cents against 0.47 on the other leg.
+    leg_b = [(0.47, 100)]
+    assert pricing.depth(leg_a, leg_b, fee, fee, 0.05) == (0.46, 0.47, 100)      # The third level is under 5 cents.
+    assert pricing.depth(leg_a, leg_b, fee, fee, 0.08) == (0.45, 0.47, 1)        # Only the top level clears 8 cents.
+    assert pricing.depth(leg_a, leg_b, fee, fee, 0.09) == (None, None, 0)        # Nothing does.
+
+
 def test_fill_walks_both_ladders_while_the_edge_is_positive():
     leg_a = [(0.40, 10), (0.41, 10)]
     leg_b = [(0.50, 5), (0.58, 100)]

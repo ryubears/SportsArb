@@ -55,6 +55,37 @@ def fill(leg_a, leg_b, venue_a, venue_b, fee_infos):
     return (top_edge if top_edge is not None else -1.0), size, profit
 
 
+def depth(leg_a, leg_b, fee_a, fee_b, min_edge):
+    """
+    Walk two ladders together as fill does, but only while the net edge per
+    contract stays at or above min_edge. Returns the deepest cost included
+    on each leg, which is the limit an order needs to sweep those levels,
+    and the contracts within them: (limit_a, limit_b, contracts).
+    fee_a and fee_b are (venue, fee_info) for each leg.
+    """
+    i = j = 0
+    left_a = left_b = 0.0
+    limit_a = limit_b = None
+    contracts = 0.0
+    while i < len(leg_a) and j < len(leg_b):
+        cost_a, size_a = leg_a[i]
+        cost_b, size_b = leg_b[j]
+        edge = 1 - cost_a - cost_b - fees.fee(fee_a[0], cost_a, 1, fee_a[1]) - fees.fee(fee_b[0], cost_b, 1, fee_b[1])
+        if edge < min_edge:
+            break
+        left_a, left_b = left_a or size_a, left_b or size_b
+        qty = min(left_a, left_b)
+        contracts += qty
+        limit_a, limit_b = cost_a, cost_b
+        left_a -= qty
+        left_b -= qty
+        if left_a <= 0:
+            i += 1
+        if left_b <= 0:
+            j += 1
+    return limit_a, limit_b, contracts
+
+
 def cheapest(members, quotes, side, fee_infos):
     """
     The member offering the lowest fee inclusive cost at the top of book to
