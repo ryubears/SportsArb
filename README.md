@@ -94,17 +94,21 @@ tied up, annualized as if held until the bet pays out. The scanner also
 calls the executor once per episode.
 
 **execute.py** paper trades the signal. It pretends to send one limit order
-per leg at the prices it saw. Each order arrives after a latency drawn from
-what was measured from us-east-1 (about 50 ms to Kalshi, 60 ms to
-Polymarket US, lognormal) and fills against the book as it is at that
-moment, from the same in memory books. Only half the visible size at a
-level is assumed to be ours, and 3% of orders are rejected outright. A leg
-that filled short is flattened at once, by selling the excess back or
-buying the missing side on the other venue, whichever the books say
-leaves more money. Signals need a net edge of at least two cents per
-contract and a payout within a day, and a trade is capped at 500
-contracts, about $500 of capital across both legs. Every trade is stored
-as soon as it is sent and updated when it is done.
+per leg. Both ladders are walked together and each leg's limit is set at
+the deepest level that still leaves the minimum edge, so an order sweeps
+every level above the floor rather than only the top one. Each order
+arrives after a latency drawn from what was measured from us-east-1
+(about 50 ms to Kalshi, 60 ms to Polymarket US, lognormal) and fills
+against the book as it is at that moment, from the same in memory books.
+Only half the visible size at a level is assumed to be ours, and 3% of
+orders are rejected outright. A leg that filled short is flattened at
+once, by selling the excess back or buying the missing side on the other
+venue, whichever the books say leaves more money, and whatever stays
+exposed is tried again on every tick until it is flat or the bet pays
+out. Signals need a net edge of at least five cents per contract and a
+payout within a day, and a trade is capped at 50 contracts, about $50 of
+capital across both legs, so a full Sunday slate fits the balances. Every
+trade is stored as soon as it is sent and updated when it is done.
 
 **balances.py**, **settle.py**, **rebalance.py** keep the paper books.
 Each venue starts with $10,000. Money for an order in flight is reserved
@@ -188,10 +192,44 @@ a few cents. Net result after hedges was +$0.07 on a few dollars of
 capital. The edges on the props are real but the depth behind them is one
 to five contracts, so the money is small and every fill is a race.
 
+**The first live game.** Atlanta at Green Bay on September 24 was the
+first game recorded in play, on a fresh database with $10,000 per venue,
+a 2-cent minimum edge and 500 contracts per trade. The recorder held
+1,700 Kalshi updates a second without a drop and wrote 550,000 rows in
+the peak hour. The scanner saw 5,587 positive-edge episodes on the game's
+pairs during play, and almost all were noise: 4,060 had under a cent of
+edge and 2,860 of those lasted under a second. The money sat in 88
+episodes of 10 cents or more, nearly all the same event: a scoring play or
+a decisive stat, one venue reprices, the other keeps its old price for a
+fraction of a second. Drake London's touchdown, later overturned, showed
+as a 78-cent edge for 0.2 seconds.
+
+The paper executor sent 398 trades in three hours and then stopped
+because both balances were at zero. 247 filled in full, 45 partly, 106
+not at all. Kalshi filled 65% of what was asked and Polymarket US 41%,
+with simulated latency never above 150 ms, so it is the book moving
+within a tenth of a second, not slow orders. Trades signalled at 2 to 3
+cents lost money after hedging; the 44 at 10 cents or more made most of
+the profit. When every trade had settled the two venues held $20,653, a
+gain of $653, or 3.3% on the capital, in three hours. About a third of
+the gain was luck: 2,161 contracts were left holding one side only,
+because the flatten attempt found nothing it could take, and the
+resolutions happened to go the right way.
+
+That game set the current limits. Thin edges are not worth the race, so
+the minimum is five cents. At 500 contracts the game wanted $31,000
+against $20,000 available and the last quarter hour went untraded, so
+the cap is 50, which fits the nine games of a Sunday early window. Two
+execution flaws it exposed are fixed: orders now sweep the levels above
+the edge floor instead of only the top level, and a level too small for a
+whole contract no longer ends a ladder walk, which is what had turned
+most of the one-sided positions into "no book to flatten".
+
 The honest reading is that after fees the two venues are tightly priced
-in the liquid markets and loosely priced in the illiquid ones, which is
-what you would expect. The next question for the data is whether the
-spread edges, which do have depth, are reachable at the latency measured.
+before kickoff and briefly, sharply mispriced after every scoring play.
+The paper edge is real. Whether it is reachable is a question of whether
+the stale quote is still there when a real order lands, which the paper
+model assumes half the time and which only real orders can measure.
 
 ## Running it
 
@@ -230,6 +268,6 @@ src/
   db/         models and the SQLite schema
   live/       run, record, streams, scan, pricing, fees, execute, balances, settle, rebalance
   tools/      summary report
-tests/        mirrors src, 107 tests, run with pytest
+tests/        mirrors src, 111 tests, run with pytest
 commands.txt  operating the AWS instance
 ```
