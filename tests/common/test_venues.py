@@ -7,7 +7,8 @@ from catalog import fetch
 from catalog.classify import classify
 from common import config
 from common.venues import SHORT_NAMES, VENUES
-from live import fees, settle, streams
+from live.components import settle, streams
+from live.price import fees
 
 
 @pytest.mark.parametrize("name, table", [

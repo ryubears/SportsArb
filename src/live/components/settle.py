@@ -9,7 +9,7 @@ checked from its payout time. Each pass costs one Kalshi call per fifty
 tickers and one Polymarket US call per event, and the next pass starts
 config.SETTLE_CHECK_SECONDS after the previous one began. Winning legs are paid a
 dollar a contract through the shared Balances and each leg's result and
-payout is written on the trade. A trade settles only once every held leg
+payout is stored as the trade's Settlement. A trade settles only once every held leg
 has a result, so a venue that is slow to resolve just delays it.
 
 A trade still exposed on one side may be settled while the executor keeps
@@ -24,7 +24,7 @@ from api import kalshi, polymarket_us
 from common import config
 from common.log import on_failure, with_traceback
 from db import database
-from db.models import Ledger
+from db.models import Ledger, Settlement
 
 RESULTS = {"kalshi": kalshi.results, "polymarket_us": polymarket_us.results}    # How each venue reports how a contract resolved.
 RESULTS_BY_EVENT = {"kalshi": False, "polymarket_us": True}     # Whether a venue's lookup takes event ids rather than contract ids.
@@ -83,27 +83,27 @@ class Settler:
         for t in (current.get(t.id) for t in due):
             if t is None or t.id in flattening:
                 continue
-            legs = [side for side in ("yes", "no") if getattr(t, f"{side}_held")]
-            if any((getattr(t, f"{side}_venue"), getattr(t, f"{side}_contract")) not in results for side in legs):
+            keys = {side: (getattr(t, f"{side}_venue"), getattr(t, f"{side}_contract"))
+                    for side in ("yes", "no") if getattr(t, f"{side}_held")}
+            if any(key not in results for key in keys.values()):
                 continue
-            for side in legs:
-                result, settled_at = results[(getattr(t, f"{side}_venue"), getattr(t, f"{side}_contract"))]
+            settlement = Settlement(t.id, settled_at=max(results[key][1] or now for key in keys.values()))
+            for side, key in keys.items():
+                result, settled_at = results[key]
                 won = leg_won(side, getattr(t, f"{side}_polarity"), result)
-                setattr(t, f"{side}_result", result)
-                setattr(t, f"{side}_payout", float(getattr(t, f"{side}_held")) if won else 0.0)
-                setattr(t, f"{side}_settled_at", settled_at or now)
-            t.settled_at = max(getattr(t, f"{side}_settled_at") for side in legs)
-            for side in legs:
-                if getattr(t, f"{side}_payout"):
-                    self.cash.book(Ledger(t.settled_at, getattr(t, f"{side}_venue"), getattr(t, f"{side}_payout"), "payout", t.id))
-            database.settle_trade(self.conn, t)
+                setattr(settlement, f"{side}_result", result)
+                setattr(settlement, f"{side}_payout", float(getattr(t, f"{side}_held")) if won else 0.0)
+                setattr(settlement, f"{side}_settled_at", settled_at or now)
+                if won:
+                    self.cash.book(Ledger(settlement.settled_at, key[0], getattr(settlement, f"{side}_payout"), "payout", t.id))
+            database.insert_settlement(self.conn, settlement)
             if self.executor:
                 self.executor.settled(t.id)
-            realized = sum(getattr(t, f"{side}_payout") - getattr(t, f"{side}_cost") for side in legs)
+            realized = sum(getattr(settlement, f"{side}_payout") - getattr(t, f"{side}_cost") for side in keys)
             self.settled.append((t, realized))
             self.log(f"settled {t.label}: " + ", ".join(
-                f"{getattr(t, f'{side}_venue')} {side} {getattr(t, f'{side}_result')} pays {getattr(t, f'{side}_payout'):.0f}$" for side in legs)
-                + f", realized {realized:+.2f}$")
+                f"{key[0]} {side} {getattr(settlement, f'{side}_result')} pays {getattr(settlement, f'{side}_payout'):.0f}$"
+                for side, key in keys.items()) + f", realized {realized:+.2f}$")
 
     def tick(self, now, clock):
         """

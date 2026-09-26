@@ -1,8 +1,19 @@
 """
 Data classes shared across the project.
+
+Each model lists its key first, as its table does: the row id, or the
+columns of the primary key. A row id is keyword only, since it is set when
+the row is stored rather than when the model is made.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+def row_id():
+    """
+    A model's row id field: keyword only, and None until the row is stored.
+    """
+    return field(default=None, kw_only=True)
 
 
 @dataclass
@@ -54,6 +65,7 @@ class Pair:
     Members are Bets, two or three of them, since a venue may list both
     sides of a game as contracts.
     """
+    id: int | None = row_id()
     label: str              # For example 'spread 2026-09-20 CAR@ATL ATL 4.5'.
     kind: str
     season: int | None
@@ -64,7 +76,6 @@ class Pair:
     line: float | None
     members: list           # Bets, one per contract.
     flags: list[str]        # Things a human should check before trusting the pair.
-    id: int | None = None   # The row id once stored.
 
     @property
     def venues(self):
@@ -89,6 +100,7 @@ class Opportunity:
     A stretch of time when one pair could be traded for a profit after
     fees, by buying yes exposure on one contract and no exposure on another.
     """
+    id: int | None = row_id()
     pair_id: int            # The pair, see pairs.
     trade: str              # The two legs in words.
     yes_venue: str          # Where the yes exposure was cheapest at the peak.
@@ -106,7 +118,6 @@ class Opportunity:
     days_held: float | None     # From the peak until the bet pays out, if held to resolution.
     return_pct: float       # Net edge over the capital tied up, as a percent.
     annual_pct: float | None    # return_pct scaled to a year over days_held, without compounding.
-    id: int | None = None       # The row id once stored.
 
 
 @dataclass
@@ -124,13 +135,15 @@ class Trade:
     """
     One paper trade: two legs sent on a scanner signal, what each filled,
     the profit locked in on the matched contracts, and how any mismatch
-    was flattened.
+    was flattened. How its legs paid out is its Settlement, once it has one.
     """
+    id: int | None = row_id()
     pair_id: int            # The pair, see pairs.
     trade: str              # The two legs in words.
     signal_ts: str          # When the scanner signalled.
     edge: float             # Net dollars per contract at the signal.
     quantity: int           # Contracts wanted on each leg.
+    cap: int | None = field(default=None, kw_only=True)     # The allocator's cap on contracts per trade when this one was sent.
     yes_venue: str
     yes_contract: str
     yes_polarity: str       # The side the contract pays on, so settlement knows whether the leg won.
@@ -155,17 +168,24 @@ class Trade:
     hedge: str = "none"     # How the mismatch was flattened, in words.
     hedge_pnl: float = 0.0  # Dollars gained or lost by flattening, after fees.
     status: str = "sent"    # 'sent' while in flight, then 'filled', 'partial', or 'failed'.
-    yes_result: str | None = None   # How the yes leg's contract resolved, 'yes' or 'no', once known.
-    yes_payout: float | None = None # Dollars received on the yes leg, one per contract held when its side won.
+    label: str | None = None    # The pair's label for log lines, read from the pairs table rather than stored here.
+    starts_at: str | None = None    # Kickoff of the game behind the trade, read from the contracts table, for the settler.
+
+
+@dataclass
+class Settlement:
+    """
+    How a trade's legs paid out once both had resolved. A leg that held
+    nothing has no result.
+    """
+    trade_id: int           # The trade settled, see trades. A trade has at most one settlement.
+    settled_at: str         # When both legs had resolved and the payouts were booked: the later leg's settlement.
+    yes_result: str | None = None       # How the yes leg's contract resolved, 'yes' or 'no'.
+    yes_payout: float | None = None     # Dollars received on the yes leg, one per contract held when its side won.
     yes_settled_at: str | None = None   # The venue's settlement time for the yes leg.
     no_result: str | None = None
     no_payout: float | None = None
     no_settled_at: str | None = None
-    settled_at: str | None = None   # When both legs had resolved and the payouts were booked.
-    cap: int | None = None  # The allocator's cap on contracts per trade when this one was sent.
-    id: int | None = None   # The row id once stored.
-    label: str | None = None    # The pair's label for log lines, read from the pairs table rather than stored here.
-    starts_at: str | None = None    # Kickoff of the game behind the trade, read from the contracts table, for the settler.
 
 
 @dataclass
@@ -173,10 +193,11 @@ class Ledger:
     """
     One cash movement on a venue's paper balance.
     """
+    id: int | None = row_id()
     ts: str
     venue: str
     amount: float           # Dollars in or out, positive when money arrives.
-    reason: str             # 'buy', 'sell', 'payout', 'transfer_out', or 'transfer_in'.
+    reason: str             # 'buy', 'sell', 'payout', 'transfer_out', or 'transfer_in', which is also each venue's opening balance.
     trade_id: int | None = None     # The trade behind a buy, sell, or payout.
     balance: float | None = None    # The venue's balance after this entry, so the newest entry gives the balance.
 
@@ -186,6 +207,7 @@ class Transfer:
     """
     A rebalancing transfer between venues.
     """
+    id: int | None = row_id()
     from_venue: str
     to_venue: str
     amount: float
@@ -193,4 +215,3 @@ class Transfer:
     expected_at: str        # When the money should land, business days after the request.
     reason: str             # 'drift' for the weekly check, 'floor' for a venue running low.
     arrived_at: str | None = None   # Set when the money was credited to the receiving venue.
-    id: int | None = None   # The row id once stored.

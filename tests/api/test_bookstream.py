@@ -59,7 +59,7 @@ class ScriptedStream(bookstream.BookStream):
     def __init__(self, contract_ids, connections, on_book=lambda *a: None, log=None):
         self.logs = []
         self.gaps = []
-        super().__init__(contract_ids, on_book, self.logs.append, on_gap=lambda start, end: self.gaps.append((start, end)))
+        super().__init__(contract_ids, on_book, lambda start, end: self.gaps.append((start, end)), self.logs.append)
         self.connections = list(connections)
         self.used = []
         self.resets = 0

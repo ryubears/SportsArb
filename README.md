@@ -76,7 +76,8 @@ and rebalancer together, and a one-second timer ticks it: flush the changed
 books, price them, settle and rebalance, and log a status line every
 minute and each component's summary every ten. The same loop starts the
 hourly catalog refresh in a background thread and applies the result to
-the live connections.
+the live connections. The pieces it wires together are in
+`live/components/`, and the pricing they share is in `live/price/`.
 
 **record.py** holds the newest book for every paired contract in memory
 and, on each tick, writes a row with five levels a side for each contract
@@ -116,14 +117,17 @@ trade is stored as soon as it is sent and updated when it is done.
 Each venue starts with $10,000. Money for an order in flight is reserved
 before anything is awaited, so two signals in the same moment cannot spend
 the same dollars. Every cash movement is a `Ledger` row that records the
-balance it left behind, so a restart reads the newest row instead of
-replaying history. Every ten minutes the settler asks the venues how the
-contracts of trades past their payout time resolved, pays the winning leg
-a dollar a contract, and writes each leg's result, payout, and settlement
-time on the trade, which is what a tax return needs. On Mondays the rebalancer
-compares the venues and, when one sits more than 25% above the average,
-sends the excess to the other as a `Transfer` that takes four business
-days, during which the money is on neither venue.
+balance it left behind, starting with a `transfer_in` of each venue's
+opening balance, so the ledger accounts for every dollar and a restart
+reads the newest row instead of replaying history. From kickoff, every 30
+seconds, the settler asks the venues how the contracts of open trades
+resolved, pays the winning leg a dollar a contract, and stores each leg's
+result, payout, and settlement time as the trade's `Settlement`, which is
+what a tax return needs. On Tuesdays, once Monday night's trades have
+settled, the rebalancer compares the venues and, when one sits more than
+25% above the average, sends the excess to the other as a `Transfer` that
+takes four business days, during which the money is on neither venue. A
+venue under $500 is topped up on any day, also once no trade is open.
 
 ### Tools
 
@@ -147,9 +151,9 @@ first placed in Mexico to reach polymarket.com, which was then dropped as a
 venue for legal reasons in favor of Polymarket US, and moved to us-east-1.
 
 `commands.txt` holds the commands used to check the data, deploy, and
-operate the instance, with the instance's address, key, and ids at the top
-as variables the commands read. It is gitignored, so it lives only on the
-machine that operates the instance.
+operate the instance, with the instance's address, key, and ids written
+into them. It is gitignored, so it lives only on the machine that operates
+the instance.
 
 The process is light. It holds 4,900 books in about 190 MB of memory,
 and the database grows by roughly 500 MB a day.
@@ -273,9 +277,11 @@ python3 src/tools/summary.py --hours 24
 src/
   api/        venue clients and the shared websocket book stream
   catalog/    fetch, classify (one parser per venue), match, pipeline
-  common/     the settings a run is tuned by, paths, time and json helpers, the venue list, the logger
+  common/     the settings a run is tuned by, game timing, paths, time and json helpers, the venue list, the logger
   db/         models, the SQLite schema and its migrations, reads and writes
-  live/       run, record, streams, scan, pricing, fees, execute, allocate, gametime, balances, settle, rebalance
+  live/       run, the process that wires the components together
+    components/  record, streams, scan, execute, allocate, balances, settle, rebalance
+    price/       pricing and fees
   tools/      summary report
 tests/        mirrors src, run with pytest, configured in pyproject.toml
 commands.txt  operating the AWS instance, gitignored, kept locally

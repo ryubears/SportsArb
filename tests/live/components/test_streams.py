@@ -4,7 +4,7 @@ Tests for the venue connections behind the recorder.
 
 import asyncio
 from db import database
-from live import record, streams
+from live.components import record, streams
 
 
 def test_streams_change_subscriptions_in_place(tmp_path, fake_stream):

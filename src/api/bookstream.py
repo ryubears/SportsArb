@@ -49,7 +49,7 @@ class BookStream:
     name = "venue"                  # Used in log lines.
     stale_seconds = STALE_SECONDS
 
-    def __init__(self, contract_ids, on_book, log=print, on_gap=None):
+    def __init__(self, contract_ids, on_book, on_gap=None, log=print):
         self.wanted = set(contract_ids)
         self.on_book = on_book
         self.log = log

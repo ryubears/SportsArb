@@ -22,14 +22,7 @@ game not in play gets nothing at all, since trades are only taken live.
 from common import config
 from common.venues import VENUES
 from db import database
-from live.gametime import in_play, in_play_or_settling
-
-
-def game_key(pair):
-    """
-    What identifies a game across its pairs, or None for a bet with no game.
-    """
-    return (pair["game_date"], pair["team_a"], pair["team_b"]) if pair.get("game_date") else None
+from common.game import game_key, in_play, in_play_or_settling
 
 
 class Allocator:
@@ -60,8 +53,8 @@ class Allocator:
         Dollars held in open trades per game and venue, as {game key: {venue: dollars}}.
         """
         held = {}
-        for game_key, legs in database.load_open_game_costs(self.conn):
-            game = held.setdefault(game_key, {venue: 0.0 for venue in VENUES})
+        for key, legs in database.load_open_game_costs(self.conn):
+            game = held.setdefault(key, {venue: 0.0 for venue in VENUES})
             for venue, cost in legs:
                 game[venue] += cost
         return held

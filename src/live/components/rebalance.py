@@ -3,11 +3,15 @@ Keep both venues funded by moving paper money between them.
 
 Balances drift apart as games resolve, because the venue holding the
 winning leg receives the whole dollar and the other receives nothing. On
-config.REBALANCE_WEEKDAY the balances are compared, and when the richer venue
-sits more than config.REBALANCE_DRIFT above the two venue average the excess is sent to
-the other one. A venue under config.REBALANCE_FLOOR is topped up on any day. A transfer
-takes config.TRANSFER_DAYS business days, during which the money is on neither
-venue, and one is in flight at a time. Every transfer is stored.
+config.REBALANCE_WEEKDAY, a Tuesday so that Monday night's game has paid
+out, the balances are compared, and when the larger sits more than
+config.REBALANCE_DRIFT above the two venue average the excess is sent to
+the other venue. A venue under config.REBALANCE_FLOOR is topped up on any
+day. Either way a transfer waits until no trade is open, since money still
+out in trades comes back as they settle and the balances only mean
+something once it has. A transfer takes config.TRANSFER_DAYS business
+days, during which the money is on neither venue, and one is in flight at
+a time. Every transfer is stored.
 """
 
 from datetime import datetime
@@ -30,21 +34,25 @@ class Rebalancer:
 
     def rebalance(self, now):
         """
-        Request a transfer from the richer venue to the poorer one when they
-        have drifted apart on the weekly check, or at any time when a venue
-        is under the floor.
+        Request a transfer from the larger balance to the smaller one when
+        they have drifted apart on the weekly check, or on any day when a
+        venue is under the floor, once no trade is open.
         """
         if database.load_transfers(self.conn, pending_only=True):
             return
-        rich, poor = self.cash.richest(), self.cash.poorest()
+        rich, poor = self.cash.largest(), self.cash.smallest()
         excess = self.cash[rich] - self.cash.average()
-        reason = None
         today = now[:10]
-        if datetime.fromisoformat(now).weekday() == config.REBALANCE_WEEKDAY and self.last_check != today:
+        weekly = datetime.fromisoformat(now).weekday() == config.REBALANCE_WEEKDAY and self.last_check != today
+        low = self.cash[poor] < config.REBALANCE_FLOOR and excess > 0
+        if not (weekly or low) or database.has_open_trades(self.conn):
+            return          # Nothing is due, or money is still out in trades. The weekly check waits for them too.
+        reason = None
+        if weekly:
             self.last_check = today
             if excess > config.REBALANCE_DRIFT * self.cash.average():
                 reason = "drift"
-        if reason is None and self.cash[poor] < config.REBALANCE_FLOOR and excess > 0:
+        if reason is None and low:
             reason = "floor"
         if reason is None:
             return

@@ -4,7 +4,7 @@ Tests for the recorder's write rules.
 
 from common import config
 from db import database
-from live import record
+from live.components import record
 
 
 def test_flush_writes_only_when_the_best_level_changes(tmp_path):

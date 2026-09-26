@@ -10,7 +10,8 @@ SQLite browser. The tables follow the pipeline in order.
     quotes         order book snapshots for paired contracts, by record.py
     gaps           stretches when a venue's feed was down, also by record.py
     opportunities  every episode the live scanner saw, by scan.py
-    trades         every paper trade the executor made, by execute.py, and what each leg paid out, by settle.py
+    trades         every paper trade the executor made, by execute.py
+    settlements    how each trade's legs paid out, by settle.py
     ledger         every paper cash movement per venue, by balances.py
     transfers      paper rebalancing transfers between venues, by rebalance.py
 
@@ -23,7 +24,7 @@ from dataclasses import asdict, fields
 from common import jsonutil
 from common.paths import DATA_DIR
 from db import migrations, schema
-from db.models import Bet, Gap, Ledger, Opportunity, Quote, Trade, Transfer
+from db.models import Bet, Gap, Ledger, Opportunity, Quote, Settlement, Trade, Transfer
 from pathlib import Path
 
 DB_PATH = DATA_DIR / "sportsarb.sqlite"
@@ -33,7 +34,6 @@ NOT_STORED = {"id", "label", "starts_at"}
 # What a Trade's update and settlement change, in the order they happen.
 TRADE_FILLS = ["yes_filled", "yes_cost", "yes_latency_ms", "yes_fill_ts", "no_filled", "no_cost", "no_latency_ms", "no_fill_ts",
                "yes_held", "no_held", "matched", "profit", "hedge", "hedge_pnl", "status"]
-TRADE_RESULTS = ["yes_result", "yes_payout", "yes_settled_at", "no_result", "no_payout", "no_settled_at", "settled_at"]
 
 
 def columns(model):
@@ -345,7 +345,17 @@ def load_open_trades(conn):
                (SELECT MAX(c.start_time) FROM contracts c
                 WHERE (c.venue = t.yes_venue AND c.contract_id = t.yes_contract) OR (c.venue = t.no_venue AND c.contract_id = t.no_contract)) AS starts_at
         FROM trades t JOIN pairs p ON p.id = t.pair_id
-        WHERE t.status != 'sent' AND t.settled_at IS NULL AND t.yes_held + t.no_held > 0 ORDER BY t.id""")]
+        WHERE t.status != 'sent' AND t.yes_held + t.no_held > 0
+          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id) ORDER BY t.id""")]
+
+
+def has_open_trades(conn):
+    """
+    Whether any trade is still in flight or holds contracts that have not settled.
+    """
+    return conn.execute("""
+        SELECT 1 FROM trades t WHERE (t.status = 'sent' OR t.yes_held + t.no_held > 0)
+          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id) LIMIT 1""").fetchone() is not None
 
 
 def load_open_game_costs(conn):
@@ -356,15 +366,23 @@ def load_open_game_costs(conn):
     return [((d, a, b), [(yv, yc), (nv, nc)]) for d, a, b, yv, yc, nv, nc in conn.execute("""
         SELECT p.game_date, p.team_a, p.team_b, t.yes_venue, t.yes_cost, t.no_venue, t.no_cost
         FROM trades t JOIN pairs p ON p.id = t.pair_id
-        WHERE t.settled_at IS NULL AND t.yes_held + t.no_held > 0 AND p.game_date IS NOT NULL""")]
+        WHERE t.yes_held + t.no_held > 0 AND p.game_date IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""")]
 
 
-def settle_trade(conn, t):
+def insert_settlement(conn, settlement):
     """
-    Write what each leg of a Trade paid out and mark it settled.
+    Store how a trade's legs paid out, which marks the trade settled.
     """
-    conn.execute(update_sql("trades", TRADE_RESULTS), asdict(t))
+    conn.execute(insert_sql("settlements", Settlement), asdict(settlement))
     conn.commit()
+
+
+def load_settlements(conn):
+    """
+    Every Settlement, oldest trade first.
+    """
+    return [Settlement(**dict(r)) for r in conn.execute("SELECT * FROM settlements ORDER BY trade_id")]
 
 
 # LEDGER

@@ -59,8 +59,8 @@ def step_1_catch_up(conn):
         for column, kind in (("yes_result", "TEXT"), ("yes_payout", "REAL"), ("yes_settled_at", "TEXT"),
                              ("no_result", "TEXT"), ("no_payout", "REAL"), ("no_settled_at", "TEXT")):
             conn.execute(f"ALTER TABLE trades ADD COLUMN {column} {kind}")
-    if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'settlements'").fetchone():
-        # Settlements used to be a table of legs. Fold each leg into its trade's columns.
+    if "side" in [r[1] for r in conn.execute("PRAGMA table_info(settlements)")]:
+        # Settlements used to be a table of legs. Fold each leg into its trade's columns, which step 2 moves to today's settlements.
         for trade_id, side, result, payout, settled_at in conn.execute(
                 "SELECT trade_id, side, result, payout, settled_at FROM settlements").fetchall():
             conn.execute(f"UPDATE trades SET {side}_result = ?, {side}_payout = ?, {side}_settled_at = ? WHERE id = ?",
@@ -104,8 +104,55 @@ def migrate_pair_ids(conn):
         shared = [c for c, in conn.execute(f"SELECT name FROM pragma_table_info('{table}')") if c in old_columns]
         conn.execute(f"""INSERT INTO {table} ({', '.join(shared)}, pair_id)
                          SELECT {', '.join('o.' + c for c in shared)}, p.id FROM {table}_old o JOIN pairs p ON p.label = o.label""")
+        if table == "trades" and "settled_at" in old_columns:
+            # The table was rebuilt from today's schema, where settlements have a table of their own.
+            copy_settlements(conn, "trades_old")
         conn.execute(f"DROP TABLE {table}_old")
 
 
+def step_2_settlements(conn):
+    """
+    Trades used to carry how they settled in seven columns. Move those to
+    the settlements table, one row per settled trade, and drop them.
+    """
+    columns = [r[1] for r in conn.execute("PRAGMA table_info(trades)")]
+    if "settled_at" not in columns:
+        return
+    copy_settlements(conn, "trades")
+    for column in SETTLEMENT_COLUMNS:
+        conn.execute(f"ALTER TABLE trades DROP COLUMN {column}")
+
+
+def step_3_opening_balances(conn):
+    """
+    Each venue's ledger now opens with a 'transfer_in' of its starting
+    balance. Older ledgers began with their first trade, so work each
+    venue's starting balance out from its first entry and write the ledger
+    again with the openings in front. Nothing refers to ledger ids.
+    """
+    rows = conn.execute("SELECT ts, venue, amount, reason, trade_id, balance FROM ledger ORDER BY id").fetchall()
+    first = {}
+    for ts, venue, amount, reason, trade_id, balance in rows:
+        first.setdefault(venue, (ts, balance - amount))
+    if not first:
+        return
+    openings = [(ts, venue, start, "transfer_in", None, start) for venue, (ts, start) in first.items()]
+    conn.execute("DELETE FROM ledger")
+    conn.executemany("INSERT INTO ledger (ts, venue, amount, reason, trade_id, balance) VALUES (?,?,?,?,?,?)",
+                     openings + [tuple(r) for r in rows])
+
+
+SETTLEMENT_COLUMNS = ["yes_result", "yes_payout", "yes_settled_at", "no_result", "no_payout", "no_settled_at", "settled_at"]
+
+
+def copy_settlements(conn, table):
+    """
+    Copy the settlement columns of a trades table in the older shape into the settlements table.
+    """
+    conn.execute(f"""INSERT OR IGNORE INTO settlements (trade_id, settled_at, yes_result, yes_payout, yes_settled_at,
+                                                        no_result, no_payout, no_settled_at)
+                     SELECT id, settled_at, yes_result, yes_payout, yes_settled_at, no_result, no_payout, no_settled_at
+                     FROM {table} WHERE settled_at IS NOT NULL""")
+
 # Step n brings a database from user_version n - 1 to n. Only ever add to the end.
-STEPS = [step_1_catch_up]
+STEPS = [step_1_catch_up, step_2_settlements, step_3_opening_balances]

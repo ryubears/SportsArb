@@ -3,15 +3,18 @@ Paper cash per venue, backed by the ledger.
 
 Every ledger entry records the balance it left behind, so a venue's
 balance is simply its newest entry and survives a restart without
-replaying the history. A venue with no entries starts at config.START_BALANCE. Money
-for an order in flight is reserved without a ledger entry and released
+replaying the history. A venue's ledger opens with a 'transfer_in' of
+config.START_BALANCE, booked the first time the venue has no entries, so
+the ledger alone accounts for every dollar. Money for an order in flight is reserved without a ledger entry and released
 when the order comes back, so two signals in the same moment cannot both
 spend the same dollars.
 """
 
 from common import config
+from common.timeutil import now_iso
 from common.venues import VENUES
 from db import database
+from db.models import Ledger
 
 
 class Balances:
@@ -22,8 +25,10 @@ class Balances:
     def __init__(self, conn, start=None):
         self.conn = conn
         last = database.last_balances(conn)
-        start = config.START_BALANCE if start is None else start
-        self.amounts = {venue: last.get(venue, start) for venue in VENUES}
+        self.amounts = {venue: last.get(venue, 0.0) for venue in VENUES}
+        for venue in VENUES:
+            if venue not in last:
+                self.book(Ledger(now_iso(), venue, config.START_BALANCE if start is None else start, "transfer_in"))
 
     def __getitem__(self, venue):
         return self.amounts[venue]
@@ -48,10 +53,10 @@ class Balances:
         entry.balance = self.amounts[entry.venue]
         database.add_ledger(self.conn, entry)
 
-    def richest(self):
+    def largest(self):
         return max(self.amounts, key=self.amounts.get)
 
-    def poorest(self):
+    def smallest(self):
         return min(self.amounts, key=self.amounts.get)
 
     def average(self):
