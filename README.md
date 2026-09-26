@@ -147,9 +147,9 @@ first placed in Mexico to reach polymarket.com, which was then dropped as a
 venue for legal reasons in favor of Polymarket US, and moved to us-east-1.
 
 `commands.txt` holds the commands used to check the data, deploy, and
-operate the instance, with the instance's address, key, and ids at the top
-as variables the commands read. It is gitignored, so it lives only on the
-machine that operates the instance.
+operate the instance, with the instance's address, key, and ids written
+into them. It is gitignored, so it lives only on the machine that operates
+the instance.
 
 The process is light. It holds 4,900 books in about 190 MB of memory,
 and the database grows by roughly 500 MB a day.
