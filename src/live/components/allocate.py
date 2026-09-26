@@ -19,10 +19,10 @@ games share it. A game that has spent its share gets nothing more, and a
 game not in play gets nothing at all, since trades are only taken live.
 """
 
-from common import config
 from common.venues import VENUES
 from db import database
-from common.game import game_key, in_play, in_play_or_settling
+from live.helper import config
+from live.helper.game import game_key, in_play, in_play_or_settling
 
 
 class Allocator:

@@ -32,12 +32,12 @@ import dataclasses
 import math
 import random
 from dataclasses import dataclass
-from common import config, game
 from common.log import on_failure
 from common.timeutil import now_iso
 from db import database
 from db.models import Ledger, Trade
-from live.price.pricing import depth, ladder, sell_ladder, sweep, trade_words
+from live.helper import config, game
+from live.helper.pricing import depth, ladder, sell_ladder, sweep, trade_words
 
 
 @dataclass

@@ -2,10 +2,10 @@
 Tests for the capital allocator on a Sunday schedule.
 """
 
-from common import config
 from db import database
 from db.models import Bet, Contract, Pair, Trade
 from live.components import allocate, balances
+from live.helper import config
 
 SUNDAY = "2026-09-27"
 EARLY = [(f"E{i}", f"H{i}", f"{SUNDAY}T17:00:00+00:00") for i in range(9)]

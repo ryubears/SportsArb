@@ -77,7 +77,8 @@ books, price them, settle and rebalance, and log a status line every
 minute and each component's summary every ten. The same loop starts the
 hourly catalog refresh in a background thread and applies the result to
 the live connections. The pieces it wires together are in
-`live/components/`, and the pricing they share is in `live/price/`.
+`live/components/`, and what they share is in `live/helper/`: the settings,
+game timing, pricing, and fees.
 
 **record.py** holds the newest book for every paired contract in memory
 and, on each tick, writes a row with five levels a side for each contract
@@ -260,7 +261,7 @@ python3 -m live.run --sport nfl
 `--no-trade` scans without paper trading, `--no-scan` only records, and
 `--seconds 120` runs a short test. The settings a run is tuned by, such as
 the minimum edge, the trade caps, and the starting balance, are in
-`src/common/config.py`, and `--set NAME=VALUE` overrides one for a run,
+`src/live/helper/config.py`, and `--set NAME=VALUE` overrides one for a run,
 for example `python3 -m live.run --sport nfl --set min_edge=0.03`. The run
 logs every setting when it starts. The streams need venue keys in `data/`:
 `kalshi_key_id.txt` and `kalshi_private_key.pem` for Kalshi,
@@ -277,11 +278,11 @@ python3 src/tools/summary.py --hours 24
 src/
   api/        venue clients and the shared websocket book stream
   catalog/    fetch, classify (one parser per venue), match, pipeline
-  common/     the settings a run is tuned by, game timing, paths, time and json helpers, the venue list, the logger
+  common/     paths, time and json helpers, the venue list, the logger
   db/         models, the SQLite schema and its migrations, reads and writes
   live/       run, the process that wires the components together
     components/  record, streams, scan, execute, allocate, balances, settle, rebalance
-    price/       pricing and fees
+    helper/      config (the settings a run is tuned by), game (which game a bet is on and when it is played), pricing, fees
   tools/      summary report
 tests/        mirrors src, run with pytest, configured in pyproject.toml
 commands.txt  operating the AWS instance, gitignored, kept locally

@@ -7,8 +7,8 @@ from the first live game, Atlanta at Green Bay: kickoff to final whistle
 took 3.05 hours, and both venues settled within half an hour of it.
 """
 
-from common import config
 from common.timeutil import shift
+from live.helper import config
 
 
 def game_key(pair):

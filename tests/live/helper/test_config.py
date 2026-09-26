@@ -3,9 +3,9 @@ Tests for overriding settings for one run.
 """
 
 import pytest
-from common import config, game
 from live import run
 from live.components import balances
+from live.helper import config, game
 
 
 @pytest.fixture
@@ -46,6 +46,6 @@ def test_settings_are_read_when_used_not_when_imported(restore, tmp_path):
 def test_the_command_line_rejects_a_bad_setting():
     import subprocess, sys
     from pathlib import Path
-    src = Path(config.__file__).resolve().parents[1]
+    src = Path(config.__file__).resolve().parents[2]
     done = subprocess.run([sys.executable, "-m", "live.run", "--set", "min_edge=cheap"], cwd=src, capture_output=True, text=True, timeout=60)
     assert done.returncode == 2 and "MIN_EDGE needs a number, not 'cheap'" in done.stderr

@@ -16,12 +16,12 @@ pricing itself lives in pricing.py.
 """
 
 from collections import defaultdict
-from common import config
 from common.timeutil import now_iso, seconds_between
 from db import database
 from db.models import Opportunity
-from common.game import pays_at as payout_time
-from live.price.pricing import best_trade, trade_words
+from live.helper import config
+from live.helper.game import pays_at as payout_time
+from live.helper.pricing import best_trade, trade_words
 
 
 # EPISODES

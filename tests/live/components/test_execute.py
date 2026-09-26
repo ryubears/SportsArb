@@ -5,10 +5,10 @@ Tests for the paper executor, with fixed latency and no randomness unless a test
 import asyncio
 import random
 import pytest
-from common import config
 from db import database
 from db.models import Quote
 from live.components import balances, execute, scan, settle
+from live.helper import config
 
 NO_PM_FEES = {"feeCoefficient": 0}
 NO_K_FEES = {"fee_type": "quadratic", "fee_multiplier": 0}

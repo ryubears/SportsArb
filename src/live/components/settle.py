@@ -21,10 +21,10 @@ has settled so it stops flattening it.
 
 import asyncio
 from api import kalshi, polymarket_us
-from common import config
 from common.log import on_failure, with_traceback
 from db import database
 from db.models import Ledger, Settlement
+from live.helper import config
 
 RESULTS = {"kalshi": kalshi.results, "polymarket_us": polymarket_us.results}    # How each venue reports how a contract resolved.
 RESULTS_BY_EVENT = {"kalshi": False, "polymarket_us": True}     # Whether a venue's lookup takes event ids rather than contract ids.

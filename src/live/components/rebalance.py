@@ -15,10 +15,10 @@ a time. Every transfer is stored.
 """
 
 from datetime import datetime
-from common import config
 from common.timeutil import add_business_days
 from db import database
 from db.models import Ledger, Transfer
+from live.helper import config
 
 
 class Rebalancer:
