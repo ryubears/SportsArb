@@ -6,6 +6,7 @@ import asyncio
 from db import database
 from live import run
 from live.components import accounts, notify, streams
+from live.components.execute import live
 
 
 def test_run_survives_a_failing_refresh(tmp_path, monkeypatch, capsys, fake_stream):
@@ -72,6 +73,7 @@ def test_a_trading_session_logs_its_settings_when_it_starts(tmp_path, monkeypatc
 
 def test_a_session_trading_both_modes_keeps_a_desk_for_each_and_offers_live_the_signal_first(tmp_path, monkeypatch, capsys, fake_stream):
     monkeypatch.setattr(accounts, "READERS", {"kalshi": lambda: 800.0, "polymarket_us": lambda: 600.0})
+    monkeypatch.setattr(live, "HALT_FILE", tmp_path / "live_halted.txt")
     monkeypatch.setattr(notify, "EMAIL_FILE", tmp_path / "email.json")
 
     async def scenario():

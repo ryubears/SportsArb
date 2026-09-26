@@ -224,7 +224,6 @@ def test_orders_are_stored_before_they_are_sent_and_updated_with_the_answer(tmp_
 
 
 def test_trades_and_settlements_from_before_live_trading_are_paper(tmp_path):
-    import sqlite3
     path = tmp_path / "t.sqlite"
     conn = database.connect(path)
     conn.execute("ALTER TABLE trades DROP COLUMN mode")

@@ -8,6 +8,7 @@ from api import orders
 from db import database
 from db.models import Quote
 from live.components import accounts, balances
+from live.components.execute import live
 from live.components.execute.live import LiveExecutor
 from live.components.execute.paper import PaperExecutor
 from live.helper import config
@@ -61,6 +62,12 @@ class Venues:
                 return answer(quantity, price) if callable(answer) else answer
             return place_order
         return {venue: for_venue(venue) for venue in self.scripts}
+
+
+@pytest.fixture(autouse=True)
+def halt_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(live, "HALT_FILE", tmp_path / "live_halted.txt")
+    return live.HALT_FILE
 
 
 def executor(tmp_path, venues, latest=None, alerts=None, logs=None, read=True):
@@ -157,7 +164,7 @@ def test_an_order_of_unknown_fate_halts_live_trading_and_tells_a_human(tmp_path)
     assert (kalshi_order["status"], kalshi_order["filled"]) == ("error", 0)
     assert ex.halted.startswith(f"order {kalshi_order['id']} for trade {t['id']} (buy 10 no of kalshi k) has an unknown fate")
     assert kalshi_order["client_id"] in ex.halted
-    assert [subject for subject, _ in alerts] == ["SportsArb live trading halted"] and "restarted" in alerts[0][1]
+    assert [subject for subject, _ in alerts] == ["SportsArb live trading halted"] and "remove" in alerts[0][1]
     assert any(line.startswith("live trading halted: ") for line in logs)
     assert trade(ex) == [False] and len(venues.orders) == 2             # No new trades either.
     assert "HALTED" in ex.summary()
@@ -203,3 +210,17 @@ def test_an_answer_that_cannot_be_read_counts_as_an_unknown_fate(tmp_path):
     trade(ex)
     assert ex.halted and "KeyError('executions')" in ex.halted
     assert cash.reserved == {"kalshi": 0, "polymarket_us": 0}          # The reservation came back all the same.
+
+
+def test_a_halt_outlasts_a_restart_until_a_human_removes_the_file(tmp_path, halt_file):
+    conn, cash, ex = executor(tmp_path, Venues(polymarket_us=[fills()], kalshi=[UNKNOWN]))
+    trade(ex)
+    assert halt_file.read_text().startswith("2026-09-27T17:30:00 UTC order ") and "has an unknown fate" in halt_file.read_text()
+    logs = []
+    venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
+    conn, cash, again = executor(tmp_path, venues, logs=logs)           # A crash or a deploy restarts the process.
+    assert again.halted.startswith(f"halted before this start, remove {halt_file} to resume: ")
+    assert logs[0].startswith("live trading halted before this start") and trade(again) == [False] and venues.orders == []
+    halt_file.unlink()                                                  # Checked and cleared by a human.
+    conn, cash, resumed = executor(tmp_path, venues)
+    assert resumed.halted is None and trade(resumed) == [True]

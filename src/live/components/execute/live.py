@@ -15,12 +15,15 @@ before it is sent and updated with the venue's answer, and the money is
 the venues' own, through Accounts from accounts.py.
 
 Real money calls for brakes. Live trading halts, sending no more orders of
-any kind until the process is restarted, when an order's fate cannot be
+any kind, when an order's fate cannot be
 known, since what is held is then unknown too, when a venue refuses
 config.LIVE_REJECT_LIMIT orders in a row, since one leg of every trade
 would fill and be flattened at a loss, and when flattening has lost more
 than config.LIVE_MAX_HEDGE_LOSS since the start. A halt is logged and
-sent to the alert, and what is held is still settled.
+sent to the alert, and what is held is still settled. It is also written
+to HALT_FILE, and a live executor that starts while the file is there
+starts halted, so a crash or a deploy does not resume live trading before
+a human has checked the venues and removed the file.
 """
 
 import asyncio
@@ -29,6 +32,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from api import kalshi, orders, polymarket_us
 from common import jsonutil
+from common.paths import DATA_DIR
 from common.timeutil import now_iso
 from db import database
 from db.models import Order
@@ -37,6 +41,7 @@ from live.helper import config
 
 PLACE = {"kalshi": kalshi.place_order, "polymarket_us": polymarket_us.place_order}   # How each venue takes an order.
 ORDER_THREADS = 8       # Orders in flight at once. Two per trade, so a burst of signals is not held back.
+HALT_FILE = DATA_DIR / "live_halted.txt"    # Why live trading halted, kept until a human removes it.
 
 
 class LiveExecutor(Executor):
@@ -55,6 +60,9 @@ class LiveExecutor(Executor):
         self.threads = ThreadPoolExecutor(ORDER_THREADS, thread_name_prefix="orders")
         self.halted = None          # Why live trading stopped, once it has.
         self.rejects = {}           # Venue maps to the orders it has refused in a row.
+        if HALT_FILE.exists():
+            self.halted = f"halted before this start, remove {HALT_FILE} to resume: {HALT_FILE.read_text().strip()}"
+            self.log(f"live trading {self.halted}")
 
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """
@@ -125,16 +133,19 @@ class LiveExecutor(Executor):
 
     def halt(self, reason):
         """
-        Stop sending orders, log why, and tell a human. Only the first reason counts.
+        Stop sending orders, keep the reason in HALT_FILE, log it, and tell a human. Only the first reason counts.
         """
         if self.halted:
             return
         self.halted = reason
+        HALT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        HALT_FILE.write_text(f"{self.clock()[:19]} UTC {reason}\n")
         self.log(f"live trading halted: {reason}")
         if self.alert:
             self.alert("SportsArb live trading halted",
-                       f"Live trading stopped at {self.clock()[:19]} UTC and sends no more orders until the process is restarted.\n\n"
-                       f"{reason}\n\nWhat is held is still settled. Balances: {self.cash.summary()}.")
+                       f"Live trading stopped at {self.clock()[:19]} UTC and sends no more orders.\n\n{reason}\n\n"
+                       f"What is held is still settled. Balances: {self.cash.summary()}.\n\n"
+                       f"Once the venues are checked, remove {HALT_FILE} and restart the process to resume.")
 
     async def retry(self, now):
         await super().retry(now)
