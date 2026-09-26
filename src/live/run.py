@@ -27,19 +27,43 @@ For a long run on a laptop, stop the Mac from sleeping while it runs:
 
 import argparse
 import asyncio
+import subprocess
 import sys
 import time
 from catalog import pipeline
 from common.log import log, with_traceback
+from common.paths import ROOT
 from common.timeutil import now_iso
 from db import database
-from live import allocate, balances, execute, rebalance, scan, settle
+from live import allocate, balances, execute, gametime, rebalance, scan, settle
 from live.record import Recorder, load_targets
 from live.streams import Streams
 
 FLUSH_SECONDS = 1.0     # How often changed books are written.
 STATUS_SECONDS = 60     # How often a status line is printed.
 CATALOG_MINUTES = 60    # How often the catalog is refreshed and subscriptions updated. Zero disables it.
+
+
+def code_version():
+    """
+    The commit the process runs, with '-dirty' when files differ from it, or 'unknown' outside a git checkout.
+    """
+    try:
+        return subprocess.run(["git", "describe", "--always", "--dirty"], cwd=ROOT, capture_output=True, text=True,
+                              timeout=5).stdout.strip() or "unknown"
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
+def trading_settings():
+    """
+    The settings that decide what the paper trader does, in one line, so each run's log says what it ran with.
+    """
+    latency = ", ".join(f"{venue} {median}ms" for venue, (median, _) in execute.LATENCY_MS.items())
+    return (f"settings: min edge {execute.MIN_EDGE:.2f}$, fill share {execute.FILL_SHARE}, rejects {execute.REJECT_PROBABILITY:.0%}, "
+            f"latency {latency}, cap {allocate.MIN_CAP} to {allocate.MAX_CAP} at {allocate.DOLLARS_PER_CAP}$ a contract, "
+            f"game {gametime.GAME_HOURS}h + settle {gametime.SETTLE_HOURS}h, start balance {balances.BALANCE:,.0f}$, "
+            f"rebalance over {rebalance.DRIFT:.0%} or under {rebalance.FLOOR:,.0f}$")
 
 
 class Session:
@@ -69,6 +93,8 @@ class Session:
         """
         Open the venue connections for everything the catalog says to record.
         """
+        if self.executor:
+            log(trading_settings())
         targets = load_targets(self.conn, self.sport)
         log("recording " + ", ".join(f"{len(ids)} {venue}" for venue, ids in targets.items()) + " contracts")
         if not any(targets.values()):
@@ -143,6 +169,7 @@ async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True, with
     never when zero. A refresh that fails is logged and tried again at the
     next interval, so a bad fetch never stops the recording.
     """
+    log(f"starting {sport}, code {code_version()}")
     if catalog_seconds and refresh_at_start:
         log("refreshing catalog before starting")
         try:

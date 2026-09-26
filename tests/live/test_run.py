@@ -16,7 +16,9 @@ def test_run_survives_a_failing_refresh(tmp_path, monkeypatch, capsys, fake_stre
     conn = database.connect(tmp_path / "test.sqlite")
     asyncio.run(run.run(conn, "nfl", seconds=3, catalog_seconds=1))
     out = capsys.readouterr().out
+    assert "starting nfl, code " in out.splitlines()[0]
     assert "catalog refresh failed (RuntimeError('kalshi is down')), starting with the stored catalog" in out
+    assert "    RuntimeError: kalshi is down" in out                                  # With the traceback.
     assert "catalog refresh failed (RuntimeError('kalshi is down')), keeping current subscriptions" in out
 
 
@@ -55,3 +57,13 @@ def test_session_logs_every_components_summary_when_due_and_on_close(tmp_path, m
         return [line[9:].split(":")[0].split(",")[0] for line in out.splitlines()]      # Past the timestamp.
     on_tick, on_close = asyncio.run(scenario())
     assert heads(on_tick) == heads(on_close) == ["scanner", "paper", "settled", "capital", "tracking 0 books"]
+
+
+def test_a_trading_session_logs_its_settings_when_it_starts(tmp_path, monkeypatch, capsys, fake_stream):
+    async def scenario():
+        s = session(tmp_path, monkeypatch, fake_stream)
+        s.start()
+        await s.close()
+    asyncio.run(scenario())
+    first = capsys.readouterr().out.splitlines()[0]
+    assert first[9:].startswith("settings: min edge 0.05$, fill share 0.5, rejects 3%")
