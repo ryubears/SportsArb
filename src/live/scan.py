@@ -16,12 +16,12 @@ pricing itself lives in pricing.py.
 """
 
 from collections import defaultdict
-from common.timeutil import now_iso, seconds_between, shift
+from common.timeutil import now_iso, seconds_between
 from db import database
 from db.models import Opportunity
+from live.gametime import pays_at as payout_time
 from live.pricing import best_trade, trade_words
 
-GAME_HOURS = 4          # A game pays out about this long after kickoff.
 TARGET_ANNUAL_PCT = 10  # The return an opportunity must beat to be worth the risk.
 MAX_QUOTE_AGE = 60      # Seconds. A member whose newest book is older than this is left out, it may be stale.
 SUMMARY_SECONDS = 600   # How often the live scanner logs its episode summary.
@@ -30,15 +30,6 @@ LOG_PROFIT_DOLLARS = 10 # Live episodes worth at least this at the peak are logg
 
 # EPISODES
 
-def resolution_time(start_time, close_time):
-    """
-    When the bet pays out. Games settle a few hours after kickoff. Futures settle near their close time.
-    """
-    if start_time:
-        return shift(start_time, hours=GAME_HOURS)
-    return close_time
-
-
 def finish(pair, peak, start_ts, end_ts):
     """
     Turn an in progress episode into an Opportunity. peak holds the best moment seen so far.
@@ -46,8 +37,7 @@ def finish(pair, peak, start_ts, end_ts):
     start_time = next((m["start_time"] for m in pair["members"] if m["start_time"]), None)
     live = 1 if start_time and peak["ts"] >= start_time else 0
     # Capital is locked until the slower of the two legs pays, so the later resolution counts.
-    pays_at = max((t for t in (resolution_time(leg["start_time"], leg["close_time"]) for leg in (peak["yes"], peak["no"])) if t),
-                  default=None)
+    pays_at = payout_time((peak["yes"], peak["no"]))
     days_held = max(seconds_between(peak["ts"], pays_at) / 86400, 1 / 24) if pays_at else None
     return_pct = 100 * peak["edge"] / (1 - peak["edge"])
     return Opportunity(

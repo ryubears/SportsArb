@@ -266,8 +266,8 @@ src/
   catalog/    fetch, classify (one parser per venue), match, pipeline
   common/     paths, time helpers, json helpers, the venue list, the logger
   db/         models and the SQLite schema
-  live/       run, record, streams, scan, pricing, fees, execute, balances, settle, rebalance
+  live/       run, record, streams, scan, pricing, fees, execute, allocate, gametime, balances, settle, rebalance
   tools/      summary report
-tests/        mirrors src, 111 tests, run with pytest
+tests/        mirrors src, run with pytest, configured in pyproject.toml
 commands.txt  operating the AWS instance
 ```

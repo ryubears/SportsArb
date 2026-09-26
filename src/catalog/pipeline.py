@@ -14,6 +14,7 @@ import argparse
 from catalog import fetch, match
 from catalog.classify import classify
 from common.timeutil import now_iso
+from common.venues import VENUES
 from db import database
 
 
@@ -24,7 +25,7 @@ def refresh(sport, log=print, db_path=None):
     """
     with database.connect(db_path) as conn:
         parts = []
-        for venue in fetch.VENUES:
+        for venue in VENUES:
             contracts = fetch.fetch_contracts(venue, sport)
             database.upsert_contracts(conn, contracts, now_iso())
             parts.append(f"{venue} {len(contracts)} contracts")
