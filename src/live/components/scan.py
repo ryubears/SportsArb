@@ -20,7 +20,7 @@ from common import config
 from common.timeutil import now_iso, seconds_between
 from db import database
 from db.models import Opportunity
-from common.gametime import pays_at as payout_time
+from common.game import pays_at as payout_time
 from live.price.pricing import best_trade, trade_words
 
 

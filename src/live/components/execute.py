@@ -32,7 +32,7 @@ import dataclasses
 import math
 import random
 from dataclasses import dataclass
-from common import config, gametime
+from common import config, game
 from common.log import on_failure
 from common.timeutil import now_iso
 from db import database
@@ -119,10 +119,10 @@ class PaperExecutor:
         """
         if edge < config.MIN_EDGE:
             return False
-        kickoff = gametime.kickoff((yes, no))
-        if not kickoff or not gametime.in_play(kickoff, now):
+        kickoff = game.kickoff((yes, no))
+        if not kickoff or not game.in_play(kickoff, now):
             return False
-        pays_at = gametime.pays_at((yes, no))
+        pays_at = game.pays_at((yes, no))
         books = self.books()
         legs = [Leg(side, member, fee_infos[(member["venue"], member["contract_id"])]) for side, member in (("yes", yes), ("no", no))]
         yes_leg, no_leg = legs

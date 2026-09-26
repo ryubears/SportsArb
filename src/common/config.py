@@ -35,7 +35,7 @@ REBALANCE_DRIFT = 0.25      # A venue this far above the two venue average on th
 REBALANCE_FLOOR = 500.0     # A venue below this is topped up to the average on any day.
 TRANSFER_DAYS = 4           # Business days a transfer between venues takes.
 
-# GAMES, gametime.py. Measured on the first live game, Atlanta at Green Bay.
+# GAMES, game.py. Measured on the first live game, Atlanta at Green Bay.
 
 GAME_HOURS = 3.25           # Kickoff to final whistle, with a little margin over the 3.05 measured.
 SETTLE_HOURS = 0.5          # Final whistle to the venues settling. A game pays out GAME_HOURS + SETTLE_HOURS after kickoff.

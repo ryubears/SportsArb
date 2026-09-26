@@ -3,7 +3,7 @@ Tests for overriding settings for one run.
 """
 
 import pytest
-from common import config, gametime
+from common import config, game
 from live import run
 from live.components import balances
 
@@ -21,7 +21,7 @@ def test_override_reads_each_value_as_the_settings_own_type(restore):
     config.override(["min_edge=0.03", "MAX_CAP=100", " game_hours = 3.5 "])
     assert (config.MIN_EDGE, config.MAX_CAP, config.GAME_HOURS) == (0.03, 100, 3.5)
     assert isinstance(config.MAX_CAP, int)
-    assert gametime.payout_hours() == 3.5 + config.SETTLE_HOURS          # What depends on a setting follows it.
+    assert game.payout_hours() == 3.5 + config.SETTLE_HOURS          # What depends on a setting follows it.
 
 
 @pytest.mark.parametrize("assignment, message", [
