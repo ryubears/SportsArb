@@ -140,13 +140,17 @@ Kalshi and 30 ms to Polymarket US. A systemd service, `sportsarb-recorder`,
 starts `python3 -m live.run --sport nfl` from `~/SportsArb/src` on boot
 and restarts it on any exit. The venue API keys live in `data/`, which is
 gitignored, and are copied to the instance by `scp` only. Deploying is
-`git pull` on the instance followed by a service restart, which refreshes
-the catalog for about 80 seconds and then resubscribes. The instance was
+`git pull` on the instance, the tests, and a service restart only if they
+pass, which refreshes the catalog for about 80 seconds and then
+resubscribes. The instance was
 first placed in Mexico to reach polymarket.com, which was then dropped as a
 venue for legal reasons in favor of Polymarket US, and moved to us-east-1.
 
-`commands.txt` holds the commands used to check the data, deploy, and
-operate the instance.
+`scripts/ops.sh` runs the commands used to check the data, deploy, and
+operate the instance, for example `scripts/ops.sh health` or
+`scripts/ops.sh deploy`, and `scripts/ops.sh help` lists them. It reads
+the instance's address, key, and ids from `scripts/ops.env`, which is
+gitignored; copy `scripts/ops.env.example` to start one.
 
 The process is light. It holds 4,900 books in about 190 MB of memory,
 and the database grows by roughly 500 MB a day.
@@ -271,5 +275,5 @@ src/
   live/       run, record, streams, scan, pricing, fees, execute, allocate, gametime, balances, settle, rebalance
   tools/      summary report
 tests/        mirrors src, run with pytest, configured in pyproject.toml
-commands.txt  operating the AWS instance
+scripts/      ops.sh for operating the AWS instance
 ```
