@@ -40,6 +40,7 @@ class Accounts:
         self.read_at = {venue: None for venue in VENUES}     # When each venue was last read, ISO 8601 UTC.
         self.running = None         # The reading while one runs.
         self.last_check = None      # Wall clock seconds the last reading started, None before the first.
+        self.failing = {}           # Venue maps to the error its last reading failed with, while it fails.
 
     @property
     def amounts(self):
@@ -73,15 +74,19 @@ class Accounts:
 
     async def refresh(self, now):
         """
-        Read every venue's balance. A venue that fails keeps its last reading and is logged.
+        Read every venue's balance. A venue that fails keeps its last reading
+        and is logged, with the traceback only when its error is new.
         """
         before = dict(self.moved)
         first = not any(self.read_at.values())
         readings = await asyncio.gather(*(asyncio.to_thread(self.readers[venue]) for venue in VENUES), return_exceptions=True)
         for venue, reading in zip(VENUES, readings):
             if isinstance(reading, BaseException):
-                self.log(with_traceback(f"live balance of {venue} could not be read ({reading!r}), keeping the last", reading))
+                message = f"live balance of {venue} could not be read ({reading!r}), keeping the last"
+                self.log(message if self.failing.get(venue) == repr(reading) else with_traceback(message, reading))
+                self.failing[venue] = repr(reading)
                 continue
+            self.failing.pop(venue, None)
             self.read[venue] = float(reading)
             self.moved[venue] -= before[venue]
             self.read_at[venue] = now

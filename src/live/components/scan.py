@@ -65,16 +65,16 @@ class Scanner:
     is older than config.MAX_QUOTE_AGE or missing from the map, which is how the
     recorder says a venue's books went unseen. Groups and fee schedules come
     from the database and are reloaded after each catalog refresh. Every
-    finished episode is stored at once, and the big ones are logged. With
-    on_signal, the first moment of each episode that the callback accepts
-    becomes a trade, see execute/executor.py.
+    finished episode is stored at once, and the big ones are logged. Each
+    of on_signals, one per executor, is offered every moment of an episode
+    until it takes a trade, and then not again, see execute/executor.py.
     """
 
-    def __init__(self, conn, sport, log=print, on_signal=None):
+    def __init__(self, conn, sport, log=print, on_signals=()):
         self.conn = conn
         self.sport = sport
         self.log = log
-        self.on_signal = on_signal          # Called once per episode with the trade to make, if it wants it.
+        self.on_signals = list(on_signals)  # Each is called with the trade to make until it takes one in the episode.
         self.episodes = {}                  # pair id maps to {"start_ts", "peak", "pair"} while an edge is open.
         self.finished = []                  # (kind, Opportunity) for episodes ended since the last summary.
         self.reload()
@@ -127,12 +127,12 @@ class Scanner:
         episode = self.episodes.get(pair_id)
         if priced is not None and priced.edge > 0:
             if episode is None:
-                episode = self.episodes[pair_id] = {"start_ts": now, "peak": None, "pair": pair}
+                episode = self.episodes[pair_id] = {"start_ts": now, "peak": None, "pair": pair, "taken": set()}
             if episode["peak"] is None or priced.edge > episode["peak"]["edge"]:
                 episode["peak"] = dict(priced._asdict(), ts=now)
-            if (self.on_signal and not episode.get("traded")
-                    and self.on_signal(pair, priced.yes, priced.no, priced.edge, priced.size, self.fee_infos, now)):
-                episode["traded"] = True
+            for i, on_signal in enumerate(self.on_signals):
+                if i not in episode["taken"] and on_signal(pair, priced.yes, priced.no, priced.edge, priced.size, self.fee_infos, now):
+                    episode["taken"].add(i)
         elif episode is not None:
             self.close(pair_id, now)
 

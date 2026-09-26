@@ -61,7 +61,9 @@ def test_a_venue_that_cannot_be_read_keeps_its_last_reading():
     asyncio.run(cash.refresh("2026-09-27T17:30:30+00:00"))
     assert cash.amounts == {"kalshi": 500.0, "polymarket_us": 300.0}
     assert cash.read_at == {"kalshi": NOW, "polymarket_us": "2026-09-27T17:30:30+00:00"}
-    assert logs[-1].startswith("live balance of kalshi could not be read (TimeoutError('timed out')), keeping the last")
+    assert logs[-1].startswith("live balance of kalshi could not be read (TimeoutError('timed out')), keeping the last\n    Traceback")
+    asyncio.run(cash.refresh("2026-09-27T17:31:00+00:00"))            # The same error again is one line.
+    assert logs[-1] == "live balance of kalshi could not be read (TimeoutError('timed out')), keeping the last"
 
 
 def test_readings_are_taken_on_a_timer_and_at_once_after_a_payout():
