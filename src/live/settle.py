@@ -21,6 +21,7 @@ has settled so it stops flattening it.
 
 import asyncio
 from api import kalshi, polymarket_us
+from common.log import on_failure, with_traceback
 from db import database
 from db.models import Ledger
 
@@ -73,7 +74,7 @@ class Settler:
             try:
                 found = await asyncio.to_thread(self.results[venue], lookup)
             except Exception as e:
-                self.log(f"settlement lookup failed for {venue} ({e!r}), will retry")
+                self.log(with_traceback(f"settlement lookup failed for {venue} ({e!r}), will retry", e))
                 continue
             results.update({(venue, cid): r for cid, r in found.items()})
         # The executor may have flattened some of these while the venues were asked, so pay out what the trades hold now.
@@ -111,6 +112,7 @@ class Settler:
         if clock - self.last_check >= SETTLE_SECONDS and (self.running is None or self.running.done()):
             self.last_check = clock
             self.running = asyncio.create_task(self.settle(now))
+            self.running.add_done_callback(on_failure(self.log, "settlement pass"))
 
     def summary(self):
         """

@@ -32,6 +32,7 @@ import dataclasses
 import math
 import random
 from dataclasses import dataclass
+from common.log import on_failure
 from common.timeutil import now_iso
 from db import database
 from db.models import Ledger, Trade
@@ -155,6 +156,7 @@ class PaperExecutor:
         task = asyncio.create_task(coroutine)
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
+        task.add_done_callback(on_failure(self.log, "paper trade task"))
         return task
 
     def tick(self, now):

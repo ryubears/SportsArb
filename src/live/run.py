@@ -30,15 +30,12 @@ import asyncio
 import sys
 import time
 from catalog import pipeline
-from common.log import log
+from common.log import log, with_traceback
 from common.timeutil import now_iso
 from db import database
 from live import allocate, balances, execute, rebalance, scan, settle
 from live.record import Recorder, load_targets
 from live.streams import Streams
-
-# Print immediately even when output goes to a file.
-sys.stdout.reconfigure(line_buffering=True)
 
 FLUSH_SECONDS = 1.0     # How often changed books are written.
 STATUS_SECONDS = 60     # How often a status line is printed.
@@ -151,7 +148,7 @@ async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True, with
         try:
             log(await asyncio.to_thread(pipeline.refresh, sport, log))
         except Exception as e:
-            log(f"catalog refresh failed ({e!r}), starting with the stored catalog")
+            log(with_traceback(f"catalog refresh failed ({e!r}), starting with the stored catalog", e))
     session = Session(conn, sport, with_scanner, with_trading)
     session.start()
     started = last_catalog = time.time()
@@ -164,7 +161,7 @@ async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True, with
                 refresh = asyncio.create_task(asyncio.to_thread(pipeline.refresh, sport, log))
             if refresh is not None and refresh.done():
                 if refresh.exception():
-                    log(f"catalog refresh failed ({refresh.exception()!r}), keeping current subscriptions")
+                    log(with_traceback(f"catalog refresh failed ({refresh.exception()!r}), keeping current subscriptions", refresh.exception()))
                 else:
                     log(f"catalog refreshed, {refresh.result()}")
                     session.refreshed()
@@ -188,6 +185,7 @@ if __name__ == "__main__":
     ap.add_argument("--no-scan", action="store_true", help="record only, without the live scanner")
     ap.add_argument("--no-trade", action="store_true", help="scan without paper trading")
     args = ap.parse_args()
+    sys.stdout.reconfigure(line_buffering=True)     # Print immediately even when output goes to a file.
     with database.connect() as conn:
         try:
             asyncio.run(run(conn, args.sport, args.seconds, args.catalog_minutes * 60, not args.skip_refresh, not args.no_scan, not args.no_trade))
