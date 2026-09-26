@@ -19,11 +19,9 @@ games share it. A game that has spent its share gets nothing more, and a
 game not in play gets nothing at all, since trades are only taken live.
 """
 
-from common.timeutil import shift
 from common.venues import VENUES
+from live.gametime import in_play, in_play_or_settling
 
-GAME_HOURS = 3.25       # Kickoff to final whistle, with a little margin over the 3.05 measured.
-SETTLE_HOURS = 0.5      # Final whistle to the venues settling, from the first live game.
 DOLLARS_PER_CAP = 20    # Dollars a game spends on each venue, over the whole game, for every contract of cap. From the first live game.
 MIN_CAP = 5             # Contracts per trade, the least worth sending.
 MAX_CAP = 500           # Contracts per trade, the most one trade may hold.
@@ -34,13 +32,6 @@ def game_key(pair):
     What identifies a game across its pairs, or None for a bet with no game.
     """
     return (pair["game_date"], pair["team_a"], pair["team_b"]) if pair.get("game_date") else None
-
-
-def in_play(kickoff, now):
-    """
-    Whether a game that kicked off at kickoff is being played at now.
-    """
-    return kickoff <= now < shift(kickoff, hours=GAME_HOURS)
 
 
 class Allocator:
@@ -67,7 +58,7 @@ class Allocator:
         """
         The games whose money is out right now: kicked off and not yet settled.
         """
-        return [key for key, kickoff in self.kickoffs.items() if kickoff <= now < shift(kickoff, hours=GAME_HOURS + SETTLE_HOURS)]
+        return [key for key, kickoff in self.kickoffs.items() if in_play_or_settling(kickoff, now)]
 
     def deployed(self):
         """

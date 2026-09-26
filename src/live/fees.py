@@ -49,10 +49,11 @@ def polymarket_us_fee(price, contracts, fee_info):
     return round(coefficient * contracts * price * (1 - price), 2)
 
 
+FEES = {"kalshi": kalshi_fee, "polymarket_us": polymarket_us_fee}     # The taker fee function of each venue.
+
+
 def fee(venue, price, contracts, fee_info):
     """
     Taker fee in dollars for any venue.
     """
-    if venue == "polymarket_us":
-        return polymarket_us_fee(price, contracts, fee_info)
-    return kalshi_fee(price, contracts, fee_info)
+    return FEES[venue](price, contracts, fee_info)

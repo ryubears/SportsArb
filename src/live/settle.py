@@ -20,6 +20,7 @@ from db.models import Ledger
 
 SETTLE_SECONDS = 30     # Seconds between passes over the open trades whose game has started.
 RESULTS = {"kalshi": kalshi.results, "polymarket_us": polymarket_us.results}    # How each venue reports how a contract resolved.
+RESULTS_BY_EVENT = {"kalshi": False, "polymarket_us": True}     # Whether a venue's lookup takes event ids rather than contract ids.
 
 
 def leg_won(side, polarity, result):
@@ -60,7 +61,7 @@ class Settler:
                     wanted.setdefault(getattr(t, f"{side}_venue"), set()).add(getattr(t, f"{side}_contract"))
         results = {}
         for venue, ids in wanted.items():
-            lookup = list(ids) if venue == "kalshi" else list(database.event_ids(self.conn, venue, list(ids)).values())
+            lookup = list(database.event_ids(self.conn, venue, list(ids)).values()) if RESULTS_BY_EVENT[venue] else list(ids)
             try:
                 found = await asyncio.to_thread(self.results[venue], lookup)
             except Exception as e:

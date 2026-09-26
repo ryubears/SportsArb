@@ -13,12 +13,18 @@ from common.timeutil import now_iso
 from common.venues import VENUES
 from db import database
 
-# How each of our sport keys maps onto the venues' own categories.
+FETCHERS = {"kalshi": kalshi.contracts, "polymarket_us": polymarket_us.contracts}     # Each venue client's catalog call.
+
+# How each of our sport keys maps onto the venues' own categories, as the arguments of each venue's fetcher.
 SPORTS = {
     "nfl": {
-        "kalshi_series_prefixes": ["KXNFL"],
-        "kalshi_series_tickers": ["KXSB"],   # The Super Bowl winner series does not use the NFL prefix.
-        "polymarket_us_tags": ["nfl"],
+        "kalshi": {
+            "prefixes": ["KXNFL"],
+            "tickers": ["KXSB"],     # The Super Bowl winner series does not use the NFL prefix.
+        },
+        "polymarket_us": {
+            "tags": ["nfl"],
+        },
     },
 }
 
@@ -27,12 +33,7 @@ def fetch_contracts(venue, sport):
     """
     Call the right venue client for a sport and return its Contracts.
     """
-    config = SPORTS[sport]
-    if venue == "kalshi":
-        return kalshi.contracts(sport, config["kalshi_series_prefixes"], config["kalshi_series_tickers"])
-    if venue == "polymarket_us":
-        return polymarket_us.contracts(sport, config["polymarket_us_tags"])
-    raise ValueError(f"unknown venue {venue}")
+    return FETCHERS[venue](sport, **SPORTS[sport][venue])
 
 
 def fetch_and_store(sport, venues, conn):

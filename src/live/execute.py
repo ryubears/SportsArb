@@ -18,7 +18,7 @@ other venue, whichever leaves more money, and books the result with fees.
 What it cannot flatten stays on a list and is tried again on every tick,
 against the books as they are then, until it is flat or the bet pays out.
 Only games being played are traded, so capital turns over the same day,
-and a Allocator from allocate.py caps each trade so the money covers every
+and an Allocator from allocate.py caps each trade so the money covers every
 game in play. Every trade is stored in the trades table as soon as it is
 sent and updated when it is done, and every dollar moved goes through
 the shared Balances. Settling what was bought is settle.py's job, and
@@ -32,13 +32,11 @@ from common.timeutil import now_iso
 from db import database
 from db.models import Ledger, Trade
 from live import fees
-from live.allocate import in_play
+from live import allocate, gametime
 from live.pricing import depth, ladder, trade_words
-from live.scan import resolution_time
 
 MIN_EDGE = 0.05             # Net dollars per contract at the top before orders are sent, and the floor for the deeper levels they sweep.
                             # In-game, 2 to 3 cent edges lost money after hedging.
-MAX_QUANTITY = 500          # Contracts per trade without a allocator. With one, allocate.py sets the cap per trade.
 FILL_SHARE = 0.5            # The share of visible size at a level assumed to be ours. Other takers get the rest.
 REJECT_PROBABILITY = 0.03   # The share of orders a venue rejects outright, for rate limits and errors.
 # Signal to fill latency per venue, as median milliseconds and the sigma of a lognormal draw. From us-east-1 a signed
@@ -111,10 +109,10 @@ class PaperExecutor:
         """
         if edge < MIN_EDGE:
             return False
-        kickoff = max((m["start_time"] for m in (yes, no) if m["start_time"]), default=None)
-        if not kickoff or not in_play(kickoff, now):
+        kickoff = gametime.kickoff((yes, no))
+        if not kickoff or not gametime.in_play(kickoff, now):
             return False
-        pays_at = max(resolution_time(m["start_time"], m["close_time"]) for m in (yes, no))
+        pays_at = gametime.pays_at((yes, no))
         books = self.books()
         legs = []
         for side, member in (("yes", yes), ("no", no)):
@@ -124,7 +122,7 @@ class PaperExecutor:
         legs[0]["limit"], legs[1]["limit"], available = depth(legs[0]["levels"], legs[1]["levels"],
                                                               (yes["venue"], legs[0]["fee_info"]), (no["venue"], legs[1]["fee_info"]), MIN_EDGE)
         # Ask for the share of the visible size we expect to get, so an unchanged book fills in full.
-        cap = self.allocator.cap(pair, now) if self.allocator else MAX_QUANTITY
+        cap = self.allocator.cap(pair, now) if self.allocator else allocate.MAX_CAP
         quantity = int(min(available * FILL_SHARE, cap, *(self.cash[l["member"]["venue"]] // l["limit"] for l in legs))) if available else 0
         if quantity < 1:
             return False

@@ -17,6 +17,9 @@ from collections import Counter
 from db import database
 
 CLASSIFIERS = {"kalshi": kalshi.classify, "polymarket_us": polymarket_us.classify}
+# How the report groups each venue's unclassified contracts, by the field that best says what kind of market it is.
+REPORT_GROUPS = {"kalshi": lambda row: row["series_id"],
+                 "polymarket_us": lambda row: row["market_type"] or row["event_title"]}
 
 
 def classify_all(rows):
@@ -44,9 +47,8 @@ def report(bets, unclassified):
         print(f"  {venue:10s} {kind:18s} {n:6d}")
     groups = Counter()
     for row in unclassified:
-        label = row["series_id"] if row["venue"] == "kalshi" else (row["market_type"] or row["event_title"])
-        if row["venue"] not in CLASSIFIERS:
-            label = "venue no longer classified"
+        group = REPORT_GROUPS.get(row["venue"])
+        label = group(row) if group and row["venue"] in CLASSIFIERS else "venue no longer classified"
         groups[(row["venue"], label)] += 1
     print(f"unclassified {len(unclassified)}, largest groups")
     for (venue, label), n in groups.most_common(12):

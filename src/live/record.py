@@ -23,10 +23,10 @@ from common.timeutil import now_iso, shift
 from common.venues import VENUES
 from db import database
 from db.models import Quote, Gap
+from live.gametime import RECORD_HOURS
 
 LEVELS = 5              # Price levels kept per side.
 GAME_WINDOW_DAYS = 7    # Games further out than this are not recorded.
-GAME_HOURS = 5          # A game contract stays recorded this long after kickoff, whatever its close time says.
 
 
 def load_targets(conn, sport):
@@ -35,7 +35,7 @@ def load_targets(conn, sport):
     """
     now = now_iso()
     return database.load_recording_targets(conn, sport, now, shift(now, days=GAME_WINDOW_DAYS), list(VENUES),
-                                           shift(now, hours=-GAME_HOURS))
+                                           shift(now, hours=-RECORD_HOURS))
 
 
 class Recorder:
