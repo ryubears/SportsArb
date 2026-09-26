@@ -27,6 +27,14 @@ def filled_trade(conn):
     return t
 
 
+def settled_at(conn):
+    """
+    When the trade settled, from its settlement, or None while it has none.
+    """
+    row = conn.execute("SELECT settled_at FROM settlements").fetchone()
+    return row[0] if row else None
+
+
 def settled(settler, now, results):
     """
     Run a settlement check with canned results, given as {(venue, contract_id): (result, settled_at)}.
@@ -43,16 +51,18 @@ def test_settlement_pays_the_winning_leg_only_and_records_each_leg(tmp_path):
     s = settle.Settler(conn, cash, logs.append)
     trade = filled_trade(conn)
     settled(s, "2026-09-20T20:00:00+00:00", {})                 # Not due yet.
-    assert conn.execute("SELECT settled_at FROM trades").fetchone()[0] is None
+    assert settled_at(conn) is None
     settled(s, "2026-09-20T21:05:00+00:00",
             {("polymarket_us", "pm"): ("yes", "2026-09-20T20:10:00+00:00"), ("kalshi", "k"): ("yes", "2026-09-20T20:09:00+00:00")})
-    row = conn.execute("SELECT * FROM trades").fetchone()
+    row = conn.execute("SELECT * FROM settlements").fetchone()
+    assert row["trade_id"] == trade.id
     # The bet resolved yes. The Polymarket US leg held the yes side and is paid a dollar each. The Kalshi leg held no and gets nothing.
     assert (row["yes_result"], row["yes_payout"], row["yes_settled_at"]) == ("yes", 50, "2026-09-20T20:10:00+00:00")
     assert (row["no_result"], row["no_payout"], row["no_settled_at"]) == ("yes", 0, "2026-09-20T20:09:00+00:00")
     assert row["settled_at"] == "2026-09-20T20:10:00+00:00"       # The later leg.
     assert cash.amounts == pytest.approx({"polymarket_us": 10000 + 50, "kalshi": 10000})
-    assert [tuple(r) for r in conn.execute("SELECT venue, amount, reason, trade_id FROM ledger")] == [("polymarket_us", 50.0, "payout", trade.id)]
+    assert [tuple(r) for r in conn.execute("SELECT venue, amount, reason, trade_id FROM ledger WHERE reason != 'transfer_in'")] == [
+        ("polymarket_us", 50.0, "payout", trade.id)]                    # After the two opening balances.
     assert logs == [f"settled {trade.label}: polymarket_us yes yes pays 50$, kalshi no yes pays 0$, realized +4.00$"]
     assert s.summary() == "settled: 1 trades for +4.00$, 0 still open"
 
@@ -69,9 +79,9 @@ def test_a_trade_is_checked_from_kickoff_when_its_contracts_have_a_start_time(tm
     assert database.load_open_trades(conn)[0].starts_at == KICKOFF
     results = {("polymarket_us", "pm"): ("yes", "2026-09-20T17:20:00+00:00"), ("kalshi", "k"): ("yes", "2026-09-20T17:19:00+00:00")}
     settled(s, "2026-09-20T16:59:00+00:00", results)                  # Before kickoff, not looked at.
-    assert conn.execute("SELECT settled_at FROM trades").fetchone()[0] is None
+    assert settled_at(conn) is None
     settled(s, "2026-09-20T17:30:00+00:00", results)                  # During the game, a decided prop settles at once.
-    assert conn.execute("SELECT settled_at FROM trades").fetchone()[0] == "2026-09-20T17:20:00+00:00"
+    assert settled_at(conn) == "2026-09-20T17:20:00+00:00"
     assert cash["polymarket_us"] == pytest.approx(10050)
 
 
@@ -80,7 +90,7 @@ def test_a_trade_waits_until_every_held_leg_has_a_result(tmp_path):
     s = settle.Settler(conn, balances.Balances(conn), lambda m: None)
     filled_trade(conn)
     settled(s, "2026-09-20T21:05:00+00:00", {("kalshi", "k"): ("no", "2026-09-20T20:09:00+00:00")})
-    assert conn.execute("SELECT settled_at FROM trades").fetchone()[0] is None
+    assert settled_at(conn) is None
     assert s.summary() == "settled: 0 trades for +0.00$, 1 still open"
 
 
@@ -111,11 +121,11 @@ def test_a_trade_being_flattened_is_left_alone_and_the_executor_is_told_once_it_
     s = settle.Settler(conn, cash, lambda m: None, executor=executor)
     results = {("polymarket_us", "pm"): ("yes", "2026-09-20T20:10:00+00:00"), ("kalshi", "k"): ("yes", "2026-09-20T20:09:00+00:00")}
     settled(s, "2026-09-20T21:05:00+00:00", results)            # An order to flatten it is in flight.
-    assert conn.execute("SELECT settled_at FROM trades").fetchone()[0] is None
+    assert settled_at(conn) is None
     assert (cash["polymarket_us"], executor.told) == (10000, [])
     executor.flattening.clear()
     settled(s, "2026-09-20T21:06:00+00:00", results)
-    assert conn.execute("SELECT settled_at FROM trades").fetchone()[0] == "2026-09-20T20:10:00+00:00"
+    assert settled_at(conn) == "2026-09-20T20:10:00+00:00"
     assert executor.told == [trade.id]
 
 
@@ -137,6 +147,6 @@ def test_payouts_follow_what_the_trade_holds_once_the_venues_answer(tmp_path, mo
     monkeypatch.setattr(settle.asyncio, "to_thread", inline)
     s.results = {"kalshi": kalshi_results, "polymarket_us": lambda events: {"pm": ("yes", "2026-09-20T20:10:00+00:00")}}
     asyncio.run(s.settle("2026-09-20T21:05:00+00:00"))
-    row = conn.execute("SELECT yes_payout, settled_at FROM trades").fetchone()
+    row = conn.execute("SELECT yes_payout, settled_at FROM settlements").fetchone()
     assert tuple(row) == (30, "2026-09-20T20:10:00+00:00")       # Paid on the 30 still held, not the 50 held when the check began.
     assert cash["polymarket_us"] == pytest.approx(10000 + 30)

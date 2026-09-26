@@ -126,14 +126,20 @@ CREATE TABLE IF NOT EXISTS trades (
     hedge          TEXT NOT NULL,   -- How a mismatch was flattened, in words.
     hedge_pnl      REAL NOT NULL,   -- Dollars gained or lost by flattening, after fees.
     status         TEXT NOT NULL,   -- 'sent' while in flight, then 'filled', 'partial', or 'failed'.
-    pays_at        TEXT NOT NULL,
-    yes_result     TEXT,            -- How the yes leg's contract resolved, 'yes' or 'no', once known.
-    yes_payout     REAL,            -- Dollars received on the yes leg, one per contract held when its side won.
-    yes_settled_at TEXT,            -- The venue's settlement time for the yes leg.
+    pays_at        TEXT NOT NULL    -- When the slower leg pays out.
+);
+
+-- How each trade's legs paid out, one row per trade once both of its held legs have resolved, by settle.py.
+-- A trade with no row here is still open. A leg that held nothing has no result.
+CREATE TABLE IF NOT EXISTS settlements (
+    trade_id       INTEGER PRIMARY KEY,   -- The trade, see trades.
+    settled_at     TEXT NOT NULL,         -- When both legs had resolved and the payouts were booked: the later leg's settlement.
+    yes_result     TEXT,                  -- How the yes leg's contract resolved, 'yes' or 'no'.
+    yes_payout     REAL,                  -- Dollars received on the yes leg, one per contract held when its side won.
+    yes_settled_at TEXT,                  -- The venue's settlement time for the yes leg.
     no_result      TEXT,
     no_payout      REAL,
-    no_settled_at  TEXT,
-    settled_at     TEXT             -- When both legs had resolved and the payouts were booked.
+    no_settled_at  TEXT
 );
 
 CREATE TABLE IF NOT EXISTS ledger (
@@ -141,7 +147,7 @@ CREATE TABLE IF NOT EXISTS ledger (
     ts           TEXT NOT NULL,
     venue        TEXT NOT NULL,
     amount       REAL NOT NULL,     -- Dollars in or out of the venue balance, positive when money arrives.
-    reason       TEXT NOT NULL,     -- 'buy', 'sell', 'payout', 'transfer_out', or 'transfer_in'.
+    reason       TEXT NOT NULL,     -- 'buy', 'sell', 'payout', 'transfer_out', or 'transfer_in'. Each venue's first entry is a 'transfer_in' of its starting balance.
     trade_id     INTEGER,           -- The trade behind a buy, sell, or payout.
     balance      REAL NOT NULL      -- The venue's balance after this entry, so the newest entry gives the balance.
 );

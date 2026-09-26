@@ -70,8 +70,8 @@ def test_unchanged_books_fill_both_legs_and_lock_in_the_edge(tmp_path, quick):
     assert (t["hedge"], t["hedge_pnl"], t["yes_held"], t["no_held"]) == ("none", 0, 50, 50)
     assert t["pays_at"] == "2026-09-20T20:45:00+00:00"            # Kickoff plus the game and the venues settling.
     assert cash.amounts == pytest.approx({"polymarket_us": 10000 - 50 * 0.45, "kalshi": 10000 - 50 * 0.47})
-    assert [tuple(r) for r in conn.execute("SELECT venue, amount, reason, trade_id FROM ledger ORDER BY id")] == [
-        ("polymarket_us", pytest.approx(-22.5), "buy", 1), ("kalshi", pytest.approx(-23.5), "buy", 1)]
+    assert [tuple(r) for r in conn.execute("SELECT venue, amount, reason, trade_id FROM ledger ORDER BY id")][2:] == [
+        ("polymarket_us", pytest.approx(-22.5), "buy", 1), ("kalshi", pytest.approx(-23.5), "buy", 1)]      # After the two openings.
     assert logs[0].startswith("paper filled: game_winner 2026-09-20 CAR@ATL CAR")
     assert ex.summary().startswith("paper: 1 trades (1 filled, 0 partial, 0 failed), locked in 4.00$, hedges +0.00$; total 1 trades, 4.00$")
 
@@ -176,9 +176,10 @@ def test_a_settled_trade_is_not_flattened_any_more(tmp_path, quick):
         await asyncio.gather(*ex.tasks)
     asyncio.run(later())
     t = stored(conn)[0]
+    settlement = conn.execute("SELECT yes_payout, settled_at FROM settlements WHERE trade_id = ?", (t["id"],)).fetchone()
     assert ex.exposed == {} and ex.tasks == set()
-    assert (t["yes_held"], t["no_held"], t["yes_payout"], t["settled_at"]) == (50, 0, 50, "2026-09-20T17:40:00+00:00")
-    assert [r[0] for r in conn.execute("SELECT reason FROM ledger ORDER BY id")] == ["buy", "payout"]     # No sale after the payout.
+    assert (t["yes_held"], t["no_held"], *settlement) == (50, 0, 50, "2026-09-20T17:40:00+00:00")
+    assert [r[0] for r in conn.execute("SELECT reason FROM ledger ORDER BY id")][2:] == ["buy", "payout"]     # No sale after the payout.
 
 
 def test_rejected_orders_fail_without_a_hedge(tmp_path, quick, monkeypatch):

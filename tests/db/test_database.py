@@ -126,7 +126,9 @@ def test_old_databases_are_migrated_to_pairs(tmp_path):
     assert "pair_label" not in [r[1] for r in conn.execute("PRAGMA table_info(bets)")]
     assert conn.execute("SELECT pair_id FROM bets").fetchone()[0] is None      # No pairs table yet, the next match sets it.
     assert [g.start_ts[11:19] for g in database.load_gaps(conn, "kalshi")] == ["19:39:39"]
-    assert [r[0] for r in conn.execute("SELECT balance FROM ledger ORDER BY id")] == [10000 - 23.5, 10000 + 26.5]   # Replayed from the start.
+    # Replayed from the start, then opened with the starting balance that the first entry implies.
+    assert [tuple(r) for r in conn.execute("SELECT ts, amount, reason, balance FROM ledger ORDER BY id")] == [
+        ("t1", 10000, "transfer_in", 10000), ("t1", -23.5, "buy", 10000 - 23.5), ("t2", 50, "payout", 10000 + 26.5)]
     assert database.last_balances(conn) == {"kalshi": 10026.5}
 
 
@@ -158,9 +160,11 @@ def test_old_settlement_rows_are_folded_into_their_trades(tmp_path):
     """)
     old.commit(); old.close()
     conn = database.connect(path)
-    assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'settlements'").fetchone() is None
-    row = conn.execute("SELECT yes_result, yes_payout, yes_settled_at, no_result, no_payout, no_settled_at, settled_at FROM trades").fetchone()
-    assert tuple(row) == ("yes", 5, "2026-09-20T20:10:00+00:00", "yes", 0, "2026-09-20T20:09:00+00:00", "2026-09-20T20:10:00+00:00")
+    # The legs were folded into the trade, then moved to the settlements table of today, one row for the trade.
+    assert "side" not in [r[1] for r in conn.execute("PRAGMA table_info(settlements)")]
+    assert "settled_at" not in [r[1] for r in conn.execute("PRAGMA table_info(trades)")]
+    row = conn.execute("SELECT trade_id, yes_result, yes_payout, yes_settled_at, no_result, no_payout, no_settled_at, settled_at FROM settlements").fetchone()
+    assert tuple(row) == (1, "yes", 5, "2026-09-20T20:10:00+00:00", "yes", 0, "2026-09-20T20:09:00+00:00", "2026-09-20T20:10:00+00:00")
     assert database.load_open_trades(conn) == []
     # Pairs got ids. The stored pair kept its row, the trade's and the second episode's pairs, long gone from the catalog, got bare rows.
     assert [tuple(r) for r in conn.execute("SELECT id, label, contracts FROM pairs ORDER BY id")] == [
@@ -171,9 +175,10 @@ def test_old_settlement_rows_are_folded_into_their_trades(tmp_path):
 
 
 def test_every_model_writes_only_columns_its_table_has():
-    from db.models import Ledger, Trade, Transfer
+    from db.models import Ledger, Settlement, Trade, Transfer
     conn = database.connect(":memory:")
-    for table, model in (("bets", Bet), ("gaps", Gap), ("opportunities", Opportunity), ("trades", Trade), ("ledger", Ledger), ("transfers", Transfer)):
+    for table, model in (("bets", Bet), ("gaps", Gap), ("opportunities", Opportunity), ("trades", Trade), ("settlements", Settlement),
+                         ("ledger", Ledger), ("transfers", Transfer)):
         table_columns = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
         assert set(database.columns(model)) <= set(table_columns), table
         assert set(table_columns) - set(database.columns(model)) <= {"id"}, table      # Nothing in the table the model forgets.

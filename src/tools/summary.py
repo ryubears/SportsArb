@@ -64,7 +64,7 @@ def print_storage(conn):
     print(f"database {DB_PATH}")
     print(f"size {size / 1e6:,.0f} MB")
     # Listed in pipeline order rather than alphabetically.
-    tables = ["contracts", "bets", "pairs", "quotes", "gaps", "opportunities", "trades", "ledger", "transfers"]
+    tables = ["contracts", "bets", "pairs", "quotes", "gaps", "opportunities", "trades", "settlements", "ledger", "transfers"]
     print_table("tables", ("table", "rows"), [(t, f"{first_value(conn, f'SELECT COUNT(*) FROM {t}'):,}") for t in tables])
 
 
@@ -179,14 +179,16 @@ def print_trades(conn, since, hours):
                     [(l[:40], t, q, y, n, p, h[:40], a) for l, t, q, y, n, p, h, a in worst])
     settled = query_rows(conn, """
         SELECT venue, COUNT(*), SUM(held), ROUND(SUM(cost), 2), ROUND(SUM(payout), 2), ROUND(SUM(payout - cost), 2) FROM (
-            SELECT yes_venue AS venue, yes_held AS held, yes_cost AS cost, yes_payout AS payout, yes_settled_at AS settled_at
-            FROM trades WHERE yes_result IS NOT NULL
+            SELECT t.yes_venue AS venue, t.yes_held AS held, t.yes_cost AS cost, s.yes_payout AS payout, s.yes_settled_at AS settled_at
+            FROM trades t JOIN settlements s ON s.trade_id = t.id WHERE s.yes_result IS NOT NULL
             UNION ALL
-            SELECT no_venue, no_held, no_cost, no_payout, no_settled_at FROM trades WHERE no_result IS NOT NULL)
+            SELECT t.no_venue, t.no_held, t.no_cost, s.no_payout, s.no_settled_at
+            FROM trades t JOIN settlements s ON s.trade_id = t.id WHERE s.no_result IS NOT NULL)
         WHERE settled_at >= ? GROUP BY venue ORDER BY venue""", (since,))
     if settled:
         print_table(f"settled legs by venue, last {hours} hours", ("venue", "legs", "contracts", "cost $", "payout $", "realized $"), settled)
-    open_count = first_value(conn, "SELECT COUNT(*) FROM trades WHERE settled_at IS NULL AND yes_held + no_held > 0")
+    open_count = first_value(conn, """
+        SELECT COUNT(*) FROM trades t WHERE yes_held + no_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""")
     print(f"  {open_count:,} trades still open")
     balances = query_rows(conn, """
         SELECT l.venue, ROUND(l.balance, 2), ROUND(COALESCE((SELECT SUM(amount) FROM transfers WHERE to_venue = l.venue AND arrived_at IS NULL), 0))

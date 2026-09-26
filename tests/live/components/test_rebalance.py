@@ -28,8 +28,8 @@ def test_weekly_check_moves_the_excess_and_it_lands_after_four_business_days(tmp
     assert cash.amounts == {"kalshi": 5000.0, "polymarket_us": 5000.0}
     assert database.load_transfers(conn)[0].arrived_at == "2026-09-25T12:00:00+00:00"
     assert r.summary() is None
-    assert [tuple(x) for x in conn.execute("SELECT venue, amount, reason FROM ledger ORDER BY id")] == [
-        ("polymarket_us", -2000.0, "transfer_out"), ("kalshi", 2000.0, "transfer_in")]
+    assert [tuple(x) for x in conn.execute("SELECT venue, amount, reason FROM ledger ORDER BY id")][2:] == [
+        ("polymarket_us", -2000.0, "transfer_out"), ("kalshi", 2000.0, "transfer_in")]              # After the two openings.
 
 
 def test_a_venue_under_the_floor_is_topped_up_on_any_day(tmp_path):
