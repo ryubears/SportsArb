@@ -20,6 +20,7 @@ game not in play gets nothing at all, since trades are only taken live.
 """
 
 from common.venues import VENUES
+from db import database
 from live.gametime import in_play, in_play_or_settling
 
 DOLLARS_PER_CAP = 20    # Dollars a game spends on each venue, over the whole game, for every contract of cap. From the first live game.
@@ -49,10 +50,7 @@ class Allocator:
         """
         Load the kickoff of every game the catalog pairs.
         """
-        self.kickoffs = {(d, a, b): kickoff for d, a, b, kickoff in self.conn.execute("""
-            SELECT p.game_date, p.team_a, p.team_b, MAX(c.start_time)
-            FROM pairs p JOIN bets b ON b.pair_id = p.id JOIN contracts c ON c.venue = b.venue AND c.contract_id = b.contract_id
-            WHERE p.game_date IS NOT NULL GROUP BY 1, 2, 3 HAVING MAX(c.start_time) IS NOT NULL""")}
+        self.kickoffs = database.load_kickoffs(self.conn)
 
     def active(self, now):
         """
@@ -65,13 +63,10 @@ class Allocator:
         Dollars held in open trades per game and venue, as {game key: {venue: dollars}}.
         """
         held = {}
-        for d, a, b, yv, yc, nv, nc in self.conn.execute("""
-            SELECT p.game_date, p.team_a, p.team_b, t.yes_venue, t.yes_cost, t.no_venue, t.no_cost
-            FROM trades t JOIN pairs p ON p.id = t.pair_id
-            WHERE t.settled_at IS NULL AND t.yes_held + t.no_held > 0 AND p.game_date IS NOT NULL"""):
-            game = held.setdefault((d, a, b), {venue: 0.0 for venue in VENUES})
-            game[yv] += yc
-            game[nv] += nc
+        for game_key, legs in database.load_open_game_costs(self.conn):
+            game = held.setdefault(game_key, {venue: 0.0 for venue in VENUES})
+            for venue, cost in legs:
+                game[venue] += cost
         return held
 
     def shares(self, now):

@@ -82,7 +82,8 @@ def test_opportunities_append_and_an_old_source_column_is_dropped(tmp_path):
     database.insert_opportunities(conn, [o])
     database.insert_opportunities(conn, [o])
     assert conn.execute("SELECT COUNT(*) FROM opportunities").fetchone()[0] == 2
-    conn.execute("ALTER TABLE opportunities ADD COLUMN source TEXT")      # As the retired replay scanner left it.
+    conn.execute("ALTER TABLE opportunities ADD COLUMN source TEXT")      # As the retired replay scanner left it,
+    conn.execute("PRAGMA user_version = 0")                             # before migrations were numbered.
     conn.commit()
     conn = database.connect(tmp_path / "t.sqlite")
     assert "source" not in [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]
@@ -167,3 +168,12 @@ def test_old_settlement_rows_are_folded_into_their_trades(tmp_path):
     assert conn.execute("SELECT pair_id FROM bets").fetchone()[0] == 1
     assert [tuple(r) for r in conn.execute("SELECT id, pair_id, start_ts FROM opportunities ORDER BY id")] == [(1, 1, "s"), (2, 2, "gone")]
     assert [tuple(r) for r in conn.execute("SELECT id, pair_id FROM trades")] == [(1, 2)]
+
+
+def test_every_model_writes_only_columns_its_table_has():
+    from db.models import Ledger, Trade, Transfer
+    conn = database.connect(":memory:")
+    for table, model in (("bets", Bet), ("gaps", Gap), ("opportunities", Opportunity), ("trades", Trade), ("ledger", Ledger), ("transfers", Transfer)):
+        table_columns = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+        assert set(database.columns(model)) <= set(table_columns), table
+        assert set(table_columns) - set(database.columns(model)) <= {"id"}, table      # Nothing in the table the model forgets.
