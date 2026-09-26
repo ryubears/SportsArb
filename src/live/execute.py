@@ -28,14 +28,15 @@ keeping the venues funded is rebalance.py's.
 """
 
 import asyncio
+import dataclasses
 import math
 import random
+from dataclasses import dataclass
 from common.timeutil import now_iso
 from db import database
 from db.models import Ledger, Trade
-from live import fees
 from live import allocate, gametime
-from live.pricing import depth, ladder, trade_words
+from live.pricing import depth, ladder, sell_ladder, sweep, trade_words
 
 MIN_EDGE = 0.05             # Net dollars per contract at the top before orders are sent, and the floor for the deeper levels they sweep.
                             # In-game, 2 to 3 cent edges lost money after hedging.
@@ -47,34 +48,48 @@ REJECT_PROBABILITY = 0.03   # The share of orders a venue rejects outright, for 
 LATENCY_MS = {"kalshi": (50, 0.35), "polymarket_us": (60, 0.35)}
 
 
+@dataclass
+class Leg:
+    """
+    One side of a trade: the pair member it is held through, the order sent
+    for it, and what it holds after any flattening.
+    """
+    side: str               # 'yes' or 'no', the side of the bet this leg holds.
+    member: dict            # The pair member, with its venue, contract_id, and polarity.
+    fee_info: dict          # The contract's fee schedule.
+    limit: float = 0.0      # The highest cost per contract the order accepts.
+    quantity: int = 0       # Contracts the order asks for.
+    held: int = 0           # Contracts held after the fill and any flattening.
+    cost: float = 0.0       # Dollars paid for what is held, including fees.
+
+    @property
+    def venue(self):
+        return self.member["venue"]
+
+    @property
+    def polarity(self):
+        return self.member["polarity"]
+
+    @property
+    def key(self):
+        return (self.member["venue"], self.member["contract_id"])
+
+
+@dataclass
 class Fill:
     """
     What came back for one order: contracts filled, dollars paid or received
     including fees, and the latency and time of the fill.
     """
-
-    def __init__(self, filled=0, dollars=0.0, ms=0, ts=None, note=""):
-        self.filled = filled
-        self.dollars = dollars
-        self.ms = ms
-        self.ts = ts
-        self.note = note
+    filled: int = 0
+    dollars: float = 0.0
+    ms: int = 0
+    ts: str | None = None
+    note: str = ""
 
     @property
     def average(self):
         return self.dollars / self.filled if self.filled else 0.0
-
-
-def sell_ladder(quote, polarity, side):
-    """
-    Proceeds per contract and size for selling back one side of the bet held
-    through this contract, best first. Holding the side the contract pays
-    on means selling at the bids. Holding the other side means selling the
-    opposite outcome, which fetches one minus the ask.
-    """
-    if side == polarity:
-        return [(price, size) for price, size in quote.bids]
-    return [(round(1 - price, 4), size) for price, size in quote.asks]
 
 
 class PaperExecutor:
@@ -92,7 +107,7 @@ class PaperExecutor:
         self.rng = rng or random.Random()
         self.tasks = set()          # Trades in flight, and the retry of exposed ones while it runs.
         self.done = []              # Trades finished since the last summary.
-        self.exposed = {}           # Trade id maps to (Trade, legs) for trades still holding more on one side than the other.
+        self.exposed = {}           # Trade id maps to (Trade, [yes Leg, no Leg]) for trades holding more on one side than the other.
         self.flattening = set()     # Ids of exposed trades with an order in flight to flatten them, which the settler leaves alone.
         self.retrying = None        # The task flattening exposed trades while one runs.
         self.totals = {"trades": 0, "profit": 0.0, "hedge": 0.0}
@@ -117,24 +132,21 @@ class PaperExecutor:
             return False
         pays_at = gametime.pays_at((yes, no))
         books = self.books()
-        legs = []
-        for side, member in (("yes", yes), ("no", no)):
-            key = (member["venue"], member["contract_id"])
-            legs.append({"side": side, "member": member, "key": key, "fee_info": fee_infos[key],
-                         "levels": ladder(books[key], member["polarity"], side)})
-        legs[0]["limit"], legs[1]["limit"], available = depth(legs[0]["levels"], legs[1]["levels"],
-                                                              (yes["venue"], legs[0]["fee_info"]), (no["venue"], legs[1]["fee_info"]), MIN_EDGE)
+        legs = [Leg(side, member, fee_infos[(member["venue"], member["contract_id"])]) for side, member in (("yes", yes), ("no", no))]
+        yes_leg, no_leg = legs
+        yes_leg.limit, no_leg.limit, available = depth(*(ladder(books[l.key], l.polarity, l.side) for l in legs),
+                                                       (yes_leg.venue, yes_leg.fee_info), (no_leg.venue, no_leg.fee_info), MIN_EDGE)
         # Ask for the share of the visible size we expect to get, so an unchanged book fills in full.
         cap = self.allocator.cap(pair, now) if self.allocator else allocate.MAX_CAP
-        quantity = int(min(available * FILL_SHARE, cap, *(self.cash[l["member"]["venue"]] // l["limit"] for l in legs))) if available else 0
+        quantity = int(min(available * FILL_SHARE, cap, *(self.cash[l.venue] // l.limit for l in legs))) if available else 0
         if quantity < 1:
             return False
         for l in legs:
-            l["quantity"] = quantity
-            self.cash.reserve(l["member"]["venue"], quantity * l["limit"])
+            l.quantity = quantity
+            self.cash.reserve(l.venue, quantity * l.limit)
         trade = Trade(pair_id=pair["id"], label=pair["label"], trade=trade_words(yes, no), signal_ts=now, edge=edge, quantity=quantity, cap=cap,
-                      yes_venue=yes["venue"], yes_contract=yes["contract_id"], yes_polarity=yes["polarity"], yes_limit=legs[0]["limit"],
-                      no_venue=no["venue"], no_contract=no["contract_id"], no_polarity=no["polarity"], no_limit=legs[1]["limit"], pays_at=pays_at)
+                      yes_venue=yes["venue"], yes_contract=yes["contract_id"], yes_polarity=yes["polarity"], yes_limit=yes_leg.limit,
+                      no_venue=no["venue"], no_contract=no["contract_id"], no_polarity=no["polarity"], no_limit=no_leg.limit, pays_at=pays_at)
         database.insert_trade(self.conn, trade)
         self.spawn(self.run_trade(trade, legs))
         return True
@@ -158,74 +170,38 @@ class PaperExecutor:
         median, sigma = LATENCY_MS[venue]
         return int(self.rng.lognormvariate(math.log(median), sigma))
 
-    async def fill(self, leg):
+    async def arrive(self, venue):
         """
-        Send one leg and fill it against the book as it is when the order arrives.
+        Wait for an order to reach its venue. Returns the latency in milliseconds and the time it arrived.
         """
-        venue = leg["member"]["venue"]
         ms = self.latency(venue)
         await asyncio.sleep(ms / 1000)
-        ts = now_iso()
+        return ms, now_iso()
+
+    async def fill(self, leg):
+        """
+        Send one leg's buy order and fill it against the book as it is when the order arrives.
+        """
+        ms, ts = await self.arrive(leg.venue)
         if self.rng.random() < REJECT_PROBABILITY:
             return Fill(ms=ms, ts=ts, note="rejected")
-        quote = self.books().get(leg["key"])
+        quote = self.books().get(leg.key)
         if quote is None:
             return Fill(ms=ms, ts=ts, note="no book")
-        fill = Fill(ms=ms, ts=ts)
-        remaining = leg["quantity"]
-        for price, size in ladder(quote, leg["member"]["polarity"], leg["side"]):
-            if price > leg["limit"] + 1e-9:
-                break
-            take = int(min(remaining, size * FILL_SHARE))
-            if take < 1:
-                continue        # A level too small for a whole contract. The next may not be.
-            fill.filled += take
-            fill.dollars += take * (price + fees.fee(venue, price, 1, leg["fee_info"]))
-            remaining -= take
-            if remaining < 1:
-                break
-        return fill
+        filled, dollars = sweep(ladder(quote, leg.polarity, leg.side), leg.quantity, leg.venue, leg.fee_info, FILL_SHARE, limit=leg.limit)
+        return Fill(filled, dollars, ms, ts)
 
     async def sell_back(self, leg, quantity):
         """
         Sell back contracts held through a leg at whatever the book offers when the order arrives.
         Returns a Fill whose dollars are the proceeds after fees.
         """
-        venue = leg["member"]["venue"]
-        ms = self.latency(venue)
-        await asyncio.sleep(ms / 1000)
-        fill = Fill(ms=ms, ts=now_iso())
-        quote = self.books().get(leg["key"])
+        ms, ts = await self.arrive(leg.venue)
+        quote = self.books().get(leg.key)
         if quote is None:
-            return fill
-        remaining = quantity
-        for price, size in sell_ladder(quote, leg["member"]["polarity"], leg["side"]):
-            take = int(min(remaining, size * FILL_SHARE))
-            if take < 1:
-                continue
-            fill.filled += take
-            fill.dollars += take * (price - fees.fee(venue, price, 1, leg["fee_info"]))
-            remaining -= take
-            if remaining < 1:
-                break
-        return fill
-
-    def expected(self, levels, quantity, venue, fee_info, selling):
-        """
-        What a market order for quantity would get right now, as (contracts, dollars), to choose a hedge.
-        """
-        filled, dollars, remaining = 0, 0.0, quantity
-        for price, size in levels:
-            take = int(min(remaining, size * FILL_SHARE))
-            if take < 1:
-                continue
-            fee = fees.fee(venue, price, 1, fee_info)
-            filled += take
-            dollars += take * (price - fee if selling else price + fee)
-            remaining -= take
-            if remaining < 1:
-                break
-        return filled, dollars
+            return Fill(ms=ms, ts=ts)
+        filled, dollars = sweep(sell_ladder(quote, leg.polarity, leg.side), quantity, leg.venue, leg.fee_info, FILL_SHARE, selling=True)
+        return Fill(filled, dollars, ms, ts)
 
     # TRADES
 
@@ -235,11 +211,10 @@ class PaperExecutor:
         """
         fills = await asyncio.gather(*(self.fill(leg) for leg in legs))
         for leg, fill in zip(legs, fills):
-            venue = leg["member"]["venue"]
-            self.cash.release(venue, leg["quantity"] * leg["limit"])
-            leg["held"], leg["cost"] = fill.filled, fill.dollars
+            self.cash.release(leg.venue, leg.quantity * leg.limit)
+            leg.held, leg.cost = fill.filled, fill.dollars
             if fill.filled:
-                self.cash.book(Ledger(fill.ts, venue, -fill.dollars, "buy", trade.id))
+                self.cash.book(Ledger(fill.ts, leg.venue, -fill.dollars, "buy", trade.id))
         yes_fill, no_fill = fills
         trade.yes_filled, trade.yes_cost, trade.yes_latency_ms, trade.yes_fill_ts = yes_fill.filled, yes_fill.dollars, yes_fill.ms, yes_fill.ts
         trade.no_filled, trade.no_cost, trade.no_latency_ms, trade.no_fill_ts = no_fill.filled, no_fill.dollars, no_fill.ms, no_fill.ts
@@ -249,11 +224,11 @@ class PaperExecutor:
         if yes_fill.filled != no_fill.filled:
             trade.hedge = await self.flatten(trade, legs) or f"{abs(yes_fill.filled - no_fill.filled)} exposed, no book to flatten"
         self.settle_legs(trade, legs)
-        notes = [f"{leg['side']} leg {fill.note}" for leg, fill in zip(legs, fills) if fill.note]
+        notes = [f"{leg.side} leg {fill.note}" for leg, fill in zip(legs, fills) if fill.note]
         if notes:
             trade.hedge = trade.hedge + ", " + ", ".join(notes) if trade.hedge != "none" else ", ".join(notes)
         database.update_trade(self.conn, trade)
-        if legs[0]["held"] != legs[1]["held"]:
+        if legs[0].held != legs[1].held:
             self.exposed[trade.id] = (trade, legs)
         self.totals["trades"] += 1
         self.totals["profit"] += trade.profit
@@ -266,8 +241,8 @@ class PaperExecutor:
         """
         Copy what the legs hold onto the trade and set its status from the matched count.
         """
-        trade.yes_held, trade.no_held = legs[0]["held"], legs[1]["held"]
-        trade.yes_cost, trade.no_cost = legs[0]["cost"], legs[1]["cost"]
+        trade.yes_held, trade.no_held = legs[0].held, legs[1].held
+        trade.yes_cost, trade.no_cost = legs[0].cost, legs[1].cost
         trade.status = "failed" if trade.matched == 0 else "partial" if trade.matched < trade.quantity else "filled"
 
     def settled(self, trade_id):
@@ -296,7 +271,7 @@ class PaperExecutor:
             if not note or note.startswith(("sold back 0", "bought 0")):
                 continue
             self.settle_legs(trade, legs)
-            left = abs(legs[0]["held"] - legs[1]["held"])
+            left = abs(legs[0].held - legs[1].held)
             trade.hedge += f", then {note} at {now[11:19]}"
             database.update_trade(self.conn, trade)
             self.totals["hedge"] += trade.hedge_pnl - before
@@ -311,47 +286,42 @@ class PaperExecutor:
         books say leaves more money. The chosen order is sent like any other.
         Returns what was done in words, or None when no book allowed anything.
         """
-        long_leg, short_leg = sorted(legs, key=lambda l: l["held"], reverse=True)
-        excess = long_leg["held"] - short_leg["held"]
-        average = long_leg["cost"] / long_leg["held"]
+        long_leg, short_leg = sorted(legs, key=lambda l: l.held, reverse=True)
+        excess = long_leg.held - short_leg.held
+        average = long_leg.cost / long_leg.held
         books = self.books()
         sell_value = buy_value = None
         buyable = 0
-        if books.get(long_leg["key"]):
-            quote = books[long_leg["key"]]
-            n, dollars = self.expected(sell_ladder(quote, long_leg["member"]["polarity"], long_leg["side"]), excess,
-                                       long_leg["member"]["venue"], long_leg["fee_info"], selling=True)
+        if books.get(long_leg.key):
+            n, dollars = sweep(sell_ladder(books[long_leg.key], long_leg.polarity, long_leg.side), excess,
+                               long_leg.venue, long_leg.fee_info, FILL_SHARE, selling=True)
             sell_value = dollars - n * average if n else None
-        if books.get(short_leg["key"]):
-            quote = books[short_leg["key"]]
-            levels = ladder(quote, short_leg["member"]["polarity"], short_leg["side"])
+        if books.get(short_leg.key):
+            levels = ladder(books[short_leg.key], short_leg.polarity, short_leg.side)
             # Only what the other venue's balance can pay for.
-            buyable = min(excess, int(self.cash[short_leg["member"]["venue"]] // levels[0][0])) if levels else 0
-            n, dollars = self.expected(levels, buyable, short_leg["member"]["venue"], short_leg["fee_info"], selling=False)
+            buyable = min(excess, int(self.cash[short_leg.venue] // levels[0][0])) if levels else 0
+            n, dollars = sweep(levels, buyable, short_leg.venue, short_leg.fee_info, FILL_SHARE)
             buy_value = n * (1 - average) - dollars if n else None
         if sell_value is None and buy_value is None:
             return None
         if buy_value is None or (sell_value is not None and sell_value >= buy_value):
             fill = await self.sell_back(long_leg, excess)
-            venue = long_leg["member"]["venue"]
             if fill.filled:
-                self.cash.book(Ledger(fill.ts, venue, fill.dollars, "sell", trade.id))
-            long_leg["held"] -= fill.filled
-            long_leg["cost"] -= fill.filled * average
+                self.cash.book(Ledger(fill.ts, long_leg.venue, fill.dollars, "sell", trade.id))
+            long_leg.held -= fill.filled
+            long_leg.cost -= fill.filled * average
             trade.hedge_pnl += fill.dollars - fill.filled * average
-            note = f"sold back {fill.filled} of {excess} on {venue}"
+            note = f"sold back {fill.filled} of {excess} on {long_leg.venue}"
         else:
-            order = dict(short_leg, quantity=buyable, limit=1.0)
-            venue = short_leg["member"]["venue"]
-            self.cash.reserve(venue, buyable * 1.0)
-            fill = await self.fill(order)
-            self.cash.release(venue, buyable * 1.0)
+            self.cash.reserve(short_leg.venue, buyable * 1.0)
+            fill = await self.fill(dataclasses.replace(short_leg, quantity=buyable, limit=1.0))
+            self.cash.release(short_leg.venue, buyable * 1.0)
             if fill.filled:
-                self.cash.book(Ledger(fill.ts, venue, -fill.dollars, "buy", trade.id))
-            short_leg["held"] += fill.filled
-            short_leg["cost"] += fill.dollars
+                self.cash.book(Ledger(fill.ts, short_leg.venue, -fill.dollars, "buy", trade.id))
+            short_leg.held += fill.filled
+            short_leg.cost += fill.dollars
             trade.hedge_pnl += fill.filled * (1 - average) - fill.dollars
-            note = f"bought {fill.filled} of {excess} on {venue}"
+            note = f"bought {fill.filled} of {excess} on {short_leg.venue}"
             trade.matched += fill.filled
         if fill.filled < excess:
             note += f", {excess - fill.filled} exposed"

@@ -37,20 +37,39 @@ def test_depth_stops_where_the_edge_falls_under_the_floor():
     assert pricing.depth(leg_a, leg_b, fee, fee, 0.09) == (None, None, 0)        # Nothing does.
 
 
-def test_fill_walks_both_ladders_while_the_edge_is_positive():
+def test_positive_depth_walks_both_ladders_while_the_edge_is_positive():
     leg_a = [(0.40, 10), (0.41, 10)]
     leg_b = [(0.50, 5), (0.58, 100)]
-    fee_infos = {"polymarket_us": NO_PM_FEES}
-    top_edge, size, profit = pricing.fill(leg_a, leg_b, "polymarket_us", "polymarket_us", fee_infos)
+    fee = ("polymarket_us", NO_PM_FEES)
+    top_edge, size, profit = pricing.positive_depth(leg_a, leg_b, fee, fee)
     assert top_edge == pytest.approx(0.10)
     assert size == 20
     assert profit == pytest.approx(5 * 0.10 + 5 * 0.02 + 10 * 0.01)
 
 
-def test_fill_stops_at_zero_edge_and_handles_empty_ladders():
-    fee_infos = {"polymarket_us": NO_PM_FEES}
-    assert pricing.fill([(0.5, 10)], [(0.5, 10)], "polymarket_us", "polymarket_us", fee_infos) == (0.0, 0.0, 0.0)
-    assert pricing.fill([], [(0.5, 10)], "polymarket_us", "polymarket_us", fee_infos) == (-1.0, 0.0, 0.0)
+def test_positive_depth_stops_at_zero_edge_and_handles_empty_ladders():
+    fee = ("polymarket_us", NO_PM_FEES)
+    assert pricing.positive_depth([(0.5, 10)], [(0.5, 10)], fee, fee) == (0.0, 0.0, 0.0)
+    assert pricing.positive_depth([], [(0.5, 10)], fee, fee) == (-1.0, 0.0, 0.0)
+
+
+def test_positive_depth_leaves_the_ladders_as_they_were():
+    leg_a, leg_b = [(0.40, 10)], [(0.50, 5)]
+    fee = ("polymarket_us", NO_PM_FEES)
+    pricing.positive_depth(leg_a, leg_b, fee, fee)
+    assert (leg_a, leg_b) == ([(0.40, 10)], [(0.50, 5)])
+
+
+def test_sweep_takes_a_share_of_each_level_skips_levels_too_small_and_stops_at_the_limit():
+    levels = [(0.40, 1), (0.41, 10), (0.45, 100), (0.60, 100)]
+    fee = ("polymarket_us", NO_PM_FEES)
+    # Half of 1 is no whole contract, so the top level is skipped. Then 5 at 0.41 and the rest at 0.45, and 0.60 is over the limit.
+    assert pricing.sweep(levels, 30, *fee, share=0.5, limit=0.50) == (30, pytest.approx(5 * 0.41 + 25 * 0.45))
+    assert pricing.sweep(levels, 500, *fee, share=0.5, limit=0.50) == (55, pytest.approx(5 * 0.41 + 50 * 0.45))
+    # Selling takes the fee off the proceeds instead of adding it.
+    pm = ("polymarket_us", {"feeCoefficient": 0.0695})
+    bought, sold = pricing.sweep([(0.5, 10)], 10, *pm), pricing.sweep([(0.5, 10)], 10, *pm, selling=True)
+    assert bought[1] - 5.0 == pytest.approx(5.0 - sold[1]) and bought[1] > 5.0
 
 
 def test_best_trade_picks_the_cheapest_leg_on_each_side_across_venues():
