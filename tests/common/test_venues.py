@@ -5,10 +5,9 @@ Every table of venue specific code covers every venue, and nothing else.
 import pytest
 from catalog import fetch
 from catalog.classify import classify
-from common import config
 from common.venues import SHORT_NAMES, VENUES
 from live.components import settle, streams
-from live.price import fees
+from live.helper import config, fees
 
 
 @pytest.mark.parametrize("name, table", [

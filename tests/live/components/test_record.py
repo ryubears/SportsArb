@@ -2,9 +2,9 @@
 Tests for the recorder's write rules.
 """
 
-from common import config
 from db import database
 from live.components import record
+from live.helper import config
 
 
 def test_flush_writes_only_when_the_best_level_changes(tmp_path):

@@ -3,8 +3,8 @@ Tests for pricing one side of a bet through a contract and both sides across a g
 """
 
 import pytest
-from live.price import pricing
 from db.models import Quote
+from live.helper import pricing
 
 PM_FEES = {"feeCoefficient": 0.0695}
 NO_PM_FEES = {"feeCoefficient": 0}

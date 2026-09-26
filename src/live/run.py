@@ -33,7 +33,6 @@ import sys
 import time
 from dataclasses import dataclass
 from catalog import pipeline
-from common import config
 from common.log import log, with_traceback
 from common.paths import ROOT
 from common.timeutil import now_iso
@@ -41,6 +40,7 @@ from db import database
 from live.components import allocate, balances, execute, rebalance, scan, settle
 from live.components.record import Recorder, load_targets
 from live.components.streams import Streams
+from live.helper import config
 
 CATALOG_MINUTES = 60    # How often the catalog is refreshed and subscriptions updated. Zero disables it.
 
@@ -228,7 +228,7 @@ if __name__ == "__main__":
     ap.add_argument("--no-scan", action="store_true", help="record only, without the live scanner")
     ap.add_argument("--no-trade", action="store_true", help="scan without paper trading")
     ap.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
-                    help="override a setting from common/config.py for this run, for example --set min_edge=0.03, repeatable")
+                    help="override a setting from live/helper/config.py for this run, for example --set min_edge=0.03, repeatable")
     args = ap.parse_args()
     try:
         config.override(args.set)

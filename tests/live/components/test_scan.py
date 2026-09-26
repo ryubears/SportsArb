@@ -5,8 +5,8 @@ Tests for the scanner's episode detection over the recorder's in memory books.
 import pytest
 from db import database
 from db.models import Bet, Pair, Contract, Opportunity, Quote
-from common import game
 from live.components import record, scan
+from live.helper import game
 
 NO_PM_FEES = {"feeCoefficient": 0}
 NO_K_FEES = {"fee_type": "quadratic", "fee_multiplier": 0}

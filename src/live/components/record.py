@@ -19,11 +19,11 @@ The process that runs all this is run.py.
 """
 
 import time
-from common import config
 from common.timeutil import now_iso, shift
 from common.venues import VENUES
 from db import database
 from db.models import Quote, Gap
+from live.helper import config
 
 
 def load_targets(conn, sport):

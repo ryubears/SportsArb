@@ -10,11 +10,11 @@ when the order comes back, so two signals in the same moment cannot both
 spend the same dollars.
 """
 
-from common import config
 from common.timeutil import now_iso
 from common.venues import VENUES
 from db import database
 from db.models import Ledger
+from live.helper import config
 
 
 class Balances:
