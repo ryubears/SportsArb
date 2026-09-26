@@ -99,7 +99,7 @@ class Scanner:
 
     def price(self, pair, latest, now):
         """
-        The best trade across the pair's members whose books are fresh, or None.
+        The best trade across the pair's members whose books are fresh, as a Priced, or None.
         """
         members = [m for m in pair["members"]
                    if (m["venue"], m["contract_id"]) in latest
@@ -127,15 +127,15 @@ class Scanner:
         Open, extend, or end the episode for one pair from the current books.
         """
         pair = self.pairs[pair_id]
-        result = self.price(pair, latest, now)
+        priced = self.price(pair, latest, now)
         episode = self.episodes.get(pair_id)
-        if result is not None and result[2] > 0:
-            yes, no, edge, size, profit = result
+        if priced is not None and priced.edge > 0:
             if episode is None:
                 episode = self.episodes[pair_id] = {"start_ts": now, "peak": None, "pair": pair}
-            if episode["peak"] is None or edge > episode["peak"]["edge"]:
-                episode["peak"] = {"yes": yes, "no": no, "ts": now, "edge": edge, "size": size, "profit": profit}
-            if self.on_signal and not episode.get("traded") and self.on_signal(pair, yes, no, edge, size, self.fee_infos, now):
+            if episode["peak"] is None or priced.edge > episode["peak"]["edge"]:
+                episode["peak"] = dict(priced._asdict(), ts=now)
+            if (self.on_signal and not episode.get("traded")
+                    and self.on_signal(pair, priced.yes, priced.no, priced.edge, priced.size, self.fee_infos, now)):
                 episode["traded"] = True
         elif episode is not None:
             self.close(pair_id, now)

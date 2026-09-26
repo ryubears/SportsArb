@@ -12,6 +12,7 @@ from live import execute, fees, settle, streams
 @pytest.mark.parametrize("name, table", [
     ("SHORT_NAMES", SHORT_NAMES),
     ("fees.FEES", fees.FEES),
+    ("fees.RATES", fees.RATES),
     ("fetch.FETCHERS", fetch.FETCHERS),
     *((f"fetch.SPORTS[{sport!r}]", config) for sport, config in fetch.SPORTS.items()),
     ("classify.CLASSIFIERS", classify.CLASSIFIERS),

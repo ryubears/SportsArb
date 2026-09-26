@@ -32,3 +32,11 @@ def test_polymarket_us_rounds_half_to_even():
     assert fees.polymarket_us_fee(0.5, 100, {"feeCoefficient": 0.0695}) == 1.74
     assert fees.polymarket_us_fee(0.5, 100, {}) == 1.74
     assert fees.fee("polymarket_us", 0.5, 100, {"feeCoefficient": 0.0695}) == 1.74
+
+
+def test_fee_per_contract_is_not_rounded():
+    assert fees.fee_per_contract("kalshi", 0.5, KALSHI_SPORTS) == pytest.approx(0.0175)
+    assert fees.fee_per_contract("polymarket_us", 0.5, {"feeCoefficient": 0.0695}) == pytest.approx(0.017375)
+    assert fees.fee_per_contract("kalshi", 0.5, {"fee_multiplier": 0}) == 0
+    # A hundred contracts in one order cost what the per contract rate says, once rounded, not 100 single contract fees.
+    assert fees.fee("kalshi", 0.5, 100, KALSHI_SPORTS) == 1.75 < 100 * fees.fee("kalshi", 0.5, 1, KALSHI_SPORTS)
