@@ -33,7 +33,7 @@ import math
 import random
 from dataclasses import dataclass
 from common.log import on_failure
-from common.timeutil import now_iso
+from common.timeutil import now_iso, seconds_between
 from db import database
 from db.models import Ledger, Trade
 from live.helper import config, game
@@ -90,10 +90,11 @@ class PaperExecutor:
     books is a function returning the newest quotes keyed by (venue, contract_id).
     """
 
-    def __init__(self, conn, cash, books, log=print, rng=None, allocator=None):
+    def __init__(self, conn, cash, books, log=print, rng=None, allocator=None, clock=now_iso):
         self.conn = conn
         self.cash = cash
         self.books = books
+        self.clock = clock          # The current time in ISO 8601 UTC, for fills and for how old a book is.
         self.log = log
         self.allocator = allocator
         self.rng = rng or random.Random()
@@ -169,7 +170,21 @@ class PaperExecutor:
         """
         ms = self.latency(venue)
         await asyncio.sleep(ms / 1000)
-        return ms, now_iso()
+        return ms, self.clock()
+
+    def book(self, key):
+        """
+        The newest book for a contract, or None when there is none or it has
+        not changed for more than config.MAX_QUOTE_AGE seconds, the same rule
+        the scanner prices by. A market that has closed may stop changing
+        rather than empty its book, and its last book cannot be traded, so
+        an order or a flatten treats a stale book as no book. A quiet market
+        that is still open waits for its next change.
+        """
+        quote = self.books().get(key)
+        if quote is None or seconds_between(quote.ts, self.clock()) > config.MAX_QUOTE_AGE:
+            return None
+        return quote
 
     async def fill(self, leg):
         """
@@ -178,7 +193,7 @@ class PaperExecutor:
         ms, ts = await self.arrive(leg.venue)
         if self.rng.random() < config.REJECT_PROBABILITY:
             return Fill(ms=ms, ts=ts, note="rejected")
-        quote = self.books().get(leg.key)
+        quote = self.book(leg.key)
         if quote is None:
             return Fill(ms=ms, ts=ts, note="no book")
         filled, dollars = sweep(ladder(quote, leg.polarity, leg.side), leg.quantity, leg.venue, leg.fee_info, config.FILL_SHARE, limit=leg.limit)
@@ -190,7 +205,7 @@ class PaperExecutor:
         Returns a Fill whose dollars are the proceeds after fees.
         """
         ms, ts = await self.arrive(leg.venue)
-        quote = self.books().get(leg.key)
+        quote = self.book(leg.key)
         if quote is None:
             return Fill(ms=ms, ts=ts)
         filled, dollars = sweep(sell_ladder(quote, leg.polarity, leg.side), quantity, leg.venue, leg.fee_info, config.FILL_SHARE, selling=True)
@@ -277,20 +292,20 @@ class PaperExecutor:
         Undo the excess on the leg holding more, by selling it back on its
         venue or buying the missing amount on the other venue, whichever the
         books say leaves more money. The chosen order is sent like any other.
-        Returns what was done in words, or None when no book allowed anything.
+        Returns what was done in words, or None when no fresh book allowed anything.
         """
         long_leg, short_leg = sorted(legs, key=lambda l: l.held, reverse=True)
         excess = long_leg.held - short_leg.held
         average = long_leg.cost / long_leg.held
-        books = self.books()
+        long_book, short_book = self.book(long_leg.key), self.book(short_leg.key)
         sell_value = buy_value = None
         buyable = 0
-        if books.get(long_leg.key):
-            n, dollars = sweep(sell_ladder(books[long_leg.key], long_leg.polarity, long_leg.side), excess,
+        if long_book:
+            n, dollars = sweep(sell_ladder(long_book, long_leg.polarity, long_leg.side), excess,
                                long_leg.venue, long_leg.fee_info, config.FILL_SHARE, selling=True)
             sell_value = dollars - n * average if n else None
-        if books.get(short_leg.key):
-            levels = ladder(books[short_leg.key], short_leg.polarity, short_leg.side)
+        if short_book:
+            levels = ladder(short_book, short_leg.polarity, short_leg.side)
             # Only what the other venue's balance can pay for.
             buyable = min(excess, int(self.cash[short_leg.venue] // levels[0][0])) if levels else 0
             n, dollars = sweep(levels, buyable, short_leg.venue, short_leg.fee_info, config.FILL_SHARE)

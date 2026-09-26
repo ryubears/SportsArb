@@ -34,10 +34,10 @@ def quick(monkeypatch):
     monkeypatch.setattr(config, "REJECT_PROBABILITY", 0)
 
 
-def executor(tmp_path, latest, log=lambda m: None, start=config.START_BALANCE):
+def executor(tmp_path, latest, log=lambda m: None, start=config.START_BALANCE, clock=lambda: NOW):
     conn = database.connect(tmp_path / "t.sqlite")
     cash = balances.Balances(conn, start)
-    return conn, cash, execute.PaperExecutor(conn, cash, lambda: latest, log, random.Random(1))
+    return conn, cash, execute.PaperExecutor(conn, cash, lambda: latest, log, random.Random(1), clock=clock)
 
 
 def run(ex, after_signal=None, signals=1):
@@ -180,6 +180,34 @@ def test_a_settled_trade_is_not_flattened_any_more(tmp_path, quick):
     assert ex.exposed == {} and ex.tasks == set()
     assert (t["yes_held"], t["no_held"], *settlement) == (50, 0, 50, "2026-09-20T17:40:00+00:00")
     assert [r[0] for r in conn.execute("SELECT reason FROM ledger ORDER BY id")][2:] == ["buy", "payout"]     # No sale after the payout.
+
+
+def test_a_stale_book_is_not_flattened_against(tmp_path, quick):
+    latest = books()
+    clock = [NOW]
+    conn, cash, ex = executor(tmp_path, latest, clock=lambda: clock[0])
+
+    def kalshi_vanishes_and_polymarket_loses_its_bids():
+        latest.pop(("kalshi", "k"))
+        latest[("polymarket_us", "pm")] = Quote("polymarket_us", "pm", NOW, [], [[0.45, 100]])
+
+    run(ex, kalshi_vanishes_and_polymarket_loses_its_bids)
+    assert list(ex.exposed) == [stored(conn)[0]["id"]]              # 50 yes held, no book to flatten against.
+
+    async def at(now):
+        clock[0] = now
+        ex.tick(now)
+        await asyncio.gather(*ex.tasks)
+
+    # Kalshi's book comes back from 17:30, but by 17:32 it has not changed for two minutes, as a closed market's would not.
+    latest.update({("kalshi", "k"): books()[("kalshi", "k")]})
+    asyncio.run(at("2026-09-20T17:32:00+00:00"))
+    assert stored(conn)[0]["no_held"] == 0 and list(ex.exposed) == [stored(conn)[0]["id"]]
+    # Once the book changes again it is fresh, and the rest is flattened against it.
+    latest[("kalshi", "k")] = Quote("kalshi", "k", "2026-09-20T17:32:00+00:00", [[0.53, 100]], [[0.54, 100]])
+    asyncio.run(at("2026-09-20T17:32:00+00:00"))
+    t = stored(conn)[0]
+    assert (t["yes_held"], t["no_held"], t["matched"]) == (50, 50, 50) and ex.exposed == {}
 
 
 def test_rejected_orders_fail_without_a_hedge(tmp_path, quick, monkeypatch):
