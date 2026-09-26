@@ -113,7 +113,10 @@ orders are rejected outright. A leg that filled short is flattened at
 once, by selling the excess back or buying the missing side on the other
 venue, whichever the books say leaves more money, and whatever stays
 exposed is tried again on every tick until it is flat, the bet pays out,
-or the settler settles it. Signals need a net edge of at least five cents
+or the settler settles it. Orders and flattening only trade against a book
+that has changed within the last minute, since a market that has closed
+may stop changing rather than empty its book, and its last book cannot be
+traded. Signals need a net edge of at least five cents
 per contract, and only games being played are traded, so the money comes
 back the same day. Every trade is stored as soon as it is sent and
 updated when it is done.
