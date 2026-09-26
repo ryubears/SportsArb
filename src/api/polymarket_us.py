@@ -1,22 +1,26 @@
 """
 Polymarket US API client.
 
-Two jobs. The query half reads the public events listing on the gateway
+Three jobs. The query half reads the public events listing on the gateway
 host, filtered by sport tag, and turns every open market into a Contract,
-one per market, for the market's long side. The streaming half opens the signed markets
-websocket and keeps a live book per market slug, replacing the whole
-book on every message because the feed sends full snapshots. This is
-the only file that knows Polymarket US field names and message formats.
+one per market, for the market's long side. The trading half reads the
+account's balance and sends signed orders for the live executor. The
+streaming half opens the signed markets websocket and keeps a live book
+per market slug, replacing the whole book on every message because the
+feed sends full snapshots. This is the only file that knows Polymarket
+US field names and message formats.
 
 Requests to the API host must be signed with the account's key. The key
 id and secret live in the data folder, see KEY_ID_FILE and SECRET_KEY_FILE.
 """
 
 import base64
+import functools
 import json
 import time
+from api import orders
 from api.bookstream import BookStream
-from api.http import get_json
+from api.http import RequestFailed, get_json, send_json
 from common.jsonutil import float_or_none
 from common.paths import DATA_DIR
 from common.timeutil import iso
@@ -25,6 +29,7 @@ from db.models import Contract
 
 GATEWAY = "https://gateway.polymarket.us/v1"    # Public catalog of events and markets.
 API = "https://api.polymarket.us/v1"            # Signed requests for books and trading.
+API_PATH = "/v1"                                # API's path, which a signed request's signature covers.
 WS_URL = "wss://api.polymarket.us/v1/ws/markets"
 WS_PATH = "/v1/ws/markets"
 WS_CHUNK = 100          # Market slugs per subscription, the documented maximum.
@@ -101,17 +106,108 @@ def results(event_slugs):
 
 # SIGNING
 
+@functools.cache
+def credentials():
+    """
+    The account's key id and Ed25519 private key, read from the data folder once.
+    """
+    secret = base64.b64decode(SECRET_KEY_FILE.read_text().strip())
+    return KEY_ID_FILE.read_text().strip(), Ed25519PrivateKey.from_private_bytes(secret[:32])
+
+
 def signed_headers(method, path):
     """
     The three headers that authenticate a request. The signature is the
     account's Ed25519 key over the timestamp, method, and path.
     """
-    key_id = KEY_ID_FILE.read_text().strip()
-    secret = base64.b64decode(SECRET_KEY_FILE.read_text().strip())
-    key = Ed25519PrivateKey.from_private_bytes(secret[:32])
+    key_id, key = credentials()
     ts = str(int(time.time() * 1000))
     signature = base64.b64encode(key.sign(f"{ts}{method}{path}".encode())).decode()
     return {"X-PM-Access-Key": key_id, "X-PM-Timestamp": ts, "X-PM-Signature": signature}
+
+
+# TRADING
+
+# The order intent for each action on each outcome. The long side is the contract itself, the short side its other side.
+INTENTS = {("buy", "yes"): "ORDER_INTENT_BUY_LONG", ("sell", "yes"): "ORDER_INTENT_SELL_LONG",
+           ("buy", "no"): "ORDER_INTENT_BUY_SHORT", ("sell", "no"): "ORDER_INTENT_SELL_SHORT"}
+FILL_TYPES = ("EXECUTION_TYPE_FILL", "EXECUTION_TYPE_PARTIAL_FILL")
+
+
+def signed_request(method, path, body=None):
+    """
+    A signed call to the API at a path under API, for example '/account/balances'.
+    """
+    return send_json(method, API + path, signed_headers(method, API_PATH + path), body)
+
+
+def amount(value):
+    """
+    An Amount from the API, {'value': '0.55', 'currency': 'USD'}, as a float, zero when missing.
+    """
+    return float(value["value"]) if value and value.get("value") not in (None, "") else 0.0
+
+
+def price_text(price):
+    """
+    A price as the API takes it, a decimal string without trailing zeros.
+    """
+    return f"{price:.4f}".rstrip("0").rstrip(".")
+
+
+def balance():
+    """
+    Dollars available for trading on the account: the buying power of its dollar balance.
+    """
+    for b in signed_request("GET", "/account/balances").get("balances", []):
+        if b.get("currency", "USD") == "USD":
+            return float(b.get("buyingPower", b.get("currentBalance", 0.0)))
+    return 0.0
+
+
+def order_body(slug, action, outcome, quantity, price):
+    """
+    An immediate or cancel limit order for quantity contracts of one side of
+    a market, at price or better for that side, answered once it has run.
+    The API prices every order on the long side, so a short side price p
+    is sent as 1 - p.
+    """
+    long_price = price if outcome == "yes" else 1 - price
+    return {"marketSlug": slug, "intent": INTENTS[(action, outcome)], "type": "ORDER_TYPE_LIMIT",
+            "price": {"value": price_text(long_price), "currency": "USD"}, "quantity": quantity,
+            "tif": "TIME_IN_FORCE_IMMEDIATE_OR_CANCEL", "manualOrderIndicator": "MANUAL_ORDER_INDICATOR_AUTOMATIC",
+            "synchronousExecution": True}
+
+
+def place_order(slug, action, outcome, quantity, price, client_id):
+    """
+    Send an immediate or cancel limit order and return what came back as an
+    orders.Answer, from the executions the synchronous answer lists. action
+    is 'buy' or 'sell', outcome 'yes' or 'no', and price the worst price per
+    contract accepted for that outcome. Execution prices are the long side's,
+    so a short side fill at p cost 1 - p. The API takes no id of ours, so
+    client_id is only kept in our own orders table.
+    """
+    try:
+        answer = signed_request("POST", "/orders", order_body(slug, action, outcome, quantity, price))
+    except RequestFailed as e:
+        return orders.refused(e) if e.status < 500 else orders.unknown(e)
+    except Exception as e:
+        return orders.unknown(e)
+    executions = answer.get("executions") or []
+    filled, traded, fees = 0, 0.0, 0.0
+    for e in executions:
+        if e.get("type") not in FILL_TYPES:
+            continue
+        shares, long_price = int(float(e.get("lastShares") or 0)), amount(e.get("lastPx"))
+        filled += shares
+        traded += shares * (long_price if outcome == "yes" else 1 - long_price)
+        fees += amount(e.get("commissionNotionalCollected"))
+    rejected = next((e for e in executions if e.get("type") == "EXECUTION_TYPE_REJECTED"), None)
+    if rejected and not filled:
+        return orders.Answer(answer.get("id"), "rejected", 0, 0.0, 0.0, rejected.get("orderRejectReason") or rejected.get("text"), answer)
+    paid = traded + fees if action == "buy" else traded - fees
+    return orders.Answer(answer.get("id"), orders.status(filled, quantity), filled, paid, fees, None, answer)
 
 
 # STREAMING

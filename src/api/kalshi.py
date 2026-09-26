@@ -1,21 +1,25 @@
 """
 Kalshi API client.
 
-Two jobs. The query half walks sports series to events to markets on the
-public API and turns every open market into a Contract. The streaming
-half opens one websocket with a signed API key, subscribes to order book
-updates, and keeps a live book for each ticker restated from the Yes side
-so it matches Polymarket US's shape. Tickers can be added and removed while
-the connection runs. This is the only file that knows Kalshi's field
-names and message formats.
+Three jobs. The query half walks sports series to events to markets on
+the public API and turns every open market into a Contract. The trading
+half reads the account's balance and sends signed orders for the live
+executor. The streaming half opens one websocket with a signed API key,
+subscribes to order book updates, and keeps a live book for each ticker
+restated from the Yes side so it matches Polymarket US's shape. Tickers
+can be added and removed while the connection runs. This is the only file
+that knows Kalshi's field names and message formats.
 """
 
 import asyncio
 import base64
+import functools
 import json
 import time
+import urllib.parse
+from api import orders
 from api.bookstream import BookStream, Reconnect
-from api.http import get_json
+from api.http import RequestFailed, get_json, send_json
 from common.jsonutil import float_or_none
 from common.paths import DATA_DIR
 from common.timeutil import iso
@@ -24,6 +28,7 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from db.models import Contract
 
 BASE = "https://api.elections.kalshi.com/trade-api/v2"
+BASE_PATH = "/trade-api/v2"     # BASE's path, which a signed request's signature covers.
 SLEEP = 0.12   # Seconds between paged calls, to stay under the public rate limit.
 WS_URL = "wss://api.elections.kalshi.com/trade-api/ws/v2"
 WS_PATH = "/trade-api/ws/v2"
@@ -150,14 +155,21 @@ def results(tickers):
 
 # SIGNING
 
+@functools.cache
+def credentials():
+    """
+    The account's key id and RSA private key, read from the data folder once.
+    """
+    return KEY_ID_FILE.read_text().strip(), serialization.load_pem_private_key(PRIVATE_KEY_FILE.read_bytes(), password=None)
+
+
 def signed_headers(method, path):
     """
     The three headers that authenticate a request. Kalshi wants the timestamp,
     the method, and the path signed with the account's RSA key. The websocket
     handshake and the trading endpoints use the same scheme.
     """
-    key_id = KEY_ID_FILE.read_text().strip()
-    key = serialization.load_pem_private_key(PRIVATE_KEY_FILE.read_bytes(), password=None)
+    key_id, key = credentials()
     ts = str(int(time.time() * 1000))
     message = (ts + method + path).encode()
     signature = key.sign(
@@ -170,6 +182,92 @@ def signed_headers(method, path):
         "KALSHI-ACCESS-TIMESTAMP": ts,
         "KALSHI-ACCESS-SIGNATURE": base64.b64encode(signature).decode(),
     }
+
+
+# TRADING
+
+def signed_request(method, path, body=None, params=None):
+    """
+    A signed call to the trading API at a path under BASE, for example
+    '/portfolio/balance'. The signature covers the path without its query.
+    """
+    url = BASE + path + (f"?{urllib.parse.urlencode(params)}" if params else "")
+    return send_json(method, url, signed_headers(method, BASE_PATH + path), body)
+
+
+def dollars(value):
+    """
+    A fixed point dollar string from the API as a float, zero when missing.
+    """
+    return float(value) if value not in (None, "") else 0.0
+
+
+def balance():
+    """
+    Dollars available for trading on the account.
+    """
+    return signed_request("GET", "/portfolio/balance")["balance"] / 100
+
+
+def order_body(ticker, action, outcome, quantity, price, client_id):
+    """
+    An immediate or cancel limit order for quantity contracts of one side of
+    a market, at price or better for that side. A sale is reduce only, so it
+    can close what is held but never open the other side.
+    """
+    body = {"ticker": ticker, "client_order_id": client_id, "action": action, "side": outcome, "count": quantity,
+            "type": "limit", "time_in_force": "immediate_or_cancel", f"{outcome}_price_dollars": f"{price:.4f}"}
+    if action == "sell":
+        body["reduce_only"] = True
+    return body
+
+
+def fills(order_id):
+    """
+    The fills of one order, as [(contracts, price)] with the price of the side the order traded.
+    """
+    out = []
+    for f in signed_request("GET", "/portfolio/fills", params={"order_id": order_id}).get("fills", []):
+        side = f["side"]
+        price = f.get(f"{side}_price_dollars") or f.get(f"{side}_price_fixed")
+        out.append((int(f["count"]), float(price) if price is not None else f[f"{side}_price"] / 100))
+    return out
+
+
+def place_order(ticker, action, outcome, quantity, price, client_id):
+    """
+    Send an immediate or cancel limit order and return what came back as an
+    orders.Answer. action is 'buy' or 'sell', outcome 'yes' or 'no', and
+    price the worst price per contract accepted for that outcome. What an
+    order traded at is read from its fills, which give each fill's price
+    for the side traded, and its fees from the order. When the fills are not
+    all visible yet, a buy is costed from the order's fill cost and a sale
+    at its limit, the least it can have fetched.
+    """
+    try:
+        order = signed_request("POST", "/portfolio/orders", order_body(ticker, action, outcome, quantity, price, client_id))["order"]
+    except RequestFailed as e:
+        return orders.refused(e) if e.status < 500 else orders.unknown(e)
+    except Exception as e:
+        return orders.unknown(e)
+    filled = int(order.get("fill_count") or 0)
+    fees = dollars(order.get("taker_fees_dollars")) + dollars(order.get("maker_fees_dollars"))
+    response = {"order": order}
+    traded = 0.0
+    if filled:
+        try:
+            found = fills(order["order_id"])
+        except Exception as e:
+            found, response["fills_error"] = [], repr(e)
+        response["fills"] = found
+        if sum(n for n, _ in found) == filled:
+            traded = sum(n * p for n, p in found)
+        elif action == "buy":
+            traded = dollars(order.get("taker_fill_cost_dollars")) + dollars(order.get("maker_fill_cost_dollars"))
+        else:
+            traded = filled * price
+    paid = traded + fees if action == "buy" else traded - fees
+    return orders.Answer(order.get("order_id"), orders.status(filled, quantity), filled, paid, fees, None, response)
 
 
 # STREAMING
