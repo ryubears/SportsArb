@@ -161,12 +161,14 @@ def test_rejected_orders_fail_without_a_hedge(tmp_path, quick, monkeypatch):
     assert cash.amounts == pytest.approx({"polymarket_us": 10000, "kalshi": 10000})
 
 
-def test_signal_is_refused_for_thin_edges_and_slow_payouts(tmp_path, quick):
+def test_signal_is_refused_for_thin_edges_and_games_not_in_play(tmp_path, quick):
     latest = books()
     conn, cash, ex = executor(tmp_path, latest)
     assert ex.signal(PAIR, YES, NO, 0.015, 100, FEES, NOW) is False
     future = dict(YES, start_time=None, close_time="2027-02-14T00:00:00+00:00")
-    assert ex.signal(PAIR, future, dict(NO, start_time=None, close_time="2027-02-14T00:00:00+00:00"), 0.05, 100, FEES, NOW) is False
+    assert ex.signal(PAIR, future, dict(NO, start_time=None, close_time="2027-02-14T00:00:00+00:00"), 0.05, 100, FEES, NOW) is False   # A future.
+    assert ex.signal(PAIR, YES, NO, 0.08, 100, FEES, "2026-09-20T16:59:00+00:00") is False        # Before kickoff.
+    assert ex.signal(PAIR, YES, NO, 0.08, 100, FEES, "2026-09-20T20:16:00+00:00") is False        # After the final whistle.
     assert ex.tasks == set() and stored(conn) == []
 
 

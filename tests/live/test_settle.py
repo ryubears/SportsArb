@@ -57,6 +57,24 @@ def test_settlement_pays_the_winning_leg_only_and_records_each_leg(tmp_path):
     assert s.summary() == "settled: 1 trades for +4.00$, 0 still open"
 
 
+def test_a_trade_is_checked_from_kickoff_when_its_contracts_have_a_start_time(tmp_path):
+    from db.models import Contract
+    conn = database.connect(tmp_path / "t.sqlite")
+    cash = balances.Balances(conn)
+    s = settle.Settler(conn, cash, lambda m: None)
+    database.upsert_contracts(conn, [Contract(venue=v, contract_id=c, market_id=c, event_id="e", series_id=None, sport="nfl", event_title=None,
+                                              title="t", outcome="Yes", market_type=None, line=None, rules=None, start_time=KICKOFF,
+                                              close_time=PAYS_AT, fee_info=None) for v, c in (("polymarket_us", "pm"), ("kalshi", "k"))], KICKOFF)
+    filled_trade(conn)
+    assert database.load_open_trades(conn)[0].starts_at == KICKOFF
+    results = {("polymarket_us", "pm"): ("yes", "2026-09-20T17:20:00+00:00"), ("kalshi", "k"): ("yes", "2026-09-20T17:19:00+00:00")}
+    settled(s, "2026-09-20T16:59:00+00:00", results)                  # Before kickoff, not looked at.
+    assert conn.execute("SELECT settled_at FROM trades").fetchone()[0] is None
+    settled(s, "2026-09-20T17:30:00+00:00", results)                  # During the game, a decided prop settles at once.
+    assert conn.execute("SELECT settled_at FROM trades").fetchone()[0] == "2026-09-20T17:20:00+00:00"
+    assert cash["polymarket_us"] == pytest.approx(10050)
+
+
 def test_a_trade_waits_until_every_held_leg_has_a_result(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
     s = settle.Settler(conn, balances.Balances(conn), lambda m: None)

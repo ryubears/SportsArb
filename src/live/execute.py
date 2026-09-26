@@ -17,8 +17,9 @@ sells the excess back on its own venue or buys the missing amount on the
 other venue, whichever leaves more money, and books the result with fees.
 What it cannot flatten stays on a list and is tried again on every tick,
 against the books as they are then, until it is flat or the bet pays out.
-Only pairs that pay out within RESOLVE_HOURS are traded, so capital turns
-over daily. Every trade is stored in the trades table as soon as it is
+Only games being played are traded, so capital turns over the same day,
+and a Allocator from allocate.py caps each trade so the money covers every
+game in play. Every trade is stored in the trades table as soon as it is
 sent and updated when it is done, and every dollar moved goes through
 the shared Balances. Settling what was bought is settle.py's job, and
 keeping the venues funded is rebalance.py's.
@@ -27,18 +28,17 @@ keeping the venues funded is rebalance.py's.
 import asyncio
 import math
 import random
-from common.timeutil import now_iso, seconds_between
+from common.timeutil import now_iso
 from db import database
 from db.models import Ledger, Trade
 from live import fees
+from live.allocate import in_play
 from live.pricing import depth, ladder, trade_words
 from live.scan import resolution_time
 
 MIN_EDGE = 0.05             # Net dollars per contract at the top before orders are sent, and the floor for the deeper levels they sweep.
                             # In-game, 2 to 3 cent edges lost money after hedging.
-MAX_QUANTITY = 50           # Contracts per trade. Both legs together cost about a dollar a contract, so this caps a trade near 50 dollars,
-                            # which keeps a full slate of Sunday games within the two 10,000 dollar balances.
-RESOLVE_HOURS = 24          # Only pairs paying out within this many hours are traded.
+MAX_QUANTITY = 500          # Contracts per trade without a allocator. With one, allocate.py sets the cap per trade.
 FILL_SHARE = 0.5            # The share of visible size at a level assumed to be ours. Other takers get the rest.
 REJECT_PROBABILITY = 0.03   # The share of orders a venue rejects outright, for rate limits and errors.
 # Signal to fill latency per venue, as median milliseconds and the sigma of a lognormal draw. From us-east-1 a signed
@@ -83,11 +83,12 @@ class PaperExecutor:
     books is a function returning the newest quotes keyed by (venue, contract_id).
     """
 
-    def __init__(self, conn, cash, books, log=print, rng=None):
+    def __init__(self, conn, cash, books, log=print, rng=None, allocator=None):
         self.conn = conn
         self.cash = cash
         self.books = books
         self.log = log
+        self.allocator = allocator
         self.rng = rng or random.Random()
         self.tasks = set()          # Trades in flight, and the retry of exposed ones while it runs.
         self.done = []              # Trades finished since the last summary.
@@ -100,8 +101,8 @@ class PaperExecutor:
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """
         Called by the scanner when a pair shows an edge. Sends the two legs
-        when the edge, the payout time, and the balances allow. Returns True
-        when orders were sent, so the scanner sends no more for this episode.
+        when the edge, the game being in play, and the balances allow. Returns
+        True when orders were sent, so the scanner sends no more for this episode.
         The scanner's size counts every level with a positive edge. The legs
         are sized here from the levels that keep MIN_EDGE instead, and each
         limit is set at the deepest of them. The cost is reserved here,
@@ -110,9 +111,10 @@ class PaperExecutor:
         """
         if edge < MIN_EDGE:
             return False
-        pays_at = max((t for t in (resolution_time(m["start_time"], m["close_time"]) for m in (yes, no)) if t), default=None)
-        if not pays_at or seconds_between(now, pays_at) > RESOLVE_HOURS * 3600:
+        kickoff = max((m["start_time"] for m in (yes, no) if m["start_time"]), default=None)
+        if not kickoff or not in_play(kickoff, now):
             return False
+        pays_at = max(resolution_time(m["start_time"], m["close_time"]) for m in (yes, no))
         books = self.books()
         legs = []
         for side, member in (("yes", yes), ("no", no)):
@@ -122,13 +124,14 @@ class PaperExecutor:
         legs[0]["limit"], legs[1]["limit"], available = depth(legs[0]["levels"], legs[1]["levels"],
                                                               (yes["venue"], legs[0]["fee_info"]), (no["venue"], legs[1]["fee_info"]), MIN_EDGE)
         # Ask for the share of the visible size we expect to get, so an unchanged book fills in full.
-        quantity = int(min(available * FILL_SHARE, MAX_QUANTITY, *(self.cash[l["member"]["venue"]] // l["limit"] for l in legs))) if available else 0
+        cap = self.allocator.cap(pair, now) if self.allocator else MAX_QUANTITY
+        quantity = int(min(available * FILL_SHARE, cap, *(self.cash[l["member"]["venue"]] // l["limit"] for l in legs))) if available else 0
         if quantity < 1:
             return False
         for l in legs:
             l["quantity"] = quantity
             self.cash.reserve(l["member"]["venue"], quantity * l["limit"])
-        trade = Trade(pair_id=pair["id"], label=pair["label"], trade=trade_words(yes, no), signal_ts=now, edge=edge, quantity=quantity,
+        trade = Trade(pair_id=pair["id"], label=pair["label"], trade=trade_words(yes, no), signal_ts=now, edge=edge, quantity=quantity, cap=cap,
                       yes_venue=yes["venue"], yes_contract=yes["contract_id"], yes_polarity=yes["polarity"], yes_limit=legs[0]["limit"],
                       no_venue=no["venue"], no_contract=no["contract_id"], no_polarity=no["polarity"], no_limit=legs[1]["limit"], pays_at=pays_at)
         database.insert_trade(self.conn, trade)
@@ -350,4 +353,4 @@ class PaperExecutor:
         counts = {s: sum(1 for t in recent if t.status == s) for s in ("filled", "partial", "failed")}
         return (f"paper: {len(recent)} trades ({counts['filled']} filled, {counts['partial']} partial, {counts['failed']} failed), "
                 f"locked in {sum(t.profit for t in recent):.2f}$, hedges {sum(t.hedge_pnl for t in recent):+.2f}$; "
-                f"total {self.totals['trades']} trades, {self.totals['profit'] + self.totals['hedge']:.2f}$; balances {self.cash.words()}")
+                f"total {self.totals['trades']} trades, {self.totals['profit'] + self.totals['hedge']:.2f}$; balances {self.cash.summary()}")

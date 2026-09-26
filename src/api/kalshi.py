@@ -29,6 +29,7 @@ WS_URL = "wss://api.elections.kalshi.com/trade-api/ws/v2"
 WS_PATH = "/trade-api/ws/v2"
 KEY_ID_FILE = DATA_DIR / "kalshi_key_id.txt"
 PRIVATE_KEY_FILE = DATA_DIR / "kalshi_private_key.pem"
+RESULTS_BATCH = 50   # Tickers per markets call when looking up results.
 
 
 # QUERY
@@ -66,20 +67,6 @@ def fetch_events(series_ticker):
         "series_ticker": series_ticker, "status": "open",
         "with_nested_markets": "true", "limit": 200,
     }, "events")
-
-
-def results(tickers):
-    """
-    Settlement results for the tickers, as {ticker: (result, settled_at)} with
-    result 'yes' or 'no'. Markets not yet finalized are left out.
-    """
-    out = {}
-    for ticker in tickers:
-        m = get_json(f"{BASE}/markets/{ticker}", {}).get("market") or {}
-        if m.get("status") == "finalized" and m.get("result") in ("yes", "no"):
-            out[ticker] = (m["result"], iso(m.get("settlement_ts")))
-        time.sleep(SLEEP)
-    return out
 
 
 def close_time(m):
@@ -140,6 +127,25 @@ def contracts(sport, prefixes, tickers=()):
                     fee_info=fee_info,
                 ))
     return result
+
+
+def results(tickers):
+    """
+    Settlement results for the tickers, as {ticker: (result, settled_at)} with
+    result 'yes' or 'no'. Markets not yet finalized are left out. The
+    markets endpoint takes a list of tickers, so this costs one call per
+    RESULTS_BATCH tickers.
+    """
+    out = {}
+    tickers = sorted(set(tickers))
+    for i in range(0, len(tickers), RESULTS_BATCH):
+        batch = tickers[i:i + RESULTS_BATCH]
+        for m in get_json(f"{BASE}/markets", {"tickers": ",".join(batch), "limit": len(batch)}).get("markets", []):
+            if m.get("status") == "finalized" and m.get("result") in ("yes", "no"):
+                out[m["ticker"]] = (m["result"], iso(m.get("settlement_ts")))
+        if i + RESULTS_BATCH < len(tickers):
+            time.sleep(SLEEP)
+    return out
 
 
 # SIGNING

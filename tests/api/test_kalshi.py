@@ -36,3 +36,20 @@ def test_stream_asks_to_reconnect_on_a_sequence_gap():
     stream.handle('{"type": "ok", "seq": 2, "msg": {}}')
     with pytest.raises(bookstream.Reconnect):
         stream.handle('{"type": "ok", "seq": 4, "msg": {}}')
+
+
+def test_results_are_looked_up_in_batches_and_only_finalized_markets_count(monkeypatch):
+    calls = []
+
+    def fake_get_json(url, params=None, retries=3):
+        calls.append(params["tickers"])
+        markets = [{"ticker": t, "status": "finalized", "result": "yes", "settlement_ts": "2026-09-25T03:23:29.0724Z"} for t in params["tickers"].split(",")]
+        markets[0]["status"] = "active"
+        return {"markets": markets}
+
+    monkeypatch.setattr(kalshi, "get_json", fake_get_json)
+    monkeypatch.setattr(kalshi, "RESULTS_BATCH", 2)
+    monkeypatch.setattr(kalshi.time, "sleep", lambda s: None)
+    out = kalshi.results(["c", "a", "b", "a"])
+    assert calls == ["a,b", "c"]                                         # Sorted, deduplicated, two per call.
+    assert out == {"b": ("yes", "2026-09-25T03:23:29.072400+00:00")}    # 'a' and 'c' were first in their batch and still active.

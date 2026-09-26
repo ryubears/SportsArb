@@ -162,8 +162,10 @@ class Trade:
     no_payout: float | None = None
     no_settled_at: str | None = None
     settled_at: str | None = None   # When both legs had resolved and the payouts were booked.
+    cap: int | None = None  # The allocator's cap on contracts per trade when this one was sent.
     id: int | None = None   # The row id once stored.
     label: str | None = None    # The pair's label for log lines, read from the pairs table rather than stored here.
+    starts_at: str | None = None    # Kickoff of the game behind the trade, read from the contracts table, for the settler.
 
 
 @dataclass

@@ -33,7 +33,7 @@ from catalog import pipeline
 from common.log import log
 from common.timeutil import now_iso
 from db import database
-from live import balances, execute, rebalance, scan, settle
+from live import allocate, balances, execute, rebalance, scan, settle
 from live.record import Recorder, load_targets
 from live.streams import Streams
 
@@ -60,7 +60,8 @@ class Session:
         self.streams = Streams(self.recorder)
         trading = with_scanner and with_trading
         cash = balances.Balances(conn) if trading else None
-        self.executor = execute.PaperExecutor(conn, cash, lambda: self.recorder.latest, log) if trading else None
+        self.allocator = allocate.Allocator(conn, cash) if trading else None
+        self.executor = execute.PaperExecutor(conn, cash, lambda: self.recorder.latest, log, allocator=self.allocator) if trading else None
         self.settler = settle.Settler(conn, cash, log) if trading else None
         self.rebalancer = rebalance.Rebalancer(conn, cash, log) if trading else None
         self.scanner = scan.Scanner(conn, sport, log, self.executor.signal if self.executor else None) if with_scanner else None
@@ -107,6 +108,9 @@ class Session:
         log(f"subscriptions {self.streams.update(load_targets(self.conn, self.sport))}")
         if self.scanner:
             self.scanner.reload()
+        if self.allocator:
+            self.allocator.reload()
+            log(self.allocator.summary(now_iso()))
 
     def summaries(self):
         """
@@ -117,6 +121,7 @@ class Session:
         if self.executor:
             log(self.executor.summary())
             log(self.settler.summary())
+            log(self.allocator.summary(now_iso()))
             if self.rebalancer.summary():
                 log(self.rebalancer.summary())
 

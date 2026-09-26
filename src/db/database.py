@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS trades (
     signal_ts      TEXT NOT NULL,
     edge           REAL NOT NULL,   -- Net dollars per contract at the signal.
     quantity       INTEGER NOT NULL,   -- Contracts wanted on each leg.
+    cap            INTEGER,            -- The allocator's cap on contracts per trade when this one was sent.
     yes_venue      TEXT NOT NULL,
     yes_contract   TEXT NOT NULL,
     yes_polarity   TEXT NOT NULL,   -- The side the contract pays on, so settlement knows whether the leg won.
@@ -220,6 +221,8 @@ def migrate(conn):
             running[venue] = running.get(venue, BALANCE) + amount
             conn.execute("UPDATE ledger SET balance = ? WHERE id = ?", (running[venue], row_id))
     trade_columns = [r[1] for r in conn.execute("PRAGMA table_info(trades)")]
+    if trade_columns and "cap" not in trade_columns:
+        conn.execute("ALTER TABLE trades ADD COLUMN cap INTEGER")
     if trade_columns and "yes_result" not in trade_columns:
         for column, kind in (("yes_result", "TEXT"), ("yes_payout", "REAL"), ("yes_settled_at", "TEXT"),
                              ("no_result", "TEXT"), ("no_payout", "REAL"), ("no_settled_at", "TEXT")):
@@ -519,12 +522,12 @@ def insert_trade(conn, t):
     Append a finished paper Trade and return its id.
     """
     cur = conn.execute("""
-        INSERT INTO trades (pair_id, trade, signal_ts, edge, quantity,
+        INSERT INTO trades (pair_id, trade, signal_ts, edge, quantity, cap,
                             yes_venue, yes_contract, yes_polarity, yes_limit, yes_filled, yes_cost, yes_latency_ms, yes_fill_ts,
                             no_venue, no_contract, no_polarity, no_limit, no_filled, no_cost, no_latency_ms, no_fill_ts,
                             yes_held, no_held, matched, profit, hedge, hedge_pnl, status, pays_at, settled_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    """, (t.pair_id, t.trade, t.signal_ts, t.edge, t.quantity,
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, (t.pair_id, t.trade, t.signal_ts, t.edge, t.quantity, t.cap,
           t.yes_venue, t.yes_contract, t.yes_polarity, t.yes_limit, t.yes_filled, t.yes_cost, t.yes_latency_ms, t.yes_fill_ts,
           t.no_venue, t.no_contract, t.no_polarity, t.no_limit, t.no_filled, t.no_cost, t.no_latency_ms, t.no_fill_ts,
           t.yes_held, t.no_held, t.matched, t.profit, t.hedge, t.hedge_pnl, t.status, t.pays_at, t.settled_at))
@@ -549,10 +552,14 @@ def update_trade(conn, t):
 
 def load_open_trades(conn):
     """
-    Trades that are done, still hold contracts, and have not settled, with their pair's label for log lines.
+    Trades that are done, still hold contracts, and have not settled, with
+    their pair's label for log lines and the kickoff of their game, if any.
     """
     return [Trade(**dict(r)) for r in conn.execute("""
-        SELECT t.*, p.label FROM trades t JOIN pairs p ON p.id = t.pair_id
+        SELECT t.*, p.label,
+               (SELECT MAX(c.start_time) FROM contracts c
+                WHERE (c.venue = t.yes_venue AND c.contract_id = t.yes_contract) OR (c.venue = t.no_venue AND c.contract_id = t.no_contract)) AS starts_at
+        FROM trades t JOIN pairs p ON p.id = t.pair_id
         WHERE t.status != 'sent' AND t.settled_at IS NULL AND t.yes_held + t.no_held > 0 ORDER BY t.id""")]
 
 

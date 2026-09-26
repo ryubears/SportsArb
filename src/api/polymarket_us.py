@@ -34,21 +34,6 @@ KEY_ID_FILE = DATA_DIR / "polymarket_us_key_id.txt"
 SECRET_KEY_FILE = DATA_DIR / "polymarket_us_secret_key.txt"
 
 
-# SIGNING
-
-def signed_headers(method, path):
-    """
-    The three headers that authenticate a request. The signature is the
-    account's Ed25519 key over the timestamp, method, and path.
-    """
-    key_id = KEY_ID_FILE.read_text().strip()
-    secret = base64.b64decode(SECRET_KEY_FILE.read_text().strip())
-    key = Ed25519PrivateKey.from_private_bytes(secret[:32])
-    ts = str(int(time.time() * 1000))
-    signature = base64.b64encode(key.sign(f"{ts}{method}{path}".encode())).decode()
-    return {"X-PM-Access-Key": key_id, "X-PM-Timestamp": ts, "X-PM-Signature": signature}
-
-
 # QUERY
 
 def fetch_events(tag_slug, page_size=500):
@@ -62,22 +47,6 @@ def fetch_events(tag_slug, page_size=500):
         if len(page) < page_size:
             return events
         offset += page_size
-
-
-def results(event_slugs):
-    """
-    Settlement results for every market on the events, as {market slug:
-    (result, settled_at)} with result 'yes' when the long side paid out and
-    'no' when it did not. Markets not yet resolved are left out.
-    """
-    out = {}
-    for slug in set(event_slugs):
-        for event in get_json(f"{GATEWAY}/events", {"slug": slug}).get("events", []):
-            for m in event.get("markets", []):
-                long_side = next((s for s in m.get("marketSides", []) if s.get("long")), None)
-                if m.get("status") == "MARKET_STATUS_RESOLVED" and long_side and long_side.get("price") in ("0", "1"):
-                    out[m["slug"]] = ("yes" if long_side["price"] == "1" else "no", iso(m.get("endDate")))
-    return out
 
 
 def contracts(sport, tags):
@@ -112,6 +81,37 @@ def contracts(sport, tags):
                 fee_info={"feeCoefficient": m.get("feeCoefficient")},
             ))
     return result
+
+
+def results(event_slugs):
+    """
+    Settlement results for every market on the events, as {market slug:
+    (result, settled_at)} with result 'yes' when the long side paid out and
+    'no' when it did not. Markets not yet resolved are left out.
+    """
+    out = {}
+    for slug in set(event_slugs):
+        for event in get_json(f"{GATEWAY}/events", {"slug": slug}).get("events", []):
+            for m in event.get("markets", []):
+                long_side = next((s for s in m.get("marketSides", []) if s.get("long")), None)
+                if m.get("status") == "MARKET_STATUS_RESOLVED" and long_side and long_side.get("price") in ("0", "1"):
+                    out[m["slug"]] = ("yes" if long_side["price"] == "1" else "no", iso(m.get("endDate")))
+    return out
+
+
+# SIGNING
+
+def signed_headers(method, path):
+    """
+    The three headers that authenticate a request. The signature is the
+    account's Ed25519 key over the timestamp, method, and path.
+    """
+    key_id = KEY_ID_FILE.read_text().strip()
+    secret = base64.b64decode(SECRET_KEY_FILE.read_text().strip())
+    key = Ed25519PrivateKey.from_private_bytes(secret[:32])
+    ts = str(int(time.time() * 1000))
+    signature = base64.b64encode(key.sign(f"{ts}{method}{path}".encode())).decode()
+    return {"X-PM-Access-Key": key_id, "X-PM-Timestamp": ts, "X-PM-Signature": signature}
 
 
 # STREAMING

@@ -19,7 +19,7 @@ def test_balances_follow_reservations_and_ledger_entries_and_survive_a_restart(t
     cash.book(Ledger("2026-09-20T21:00:00+00:00", "polymarket_us", 50.0, "payout", 1))
     assert cash.amounts == pytest.approx({"kalshi": 9976.5, "polymarket_us": 10050.0})
     assert (cash.richest(), cash.poorest(), cash.average()) == ("polymarket_us", "kalshi", pytest.approx(10013.25))
-    assert cash.words() == "kalshi 9,976$, polymarket_us 10,050$"
+    assert cash.summary() == "kalshi 9,976$, polymarket_us 10,050$"
     assert [tuple(r) for r in conn.execute("SELECT venue, amount, balance FROM ledger ORDER BY id")] == [
         ("kalshi", -23.5, 9976.5), ("polymarket_us", 50.0, 10050.0)]
     again = balances.Balances(conn)                                 # The newest entry per venue is the balance after a restart.

@@ -1,10 +1,15 @@
 """
 Settle paper trades once their contracts have resolved.
 
-Every SETTLE_SECONDS the settler looks for trades past their payout time,
-asks each venue how the held contracts resolved, pays the winning legs a
-dollar a contract through the shared Balances, and writes each leg's
-result and payout on the trade. A trade settles only once every held leg
+The settler keeps asking the venues how the held contracts of open trades
+resolved, from the moment their game kicks off, since Kalshi settles a
+prop as soon as it is decided and both venues settle the rest within
+half an hour of the final whistle. A trade with no game behind it is
+checked from its payout time. Each pass costs one Kalshi call per fifty
+tickers and one Polymarket US call per event, and the next pass starts
+SETTLE_SECONDS after the previous one began. Winning legs are paid a
+dollar a contract through the shared Balances and each leg's result and
+payout is written on the trade. A trade settles only once every held leg
 has a result, so a venue that is slow to resolve just delays it.
 """
 
@@ -13,7 +18,7 @@ from api import kalshi, polymarket_us
 from db import database
 from db.models import Ledger
 
-SETTLE_SECONDS = 600    # How often trades past their payout time are checked with the venues.
+SETTLE_SECONDS = 30     # Seconds between passes over the open trades whose game has started.
 RESULTS = {"kalshi": kalshi.results, "polymarket_us": polymarket_us.results}    # How each venue reports how a contract resolved.
 
 
@@ -42,10 +47,10 @@ class Settler:
 
     async def settle(self, now):
         """
-        Ask the venues how the contracts of trades past their payout time
-        resolved, pay the winning legs, and write each leg's result on the trade.
+        Ask the venues how the contracts of open trades whose game has
+        started resolved, pay the winning legs, and write each leg's result on the trade.
         """
-        due = [t for t in database.load_open_trades(self.conn) if t.pays_at <= now]
+        due = [t for t in database.load_open_trades(self.conn) if (t.starts_at or t.pays_at) <= now]
         if not due:
             return
         wanted = {}
@@ -85,7 +90,7 @@ class Settler:
 
     def tick(self, now, clock):
         """
-        Once a second from the recorder loop, with the wall clock in seconds. Starts a check when one is due.
+        Once a second from the session, with the wall clock in seconds. Starts a pass when one is due and none is running.
         """
         if clock - self.last_check >= SETTLE_SECONDS and (self.running is None or self.running.done()):
             self.last_check = clock

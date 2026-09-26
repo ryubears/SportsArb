@@ -57,7 +57,7 @@ class Balances:
     def average(self):
         return sum(self.amounts.values()) / len(self.amounts)
 
-    def words(self):
+    def summary(self):
         """
         The balances in one phrase, for log lines.
         """

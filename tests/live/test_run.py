@@ -54,4 +54,4 @@ def test_session_logs_every_components_summary_when_due_and_on_close(tmp_path, m
     def heads(out):
         return [line[9:].split(":")[0].split(",")[0] for line in out.splitlines()]      # Past the timestamp.
     on_tick, on_close = asyncio.run(scenario())
-    assert heads(on_tick) == heads(on_close) == ["scanner", "paper", "settled", "tracking 0 books"]
+    assert heads(on_tick) == heads(on_close) == ["scanner", "paper", "settled", "capital", "tracking 0 books"]
