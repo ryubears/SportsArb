@@ -18,7 +18,9 @@ Everything lives in `src/` and reads or writes one SQLite file,
 `data/sportsarb.sqlite`. The tables follow the pipeline in order:
 contracts, bets, pairs, quotes, gaps, opportunities, trades, ledger,
 transfers. Every table has a model in `db/models.py` and its
-schema in `db/database.py`.
+schema in `db/schema.sql`. Changes to a table for databases that
+already exist are numbered steps in `db/migrations.py`, and
+`db/database.py` holds the reads and writes.
 
 ### Catalog (`src/catalog`)
 
@@ -265,7 +267,7 @@ src/
   api/        venue clients and the shared websocket book stream
   catalog/    fetch, classify (one parser per venue), match, pipeline
   common/     paths, time helpers, json helpers, the venue list, the logger
-  db/         models and the SQLite schema
+  db/         models, the SQLite schema and its migrations, reads and writes
   live/       run, record, streams, scan, pricing, fees, execute, allocate, gametime, balances, settle, rebalance
   tools/      summary report
 tests/        mirrors src, run with pytest, configured in pyproject.toml
