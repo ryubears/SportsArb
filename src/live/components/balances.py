@@ -19,8 +19,11 @@ from live.helper import config
 
 class Balances:
     """
-    The cash on each venue, and the ledger behind it.
+    The paper cash on each venue, and the ledger behind it. The live
+    accounts in accounts.py have the same shape, read from the venues.
     """
+
+    mode = "paper"      # The trades this money pays for, so the settler, allocator, and rebalancer read only those.
 
     def __init__(self, conn, start=None):
         self.conn = conn

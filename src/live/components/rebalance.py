@@ -45,7 +45,7 @@ class Rebalancer:
         today = now[:10]
         weekly = datetime.fromisoformat(now).weekday() == config.REBALANCE_WEEKDAY and self.last_check != today
         low = self.cash[poor] < config.REBALANCE_FLOOR and excess > 0
-        if not (weekly or low) or database.has_open_trades(self.conn):
+        if not (weekly or low) or database.has_open_trades(self.conn, self.cash.mode):
             return          # Nothing is due, or money is still out in trades. The weekly check waits for them too.
         reason = None
         if weekly:

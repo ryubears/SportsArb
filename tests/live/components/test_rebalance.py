@@ -57,7 +57,7 @@ def open_trade(conn):
     A filled trade whose contracts have not settled yet.
     """
     conn.execute("INSERT INTO pairs (label, kind, venues, contracts, flags, matched_at) VALUES ('p', 'game_winner', '', 2, '[]', 'm')")
-    t = Trade(pair_id=1, trade="t", signal_ts="2026-09-22T00:30:00+00:00", edge=0.05, quantity=5, yes_venue="polymarket_us",
+    t = Trade(mode="paper", pair_id=1, trade="t", signal_ts="2026-09-22T00:30:00+00:00", edge=0.05, quantity=5, yes_venue="polymarket_us",
               yes_contract="pm", yes_polarity="yes", yes_limit=0.45, no_venue="kalshi", no_contract="k", no_polarity="yes",
               no_limit=0.47, pays_at="2026-09-22T04:15:00+00:00", yes_held=5, no_held=5, status="filled")
     database.insert_trade(conn, t)
@@ -72,7 +72,7 @@ def test_the_tuesday_check_waits_for_monday_nights_trades_to_settle(tmp_path):
     t = open_trade(conn)                                            # Monday night's game, still out after midnight UTC.
     r.rebalance("2026-09-22T01:00:00+00:00")
     assert database.load_transfers(conn) == []
-    database.insert_settlement(conn, Settlement(t.id, "2026-09-22T04:20:00+00:00"))
+    database.insert_settlement(conn, Settlement(t.id, "2026-09-22T04:20:00+00:00", mode="paper"))
     r.rebalance("2026-09-22T04:30:00+00:00")                        # Still Tuesday, and nothing is open now.
     assert [x.reason for x in database.load_transfers(conn)] == ["drift"]
 
@@ -85,6 +85,6 @@ def test_a_venue_under_the_floor_waits_until_no_trade_is_open(tmp_path):
     t = open_trade(conn)
     r.rebalance("2026-09-23T12:00:00+00:00")                        # Its payout may be what brings the venue back.
     assert database.load_transfers(conn) == []
-    database.insert_settlement(conn, Settlement(t.id, "2026-09-23T12:30:00+00:00"))
+    database.insert_settlement(conn, Settlement(t.id, "2026-09-23T12:30:00+00:00", mode="paper"))
     r.rebalance("2026-09-23T13:00:00+00:00")
     assert [(x.reason, x.amount) for x in database.load_transfers(conn)] == [("floor", 2800)]

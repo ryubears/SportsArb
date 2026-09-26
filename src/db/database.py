@@ -10,10 +10,14 @@ SQLite browser. The tables follow the pipeline in order.
     quotes         order book snapshots for paired contracts, by record.py
     gaps           stretches when a venue's feed was down, also by record.py
     opportunities  every episode the live scanner saw, by scan.py
-    trades         every trade the executors made, by execute/
+    trades         every trade the executors made, paper or live, by execute/
     settlements    how each trade's legs paid out, by settle.py
+    orders         every real order the live executor sent, by execute/live.py
     ledger         every paper cash movement per venue, by balances.py
     transfers      paper rebalancing transfers between venues, by rebalance.py
+
+Trades and settlements carry a mode, 'paper' or 'live', and every read of
+open trades is for one mode, so the paper and live books never mix.
 
 The tables themselves are in schema.sql, and the steps that bring older
 databases up to them in migrations.py. This file holds the reads and writes.
@@ -24,7 +28,7 @@ from dataclasses import asdict, fields
 from common import jsonutil
 from common.paths import DATA_DIR
 from db import migrations, schema
-from db.models import Bet, Gap, Ledger, Opportunity, Quote, Settlement, Trade, Transfer
+from db.models import Bet, Gap, Ledger, Opportunity, Order, Quote, Settlement, Trade, Transfer
 from pathlib import Path
 
 DB_PATH = DATA_DIR / "sportsarb.sqlite"
@@ -34,6 +38,8 @@ NOT_STORED = {"id", "label", "starts_at"}
 # What a Trade's update and settlement change, in the order they happen.
 TRADE_FILLS = ["yes_filled", "yes_cost", "yes_latency_ms", "yes_fill_ts", "no_filled", "no_cost", "no_latency_ms", "no_fill_ts",
                "yes_held", "no_held", "matched", "profit", "hedge", "hedge_pnl", "status"]
+# What the venue's answer to an Order sets.
+ORDER_ANSWER = ["status", "venue_order_id", "answered_at", "latency_ms", "filled", "dollars", "fees", "note", "response"]
 
 
 def columns(model):
@@ -319,7 +325,7 @@ def insert_opportunities(conn, opportunities):
 
 def insert_trade(conn, t):
     """
-    Append a finished paper Trade and return its id.
+    Append a Trade as it is sent and return its id.
     """
     cur = conn.execute(insert_sql("trades", Trade), asdict(t))
     conn.commit()
@@ -335,39 +341,40 @@ def update_trade(conn, t):
     conn.commit()
 
 
-def load_open_trades(conn):
+def load_open_trades(conn, mode):
     """
-    Trades that are done, still hold contracts, and have not settled, with
-    their pair's label for log lines and the kickoff of their game, if any.
+    Trades of one mode that are done, still hold contracts, and have not settled,
+    with their pair's label for log lines and the kickoff of their game, if any.
     """
     return [Trade(**dict(r)) for r in conn.execute("""
         SELECT t.*, p.label,
                (SELECT MAX(c.start_time) FROM contracts c
                 WHERE (c.venue = t.yes_venue AND c.contract_id = t.yes_contract) OR (c.venue = t.no_venue AND c.contract_id = t.no_contract)) AS starts_at
         FROM trades t JOIN pairs p ON p.id = t.pair_id
-        WHERE t.status != 'sent' AND t.yes_held + t.no_held > 0
-          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id) ORDER BY t.id""")]
+        WHERE t.mode = ? AND t.status != 'sent' AND t.yes_held + t.no_held > 0
+          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id) ORDER BY t.id""", (mode,))]
 
 
-def has_open_trades(conn):
+def has_open_trades(conn, mode):
     """
-    Whether any trade is still in flight or holds contracts that have not settled.
+    Whether any trade of one mode is still in flight or holds contracts that have not settled.
     """
     return conn.execute("""
-        SELECT 1 FROM trades t WHERE (t.status = 'sent' OR t.yes_held + t.no_held > 0)
-          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id) LIMIT 1""").fetchone() is not None
+        SELECT 1 FROM trades t WHERE t.mode = ? AND (t.status = 'sent' OR t.yes_held + t.no_held > 0)
+          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id) LIMIT 1""", (mode,)).fetchone() is not None
 
 
-def load_open_game_costs(conn):
+def load_open_game_costs(conn, mode):
     """
-    What each unsettled trade on a game still holds, as [((game_date, team_a, team_b), [(venue, dollars), (venue, dollars)])],
+    What each unsettled trade of one mode on a game still holds, as
+    [((game_date, team_a, team_b), [(venue, dollars), (venue, dollars)])],
     one entry per trade with its yes leg's cost first.
     """
     return [((d, a, b), [(yv, yc), (nv, nc)]) for d, a, b, yv, yc, nv, nc in conn.execute("""
         SELECT p.game_date, p.team_a, p.team_b, t.yes_venue, t.yes_cost, t.no_venue, t.no_cost
         FROM trades t JOIN pairs p ON p.id = t.pair_id
-        WHERE t.yes_held + t.no_held > 0 AND p.game_date IS NOT NULL
-          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""")]
+        WHERE t.mode = ? AND t.yes_held + t.no_held > 0 AND p.game_date IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""", (mode,))]
 
 
 def insert_settlement(conn, settlement):
@@ -378,11 +385,40 @@ def insert_settlement(conn, settlement):
     conn.commit()
 
 
-def load_settlements(conn):
+def load_settlements(conn, mode=None):
     """
-    Every Settlement, oldest trade first.
+    Every Settlement, or those of one mode, oldest trade first.
     """
-    return [Settlement(**dict(r)) for r in conn.execute("SELECT * FROM settlements ORDER BY trade_id")]
+    sql = "SELECT * FROM settlements" + (" WHERE mode = ?" if mode else "") + " ORDER BY trade_id"
+    return [Settlement(**dict(r)) for r in conn.execute(sql, (mode,) if mode else ())]
+
+
+# ORDERS
+
+def insert_order(conn, order):
+    """
+    Store a live Order before it is sent and set its id.
+    """
+    cur = conn.execute(insert_sql("orders", Order), asdict(order))
+    conn.commit()
+    order.id = cur.lastrowid
+    return order.id
+
+
+def update_order(conn, order):
+    """
+    Write what the venue answered to an Order.
+    """
+    conn.execute(update_sql("orders", ORDER_ANSWER), asdict(order))
+    conn.commit()
+
+
+def load_orders(conn, trade_id=None):
+    """
+    Live Orders oldest first, all of them or those of one trade.
+    """
+    sql = "SELECT * FROM orders" + (" WHERE trade_id = ?" if trade_id is not None else "") + " ORDER BY id"
+    return [Order(**dict(r)) for r in conn.execute(sql, (trade_id,) if trade_id is not None else ())]
 
 
 # LEDGER

@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS opportunities (
 
 CREATE TABLE IF NOT EXISTS trades (
     id             INTEGER PRIMARY KEY,
+    mode           TEXT NOT NULL DEFAULT 'paper',   -- 'paper' or 'live', the executor that made the trade. Rows from before live trading are paper.
     pair_id        INTEGER NOT NULL,   -- The pair, see pairs.
     trade          TEXT NOT NULL,   -- The two legs in words.
     signal_ts      TEXT NOT NULL,
@@ -133,6 +134,7 @@ CREATE TABLE IF NOT EXISTS trades (
 -- A trade with no row here is still open. A leg that held nothing has no result.
 CREATE TABLE IF NOT EXISTS settlements (
     trade_id       INTEGER PRIMARY KEY,   -- The trade, see trades.
+    mode           TEXT NOT NULL DEFAULT 'paper',   -- 'paper' or 'live', the trade's mode.
     settled_at     TEXT NOT NULL,         -- When both legs had resolved and the payouts were booked: the later leg's settlement.
     yes_result     TEXT,                  -- How the yes leg's contract resolved, 'yes' or 'no'.
     yes_payout     REAL,                  -- Dollars received on the yes leg, one per contract held when its side won.
@@ -142,6 +144,31 @@ CREATE TABLE IF NOT EXISTS settlements (
     no_settled_at  TEXT
 );
 
+-- Every real order the live executor sent, stored before it is sent and updated with the venue's answer.
+CREATE TABLE IF NOT EXISTS orders (
+    id             INTEGER PRIMARY KEY,
+    trade_id       INTEGER NOT NULL,   -- The live trade the order was sent for, see trades.
+    venue          TEXT NOT NULL,
+    contract_id    TEXT NOT NULL,
+    purpose        TEXT NOT NULL,      -- 'open' for one of the trade's two legs, 'flatten' for an order that evens them.
+    action         TEXT NOT NULL,      -- 'buy' or 'sell'.
+    outcome        TEXT NOT NULL,      -- 'yes' for the contract itself, 'no' for its other side.
+    quantity       INTEGER NOT NULL,   -- Contracts asked for.
+    limit_price    REAL NOT NULL,      -- The worst price per contract accepted for the outcome, before fees.
+    client_id      TEXT NOT NULL,      -- Our id for the order, sent with it, so an order whose answer was lost can be found at the venue.
+    sent_at        TEXT NOT NULL,
+    status         TEXT NOT NULL,      -- 'sent' until the venue answers, then 'filled', 'partial', 'unfilled', 'rejected', or 'error'.
+    venue_order_id TEXT,               -- The venue's id for the order, once it answered.
+    answered_at    TEXT,
+    latency_ms     INTEGER,            -- From sending the order to its answer.
+    filled         INTEGER NOT NULL,   -- Contracts bought or sold.
+    dollars        REAL NOT NULL,      -- Paid for a buy or received for a sale, fees included.
+    fees           REAL NOT NULL,
+    note           TEXT,               -- Why the venue rejected the order, or the error.
+    response       TEXT                -- The venue's answer as JSON, for reconciling.
+);
+
+-- The paper balances. Live money is read from the venues and has no ledger.
 CREATE TABLE IF NOT EXISTS ledger (
     id           INTEGER PRIMARY KEY,
     ts           TEXT NOT NULL,

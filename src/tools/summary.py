@@ -3,7 +3,7 @@ Print a summary of everything in the database.
 
 Row counts and time ranges for each table, pairs by kind, and for the
 recent window the recording health, the opportunities found, and the
-paper trades made. Reads
+trades made, paper and live apart. Reads
 only, so it is safe to run while the recorder is writing.
 
 This script opens the database file directly rather than importing the
@@ -64,7 +64,7 @@ def print_storage(conn):
     print(f"database {DB_PATH}")
     print(f"size {size / 1e6:,.0f} MB")
     # Listed in pipeline order rather than alphabetically.
-    tables = ["contracts", "bets", "pairs", "quotes", "gaps", "opportunities", "trades", "settlements", "ledger", "transfers"]
+    tables = ["contracts", "bets", "pairs", "quotes", "gaps", "opportunities", "trades", "settlements", "orders", "ledger", "transfers"]
     print_table("tables", ("table", "rows"), [(t, f"{first_value(conn, f'SELECT COUNT(*) FROM {t}'):,}") for t in tables])
 
 
@@ -149,56 +149,88 @@ def print_opportunities(conn, since, hours):
 
 
 def print_trades(conn, since, hours):
-    total = first_value(conn, "SELECT COUNT(*) FROM trades")
-    recent = first_value(conn, "SELECT COUNT(*) FROM trades WHERE signal_ts >= ?", (since,))
-    if not total:
-        print("\ntrades: none yet, the recorder's paper executor writes them")
+    """
+    The trades of each mode apart, paper first, since paper and live money never mix.
+    """
+    modes = [m for m, in conn.execute("SELECT DISTINCT mode FROM trades ORDER BY mode DESC")]
+    if not modes:
+        print("\ntrades: none yet, the recorder's executors write them")
         return
-    covered = conn.execute("SELECT MIN(signal_ts), MAX(signal_ts) FROM trades").fetchone()
-    print(f"\ntrades {total:,} paper trades in all, from {short_time(covered[0])} to {short_time(covered[1])} UTC, "
+    for mode in modes:
+        print_mode_trades(conn, since, hours, mode)
+
+
+def print_mode_trades(conn, since, hours, mode):
+    total = first_value(conn, "SELECT COUNT(*) FROM trades WHERE mode = ?", (mode,))
+    recent = first_value(conn, "SELECT COUNT(*) FROM trades WHERE mode = ? AND signal_ts >= ?", (mode, since))
+    covered = conn.execute("SELECT MIN(signal_ts), MAX(signal_ts) FROM trades WHERE mode = ?", (mode,)).fetchone()
+    print(f"\ntrades {total:,} {mode} trades in all, from {short_time(covered[0])} to {short_time(covered[1])} UTC, "
           f"{recent:,} in the last {hours} hours")
     if recent:
         body = query_rows(conn, """
             SELECT status, COUNT(*), SUM(quantity), SUM(matched), ROUND(SUM(profit), 2), ROUND(SUM(hedge_pnl), 2), ROUND(SUM(profit + hedge_pnl), 2)
-            FROM trades WHERE signal_ts >= ? GROUP BY status ORDER BY status""", (since,))
-        print_table(f"by outcome, last {hours} hours", ("status", "trades", "wanted", "matched", "locked in $", "hedges $", "net $"), body)
+            FROM trades WHERE mode = ? AND signal_ts >= ? GROUP BY status ORDER BY status""", (mode, since))
+        print_table(f"{mode} by outcome, last {hours} hours", ("status", "trades", "wanted", "matched", "locked in $", "hedges $", "net $"), body)
         body = query_rows(conn, """
             SELECT p.kind, COUNT(*), ROUND(AVG(100 * edge), 1), ROUND(100.0 * SUM(matched) / SUM(quantity), 0), ROUND(SUM(profit + hedge_pnl), 2),
                    ROUND(AVG(yes_latency_ms)), ROUND(AVG(no_latency_ms))
-            FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE signal_ts >= ? GROUP BY p.kind ORDER BY p.kind""", (since,))
-        print_table(f"by kind, last {hours} hours", ("kind", "trades", "avg edge c", "fill %", "net $", "avg yes ms", "avg no ms"), body)
+            FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ? AND signal_ts >= ? GROUP BY p.kind ORDER BY p.kind""", (mode, since))
+        print_table(f"{mode} by kind, last {hours} hours", ("kind", "trades", "avg edge c", "fill %", "net $", "avg yes ms", "avg no ms"), body)
         best = query_rows(conn, """
             SELECT p.label, trade, quantity, yes_filled, no_filled, ROUND(profit + hedge_pnl, 2), hedge, substr(signal_ts, 12, 8)
-            FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE signal_ts >= ? ORDER BY profit + hedge_pnl DESC LIMIT 5""", (since,))
-        print_table("best", ("bet", "trade", "wanted", "yes", "no", "net $", "hedge", "at"),
+            FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ? AND signal_ts >= ? ORDER BY profit + hedge_pnl DESC LIMIT 5""", (mode, since))
+        print_table(f"{mode} best", ("bet", "trade", "wanted", "yes", "no", "net $", "hedge", "at"),
                     [(l[:40], t, q, y, n, p, h[:40], a) for l, t, q, y, n, p, h, a in best])
         worst = query_rows(conn, """
             SELECT p.label, trade, quantity, yes_filled, no_filled, ROUND(profit + hedge_pnl, 2), hedge, substr(signal_ts, 12, 8)
-            FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE signal_ts >= ? AND profit + hedge_pnl < 0 ORDER BY profit + hedge_pnl LIMIT 5""", (since,))
-        print_table("worst", ("bet", "trade", "wanted", "yes", "no", "net $", "hedge", "at"),
+            FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ? AND signal_ts >= ? AND profit + hedge_pnl < 0
+            ORDER BY profit + hedge_pnl LIMIT 5""", (mode, since))
+        print_table(f"{mode} worst", ("bet", "trade", "wanted", "yes", "no", "net $", "hedge", "at"),
                     [(l[:40], t, q, y, n, p, h[:40], a) for l, t, q, y, n, p, h, a in worst])
     settled = query_rows(conn, """
         SELECT venue, COUNT(*), SUM(held), ROUND(SUM(cost), 2), ROUND(SUM(payout), 2), ROUND(SUM(payout - cost), 2) FROM (
             SELECT t.yes_venue AS venue, t.yes_held AS held, t.yes_cost AS cost, s.yes_payout AS payout, s.yes_settled_at AS settled_at
-            FROM trades t JOIN settlements s ON s.trade_id = t.id WHERE s.yes_result IS NOT NULL
+            FROM trades t JOIN settlements s ON s.trade_id = t.id WHERE t.mode = ? AND s.yes_result IS NOT NULL
             UNION ALL
             SELECT t.no_venue, t.no_held, t.no_cost, s.no_payout, s.no_settled_at
-            FROM trades t JOIN settlements s ON s.trade_id = t.id WHERE s.no_result IS NOT NULL)
-        WHERE settled_at >= ? GROUP BY venue ORDER BY venue""", (since,))
+            FROM trades t JOIN settlements s ON s.trade_id = t.id WHERE t.mode = ? AND s.no_result IS NOT NULL)
+        WHERE settled_at >= ? GROUP BY venue ORDER BY venue""", (mode, mode, since))
     if settled:
-        print_table(f"settled legs by venue, last {hours} hours", ("venue", "legs", "contracts", "cost $", "payout $", "realized $"), settled)
+        print_table(f"{mode} settled legs by venue, last {hours} hours", ("venue", "legs", "contracts", "cost $", "payout $", "realized $"), settled)
     open_count = first_value(conn, """
-        SELECT COUNT(*) FROM trades t WHERE yes_held + no_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""")
-    print(f"  {open_count:,} trades still open")
+        SELECT COUNT(*) FROM trades t WHERE mode = ? AND yes_held + no_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""",
+        (mode,))
+    print(f"  {open_count:,} {mode} trades still open")
+    if mode == "paper":
+        print_paper_money(conn)
+    else:
+        print_live_orders(conn, since, hours)
+
+
+def print_paper_money(conn):
+    """
+    The paper balances from the ledger and the paper transfers. Live money is on the venues, see live_check.py.
+    """
     balances = query_rows(conn, """
         SELECT l.venue, ROUND(l.balance, 2), ROUND(COALESCE((SELECT SUM(amount) FROM transfers WHERE to_venue = l.venue AND arrived_at IS NULL), 0))
         FROM ledger l WHERE l.id IN (SELECT MAX(id) FROM ledger GROUP BY venue) ORDER BY l.venue""")
     if balances:
-        print("  balances from the ledger: " + ", ".join(f"{v} {a:,.2f}$" + (f" (+{p:,.0f}$ pending)" if p else "") for v, a, p in balances))
+        print("  paper balances from the ledger: " + ", ".join(f"{v} {a:,.2f}$" + (f" (+{p:,.0f}$ pending)" if p else "") for v, a, p in balances))
     transfers = query_rows(conn, "SELECT from_venue, to_venue, ROUND(amount), reason, substr(requested_at, 1, 10), substr(expected_at, 1, 10), substr(arrived_at, 1, 10) FROM transfers ORDER BY id DESC LIMIT 5")
     if transfers:
-        print_table("transfers", ("from", "to", "amount $", "reason", "requested", "status"),
+        print_table("paper transfers", ("from", "to", "amount $", "reason", "requested", "status"),
                     [(f, t, a, r, q, f"arrived {v}" if v else f"in transit, due {e}") for f, t, a, r, q, e, v in transfers])
+
+
+def print_live_orders(conn, since, hours):
+    """
+    The real orders sent in the window, by venue, purpose, and what came back.
+    """
+    body = query_rows(conn, """
+        SELECT venue, purpose, status, COUNT(*), SUM(quantity), SUM(filled), ROUND(SUM(dollars), 2), ROUND(SUM(fees), 2), ROUND(AVG(latency_ms))
+        FROM orders WHERE sent_at >= ? GROUP BY venue, purpose, status ORDER BY venue, purpose, status""", (since,))
+    if body:
+        print_table(f"live orders, last {hours} hours", ("venue", "purpose", "status", "orders", "asked", "filled", "dollars $", "fees $", "avg ms"), body)
 
 
 # MAIN

@@ -33,6 +33,7 @@ class Allocator:
     def __init__(self, conn, cash):
         self.conn = conn
         self.cash = cash
+        self.mode = cash.mode   # Only the trades of this mode hold this money.
         self.kickoffs = {}      # game key maps to kickoff.
         self.reload()
 
@@ -53,7 +54,7 @@ class Allocator:
         Dollars held in open trades per game and venue, as {game key: {venue: dollars}}.
         """
         held = {}
-        for key, legs in database.load_open_game_costs(self.conn):
+        for key, legs in database.load_open_game_costs(self.conn, self.mode):
             game = held.setdefault(key, {venue: 0.0 for venue in VENUES})
             for venue, cost in legs:
                 game[venue] += cost
@@ -90,6 +91,6 @@ class Allocator:
         """
         active, shares = self.shares(now)
         if not active:
-            return "capital: no games in play"
+            return f"{self.mode} capital: no games in play"
         share = min(shares.values())
-        return f"capital: {len(active)} games in play or settling, {share:,.0f}$ a venue each, cap {int(share / config.DOLLARS_PER_CAP)}"
+        return f"{self.mode} capital: {len(active)} games in play or settling, {share:,.0f}$ a venue each, cap {int(share / config.DOLLARS_PER_CAP)}"

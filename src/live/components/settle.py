@@ -41,14 +41,16 @@ def leg_won(side, polarity, result):
 
 class Settler:
     """
-    Pays out trades whose contracts have resolved.
+    Pays out trades whose contracts have resolved, the trades of the mode
+    its cash is for, paper or live.
     results maps a venue to a function giving how its contracts resolved.
-    executor is the PaperExecutor whose exposed trades are kept apart from settlement, if trading.
+    executor is the Executor whose exposed trades are kept apart from settlement, if trading.
     """
 
     def __init__(self, conn, cash, log=print, results=None, executor=None):
         self.conn = conn
         self.cash = cash
+        self.mode = cash.mode
         self.log = log
         self.results = results or RESULTS
         self.executor = executor
@@ -62,7 +64,7 @@ class Settler:
         started resolved, pay the winning legs, and store each leg's result
         and payout as the trade's Settlement once every held leg has one.
         """
-        due = [t for t in database.load_open_trades(self.conn) if (t.starts_at or t.pays_at) <= now]
+        due = [t for t in database.load_open_trades(self.conn, self.mode) if (t.starts_at or t.pays_at) <= now]
         if not due:
             return
         wanted = {}
@@ -80,7 +82,7 @@ class Settler:
                 continue
             results.update({(venue, cid): r for cid, r in found.items()})
         # The executor may have flattened some of these while the venues were asked, so pay out what the trades hold now.
-        current = {t.id: t for t in database.load_open_trades(self.conn)}
+        current = {t.id: t for t in database.load_open_trades(self.conn, self.mode)}
         flattening = self.executor.flattening if self.executor else set()
         for t in (current.get(t.id) for t in due):
             if t is None or t.id in flattening:
@@ -89,7 +91,7 @@ class Settler:
                     for side in ("yes", "no") if getattr(t, f"{side}_held")}
             if any(key not in results for key in keys.values()):
                 continue
-            settlement = Settlement(t.id, settled_at=max(results[key][1] or now for key in keys.values()))
+            settlement = Settlement(t.id, mode=t.mode, settled_at=max(results[key][1] or now for key in keys.values()))
             for side, key in keys.items():
                 result, settled_at = results[key]
                 won = leg_won(side, getattr(t, f"{side}_polarity"), result)
@@ -103,7 +105,7 @@ class Settler:
                 self.executor.settled(t.id)
             realized = sum(getattr(settlement, f"{side}_payout") - getattr(t, f"{side}_cost") for side in keys)
             self.settled.append((t, realized))
-            self.log(f"settled {t.label}: " + ", ".join(
+            self.log(f"{self.mode} settled {t.label}: " + ", ".join(
                 f"{key[0]} {side} {getattr(settlement, f'{side}_result')} pays {getattr(settlement, f'{side}_payout'):.0f}$"
                 for side, key in keys.items()) + f", realized {realized:+.2f}$")
 
@@ -122,5 +124,5 @@ class Settler:
         """
         settled = self.settled
         self.settled = []
-        open_count = len(database.load_open_trades(self.conn))
-        return f"settled: {len(settled)} trades for {sum(r for _, r in settled):+.2f}$, {open_count} still open"
+        open_count = len(database.load_open_trades(self.conn, self.mode))
+        return f"{self.mode} settled: {len(settled)} trades for {sum(r for _, r in settled):+.2f}$, {open_count} still open"

@@ -65,7 +65,7 @@ def test_unchanged_books_fill_both_legs_and_lock_in_the_edge(tmp_path, quick):
     conn, cash, ex = executor(tmp_path, latest, logs.append)
     assert run(ex) == [True]
     t = stored(conn)[0]
-    assert (t["status"], t["quantity"], t["yes_filled"], t["no_filled"], t["matched"]) == ("filled", 50, 50, 50, 50)   # Half the visible 100.
+    assert (t["mode"], t["status"], t["quantity"], t["yes_filled"], t["no_filled"], t["matched"]) == ("paper", "filled", 50, 50, 50, 50)   # Half the visible 100.
     assert (t["yes_limit"], t["no_limit"], t["yes_polarity"], t["no_polarity"]) == (0.45, 0.47, "yes", "yes")
     assert t["profit"] == pytest.approx(50 * (1 - 0.45 - 0.47))
     assert (t["hedge"], t["hedge_pnl"], t["yes_held"], t["no_held"]) == ("none", 0, 50, 50)
@@ -279,3 +279,11 @@ def test_scanner_signals_once_per_episode(tmp_path):
     latest[("polymarket_us", "pm")] = Quote("polymarket_us", "pm", NOW, [[0.40, 100]], [[0.41, 100]])
     s.on_book("polymarket_us", "pm", latest, "2026-09-20T17:30:01+00:00")     # A bigger edge in the same episode brings no second signal.
     assert calls == [(PAIR["label"], 0.08, NOW)]
+
+
+def test_a_paper_executor_refuses_money_of_another_mode(tmp_path):
+    conn = database.connect(tmp_path / "t.sqlite")
+    cash = balances.Balances(conn)
+    cash.mode = "live"
+    with pytest.raises(ValueError, match="a paper executor cannot trade live money"):
+        PaperExecutor(conn, cash, lambda: {})

@@ -142,6 +142,16 @@ def step_3_opening_balances(conn):
                      openings + [tuple(r) for r in rows])
 
 
+def step_4_modes(conn):
+    """
+    Trades and settlements now say which executor made them, 'paper' or
+    'live'. Every row before live trading came from the paper executor.
+    """
+    for table in ("trades", "settlements"):
+        if "mode" not in [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN mode TEXT NOT NULL DEFAULT 'paper'")
+
+
 SETTLEMENT_COLUMNS = ["yes_result", "yes_payout", "yes_settled_at", "no_result", "no_payout", "no_settled_at", "settled_at"]
 
 
@@ -155,4 +165,4 @@ def copy_settlements(conn, table):
                      FROM {table} WHERE settled_at IS NOT NULL""")
 
 # Step n brings a database from user_version n - 1 to n. Only ever add to the end.
-STEPS = [step_1_catch_up, step_2_settlements, step_3_opening_balances]
+STEPS = [step_1_catch_up, step_2_settlements, step_3_opening_balances, step_4_modes]

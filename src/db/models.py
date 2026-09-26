@@ -133,11 +133,12 @@ class Gap:
 @dataclass
 class Trade:
     """
-    One paper trade: two legs sent on a scanner signal, what each filled,
+    One trade, paper or live: two legs sent on a scanner signal, what each filled,
     the profit locked in on the matched contracts, and how any mismatch
     was flattened. How its legs paid out is its Settlement, once it has one.
     """
     id: int | None = row_id()
+    mode: str = field(kw_only=True)     # 'paper' or 'live', the executor that made the trade.
     pair_id: int            # The pair, see pairs.
     trade: str              # The two legs in words.
     signal_ts: str          # When the scanner signalled.
@@ -179,6 +180,7 @@ class Settlement:
     nothing has no result.
     """
     trade_id: int           # The trade settled, see trades. A trade has at most one settlement.
+    mode: str = field(kw_only=True)     # 'paper' or 'live', the trade's mode.
     settled_at: str         # When both legs had resolved and the payouts were booked: the later leg's settlement.
     yes_result: str | None = None       # How the yes leg's contract resolved, 'yes' or 'no'.
     yes_payout: float | None = None     # Dollars received on the yes leg, one per contract held when its side won.
@@ -189,9 +191,36 @@ class Settlement:
 
 
 @dataclass
+class Order:
+    """
+    One real order the live executor sent to a venue, and what came back.
+    """
+    id: int | None = row_id()
+    trade_id: int           # The live trade the order was sent for, see trades.
+    venue: str
+    contract_id: str
+    purpose: str            # 'open' for one of the trade's two legs, 'flatten' for an order that evens them.
+    action: str             # 'buy' or 'sell'.
+    outcome: str            # 'yes' for the contract itself, 'no' for its other side.
+    quantity: int           # Contracts asked for.
+    limit_price: float      # The worst price per contract accepted for the outcome, before fees.
+    client_id: str          # Our id for the order, sent with it, so an order whose answer was lost can be found at the venue.
+    sent_at: str
+    status: str = "sent"    # 'sent' until the venue answers, then 'filled', 'partial', 'unfilled', 'rejected', or 'error'.
+    venue_order_id: str | None = None   # The venue's id for the order, once it answered.
+    answered_at: str | None = None
+    latency_ms: int | None = None       # From sending the order to its answer.
+    filled: int = 0         # Contracts bought or sold.
+    dollars: float = 0.0    # Paid for a buy or received for a sale, fees included.
+    fees: float = 0.0
+    note: str | None = None             # Why the venue rejected the order, or the error.
+    response: str | None = None         # The venue's answer as JSON, for reconciling.
+
+
+@dataclass
 class Ledger:
     """
-    One cash movement on a venue's paper balance.
+    One cash movement on a venue's paper balance. Live money is read from the venues and has no ledger.
     """
     id: int | None = row_id()
     ts: str

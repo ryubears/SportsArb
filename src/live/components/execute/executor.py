@@ -93,6 +93,8 @@ class Executor:
     mode = None     # 'paper' or 'live', set by each subclass. It starts every log line.
 
     def __init__(self, conn, cash, books, log=print, allocator=None, clock=now_iso):
+        if cash.mode != self.mode:
+            raise ValueError(f"a {self.mode} executor cannot trade {cash.mode} money")
         self.conn = conn
         self.cash = cash
         self.books = books
@@ -138,7 +140,7 @@ class Executor:
         for l in legs:
             l.quantity = quantity
             self.cash.reserve(l.venue, quantity * l.limit)
-        trade = Trade(pair_id=pair["id"], label=pair["label"], trade=trade_words(yes, no), signal_ts=now, edge=edge, quantity=quantity, cap=cap,
+        trade = Trade(mode=self.mode, pair_id=pair["id"], label=pair["label"], trade=trade_words(yes, no), signal_ts=now, edge=edge, quantity=quantity, cap=cap,
                       yes_venue=yes["venue"], yes_contract=yes["contract_id"], yes_polarity=yes["polarity"], yes_limit=yes_leg.limit,
                       no_venue=no["venue"], no_contract=no["contract_id"], no_polarity=no["polarity"], no_limit=no_leg.limit, pays_at=pays_at)
         database.insert_trade(self.conn, trade)

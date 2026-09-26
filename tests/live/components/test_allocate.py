@@ -57,9 +57,9 @@ def test_caps_follow_the_active_games(tmp_path):
     assert allocator.cap(pair_for(*early), f"{SUNDAY}T16:59:00+00:00") == 0
     assert allocator.cap(pair_for(*early), f"{SUNDAY}T20:16:00+00:00") == 0
     assert allocator.cap({"game_date": None}, f"{SUNDAY}T17:00:00+00:00") == 0
-    assert allocator.summary(f"{SUNDAY}T18:00:00+00:00") == "capital: 9 games in play or settling, 1,111$ a venue each, cap 55"
-    assert allocator.summary(f"{SUNDAY}T23:00:00+00:00") == "capital: 4 games in play or settling, 2,500$ a venue each, cap 125"
-    assert allocator.summary("2026-09-28T05:00:00+00:00") == "capital: no games in play"
+    assert allocator.summary(f"{SUNDAY}T18:00:00+00:00") == "paper capital: 9 games in play or settling, 1,111$ a venue each, cap 55"
+    assert allocator.summary(f"{SUNDAY}T23:00:00+00:00") == "paper capital: 4 games in play or settling, 2,500$ a venue each, cap 125"
+    assert allocator.summary("2026-09-28T05:00:00+00:00") == "paper capital: no games in play"
 
 
 def test_money_a_game_holds_stays_in_the_pool_and_a_game_past_its_share_stops(tmp_path):
@@ -68,7 +68,7 @@ def test_money_a_game_holds_stays_in_the_pool_and_a_game_past_its_share_stops(tm
     allocator = allocate.Allocator(conn, cash)
     (first, second), pairs = EARLY[:2], database.load_pairs(conn, "nfl")
     first_pair = next(p for p in pairs.values() if p["team_a"] == "E0")
-    t = Trade(pair_id=first_pair["id"], trade="t", signal_ts=f"{SUNDAY}T17:00:00+00:00", edge=0.05, quantity=100,
+    t = Trade(mode="paper", pair_id=first_pair["id"], trade="t", signal_ts=f"{SUNDAY}T17:00:00+00:00", edge=0.05, quantity=100,
               yes_venue="kalshi", yes_contract="kalshi-E0H0", yes_polarity="yes", yes_limit=0.5,
               no_venue="polymarket_us", no_contract="polymarket_us-E0H0", no_polarity="yes", no_limit=0.45, pays_at=f"{SUNDAY}T21:00:00+00:00",
               yes_filled=100, yes_cost=4000.0, no_filled=100, no_cost=4000.0, yes_held=100, no_held=100, matched=100, status="filled")

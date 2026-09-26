@@ -165,7 +165,7 @@ def test_old_settlement_rows_are_folded_into_their_trades(tmp_path):
     assert "settled_at" not in [r[1] for r in conn.execute("PRAGMA table_info(trades)")]
     row = conn.execute("SELECT trade_id, yes_result, yes_payout, yes_settled_at, no_result, no_payout, no_settled_at, settled_at FROM settlements").fetchone()
     assert tuple(row) == (1, "yes", 5, "2026-09-20T20:10:00+00:00", "yes", 0, "2026-09-20T20:09:00+00:00", "2026-09-20T20:10:00+00:00")
-    assert database.load_open_trades(conn) == []
+    assert database.load_open_trades(conn, "paper") == []
     # Pairs got ids. The stored pair kept its row, the trade's and the second episode's pairs, long gone from the catalog, got bare rows.
     assert [tuple(r) for r in conn.execute("SELECT id, label, contracts FROM pairs ORDER BY id")] == [
         (1, "spread 2026-09-27 KC@MIA KC 30.5", 2), (2, "l", 0)]
@@ -175,10 +175,66 @@ def test_old_settlement_rows_are_folded_into_their_trades(tmp_path):
 
 
 def test_every_model_writes_only_columns_its_table_has():
-    from db.models import Ledger, Settlement, Trade, Transfer
+    from db.models import Ledger, Order, Settlement, Trade, Transfer
     conn = database.connect(":memory:")
     for table, model in (("bets", Bet), ("gaps", Gap), ("opportunities", Opportunity), ("trades", Trade), ("settlements", Settlement),
-                         ("ledger", Ledger), ("transfers", Transfer)):
+                         ("orders", Order), ("ledger", Ledger), ("transfers", Transfer)):
         table_columns = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
         assert set(database.columns(model)) <= set(table_columns), table
         assert set(table_columns) - set(database.columns(model)) <= {"id"}, table      # Nothing in the table the model forgets.
+
+
+def trade(mode, pair_id=1, **fields):
+    from db.models import Trade
+    return Trade(mode=mode, pair_id=pair_id, trade="t", signal_ts="2026-09-27T17:30:00+00:00", edge=0.08, quantity=5,
+                 yes_venue="polymarket_us", yes_contract="pm", yes_polarity="yes", yes_limit=0.45,
+                 no_venue="kalshi", no_contract="k", no_polarity="yes", no_limit=0.47, pays_at="2026-09-27T20:45:00+00:00", **fields)
+
+
+def test_paper_and_live_trades_and_settlements_are_kept_apart(tmp_path):
+    from db.models import Settlement
+    conn = database.connect(tmp_path / "t.sqlite")
+    conn.execute("INSERT INTO pairs (id, label, kind, game_date, team_a, team_b, venues, contracts, flags, matched_at) "
+                 "VALUES (1, 'game_winner 2026-09-27 CAR@ATL CAR', 'game_winner', '2026-09-27', 'CAR', 'ATL', '', 2, '[]', 'm')")
+    held = dict(status="filled", yes_held=5, no_held=5, yes_cost=2.25, no_cost=2.35)
+    paper, live = trade("paper", **held), trade("live", **held)
+    database.insert_trade(conn, paper)
+    assert not database.has_open_trades(conn, "live")
+    database.insert_trade(conn, live)
+    assert [t.id for t in database.load_open_trades(conn, "paper")] == [paper.id]
+    assert [(t.id, t.mode) for t in database.load_open_trades(conn, "live")] == [(live.id, "live")]
+    assert database.has_open_trades(conn, "paper") and database.has_open_trades(conn, "live")
+    assert database.load_open_game_costs(conn, "live") == [(("2026-09-27", "CAR", "ATL"), [("polymarket_us", 2.25), ("kalshi", 2.35)])]
+    database.insert_settlement(conn, Settlement(live.id, "2026-09-27T20:30:00+00:00", mode="live"))
+    assert database.load_open_trades(conn, "live") == [] and not database.has_open_trades(conn, "live")
+    assert [t.id for t in database.load_open_trades(conn, "paper")] == [paper.id]             # Settling the live trade leaves paper alone.
+    assert [s.trade_id for s in database.load_settlements(conn, "live")] == [live.id] and database.load_settlements(conn, "paper") == []
+
+
+def test_orders_are_stored_before_they_are_sent_and_updated_with_the_answer(tmp_path):
+    from db.models import Order
+    conn = database.connect(tmp_path / "t.sqlite")
+    order = Order(trade_id=7, venue="kalshi", contract_id="k", purpose="open", action="buy", outcome="no", quantity=5,
+                  limit_price=0.47, client_id="sa-7-1", sent_at="2026-09-27T17:30:00.010+00:00")
+    database.insert_order(conn, order)
+    assert order.id == 1 and database.load_orders(conn)[0].status == "sent"
+    order.status, order.venue_order_id, order.filled, order.dollars, order.fees = "partial", "abc", 3, 1.45, 0.04
+    database.update_order(conn, order)
+    assert database.load_orders(conn, trade_id=7) == [order] and database.load_orders(conn, trade_id=8) == []
+
+
+def test_trades_and_settlements_from_before_live_trading_are_paper(tmp_path):
+    import sqlite3
+    path = tmp_path / "t.sqlite"
+    conn = database.connect(path)
+    conn.execute("ALTER TABLE trades DROP COLUMN mode")
+    conn.execute("ALTER TABLE settlements DROP COLUMN mode")
+    conn.execute("INSERT INTO trades (pair_id, trade, signal_ts, edge, quantity, yes_venue, yes_contract, yes_polarity, yes_limit, yes_filled, yes_cost, "
+                 "yes_latency_ms, no_venue, no_contract, no_polarity, no_limit, no_filled, no_cost, no_latency_ms, yes_held, no_held, matched, profit, "
+                 "hedge, hedge_pnl, status, pays_at) VALUES (1, 't', 's', 0.05, 5, 'polymarket_us', 'pm', 'yes', 0.45, 5, 2.25, 50, "
+                 "'kalshi', 'k', 'yes', 0.47, 5, 2.35, 50, 5, 5, 5, 0.4, 'none', 0, 'filled', 'p')")
+    conn.execute("INSERT INTO settlements (trade_id, settled_at) VALUES (1, 's')")
+    conn.execute("PRAGMA user_version = 3")
+    conn.commit(); conn.close()
+    conn = database.connect(path)
+    assert (conn.execute("SELECT mode FROM trades").fetchone()[0], conn.execute("SELECT mode FROM settlements").fetchone()[0]) == ("paper", "paper")
