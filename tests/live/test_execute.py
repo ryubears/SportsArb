@@ -67,7 +67,7 @@ def test_unchanged_books_fill_both_legs_and_lock_in_the_edge(tmp_path, quick):
     assert (t["yes_limit"], t["no_limit"], t["yes_polarity"], t["no_polarity"]) == (0.45, 0.47, "yes", "yes")
     assert t["profit"] == pytest.approx(50 * (1 - 0.45 - 0.47))
     assert (t["hedge"], t["hedge_pnl"], t["yes_held"], t["no_held"]) == ("none", 0, 50, 50)
-    assert t["pays_at"] == "2026-09-20T21:00:00+00:00"
+    assert t["pays_at"] == "2026-09-20T20:45:00+00:00"            # Kickoff plus the game and the venues settling.
     assert cash.amounts == pytest.approx({"polymarket_us": 10000 - 50 * 0.45, "kalshi": 10000 - 50 * 0.47})
     assert [tuple(r) for r in conn.execute("SELECT venue, amount, reason, trade_id FROM ledger ORDER BY id")] == [
         ("polymarket_us", pytest.approx(-22.5), "buy", 1), ("kalshi", pytest.approx(-23.5), "buy", 1)]

@@ -11,7 +11,7 @@ from common.timeutil import shift
 
 GAME_HOURS = 3.25       # Kickoff to final whistle, with a little margin over the 3.05 measured.
 SETTLE_HOURS = 0.5      # Final whistle to the venues settling.
-PAYOUT_HOURS = 4        # Kickoff to payout, as the scanner and executor count the time capital is tied up.
+PAYOUT_HOURS = GAME_HOURS + SETTLE_HOURS   # Kickoff to payout, when the money a game holds comes back.
 RECORD_HOURS = 5        # Kickoff to when a game's contracts stop being recorded, whatever their close time says.
 
 
@@ -26,12 +26,12 @@ def in_play_or_settling(kickoff, now):
     """
     Whether a game that kicked off at kickoff is being played or waiting on the venues to settle at now.
     """
-    return kickoff <= now < shift(kickoff, hours=GAME_HOURS + SETTLE_HOURS)
+    return kickoff <= now < shift(kickoff, hours=PAYOUT_HOURS)
 
 
 def resolution_time(start_time, close_time):
     """
-    When a contract pays out. Games pay a few hours after kickoff. Futures pay near their close time.
+    When a contract pays out. Games pay once the venues settle after the final whistle. Futures pay near their close time.
     """
     if start_time:
         return shift(start_time, hours=PAYOUT_HOURS)

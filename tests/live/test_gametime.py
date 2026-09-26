@@ -19,9 +19,9 @@ def test_a_game_is_in_play_until_the_whistle_then_settling():
 
 
 def test_payout_is_the_slowest_member_and_skips_members_without_times():
-    assert gametime.pays_at([GAME]) == "2026-09-20T21:00:00+00:00"
+    assert gametime.pays_at([GAME]) == "2026-09-20T20:45:00+00:00"
     assert gametime.pays_at([GAME, FUTURE]) == FUTURE["close_time"]
-    assert gametime.pays_at([GAME, UNKNOWN]) == "2026-09-20T21:00:00+00:00"
+    assert gametime.pays_at([GAME, UNKNOWN]) == "2026-09-20T20:45:00+00:00"
     assert gametime.pays_at([UNKNOWN]) is None
     assert gametime.kickoff([FUTURE, GAME]) == KICKOFF
     assert gametime.kickoff([FUTURE]) is None
