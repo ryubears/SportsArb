@@ -62,7 +62,7 @@ class Session:
         cash = balances.Balances(conn) if trading else None
         self.allocator = allocate.Allocator(conn, cash) if trading else None
         self.executor = execute.PaperExecutor(conn, cash, lambda: self.recorder.latest, log, allocator=self.allocator) if trading else None
-        self.settler = settle.Settler(conn, cash, log) if trading else None
+        self.settler = settle.Settler(conn, cash, log, executor=self.executor) if trading else None
         self.rebalancer = rebalance.Rebalancer(conn, cash, log) if trading else None
         self.scanner = scan.Scanner(conn, sport, log, self.executor.signal if self.executor else None) if with_scanner else None
         self.recorder.scanner = self.scanner

@@ -88,3 +88,55 @@ def test_leg_won():
     assert settle.leg_won("yes", "yes", "yes") and settle.leg_won("no", "yes", "no")
     assert not settle.leg_won("yes", "yes", "no") and not settle.leg_won("no", "yes", "yes")
     assert settle.leg_won("no", "no", "yes") and not settle.leg_won("yes", "no", "yes")
+
+
+class FakeExecutor:
+    """
+    The part of the PaperExecutor the settler talks to.
+    """
+
+    def __init__(self, flattening=()):
+        self.flattening = set(flattening)
+        self.told = []
+
+    def settled(self, trade_id):
+        self.told.append(trade_id)
+
+
+def test_a_trade_being_flattened_is_left_alone_and_the_executor_is_told_once_it_settles(tmp_path):
+    conn = database.connect(tmp_path / "t.sqlite")
+    cash = balances.Balances(conn)
+    trade = filled_trade(conn)
+    executor = FakeExecutor(flattening=[trade.id])
+    s = settle.Settler(conn, cash, lambda m: None, executor=executor)
+    results = {("polymarket_us", "pm"): ("yes", "2026-09-20T20:10:00+00:00"), ("kalshi", "k"): ("yes", "2026-09-20T20:09:00+00:00")}
+    settled(s, "2026-09-20T21:05:00+00:00", results)            # An order to flatten it is in flight.
+    assert conn.execute("SELECT settled_at FROM trades").fetchone()[0] is None
+    assert (cash["polymarket_us"], executor.told) == (10000, [])
+    executor.flattening.clear()
+    settled(s, "2026-09-20T21:06:00+00:00", results)
+    assert conn.execute("SELECT settled_at FROM trades").fetchone()[0] == "2026-09-20T20:10:00+00:00"
+    assert executor.told == [trade.id]
+
+
+def test_payouts_follow_what_the_trade_holds_once_the_venues_answer(tmp_path, monkeypatch):
+    conn = database.connect(tmp_path / "t.sqlite")
+    cash = balances.Balances(conn)
+    trade = filled_trade(conn)
+    s = settle.Settler(conn, cash, lambda m: None)
+
+    def kalshi_results(ids):
+        # While the venues are asked, the executor sells 20 of the Polymarket US leg back.
+        trade.yes_held, trade.yes_cost = 30, 13.5
+        database.update_trade(conn, trade)
+        return {"k": ("yes", "2026-09-20T20:09:00+00:00")}
+
+    async def inline(function, *args):
+        return function(*args)                                  # In the loop's thread, so the lookup can write to the database.
+
+    monkeypatch.setattr(settle.asyncio, "to_thread", inline)
+    s.results = {"kalshi": kalshi_results, "polymarket_us": lambda events: {"pm": ("yes", "2026-09-20T20:10:00+00:00")}}
+    asyncio.run(s.settle("2026-09-20T21:05:00+00:00"))
+    row = conn.execute("SELECT yes_payout, settled_at FROM trades").fetchone()
+    assert tuple(row) == (30, "2026-09-20T20:10:00+00:00")       # Paid on the 30 still held, not the 50 held when the check began.
+    assert cash["polymarket_us"] == pytest.approx(10000 + 30)

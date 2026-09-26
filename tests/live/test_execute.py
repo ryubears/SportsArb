@@ -7,7 +7,7 @@ import random
 import pytest
 from db import database
 from db.models import Quote
-from live import balances, execute, scan
+from live import balances, execute, scan, settle
 
 NO_PM_FEES = {"feeCoefficient": 0}
 NO_K_FEES = {"fee_type": "quadratic", "fee_multiplier": 0}
@@ -131,7 +131,7 @@ def test_exposure_is_flattened_on_a_later_tick_once_a_book_allows_it(tmp_path, q
     run(ex, kalshi_vanishes_and_polymarket_loses_its_bids)
     t = stored(conn)[0]
     assert (t["yes_held"], t["no_held"], t["hedge"]) == (50, 0, "50 exposed, no book to flatten, no leg no book")
-    assert [tr.id for tr, _ in ex.exposed] == [t["id"]]
+    assert list(ex.exposed) == [t["id"]]
 
     async def later():
         ex.tick(NOW)                                            # Still no book, nothing to do.
@@ -147,8 +147,37 @@ def test_exposure_is_flattened_on_a_later_tick_once_a_book_allows_it(tmp_path, q
     assert t["hedge"] == "50 exposed, no book to flatten, no leg no book, then bought 20 of 50 on kalshi, 30 exposed at 17:31:00"
     assert t["hedge_pnl"] == pytest.approx(20 * (1 - 0.45 - 0.47))
     assert logs[-1] == "paper flattened game_winner 2026-09-20 CAR@ATL CAR: bought 20 of 50 on kalshi, 30 exposed, 30 still exposed, hedge +1.60$"
-    assert ex.exposed == []
+    assert ex.exposed == {}
     assert cash["kalshi"] == pytest.approx(10000 - 20 * 0.47)
+
+
+def test_a_settled_trade_is_not_flattened_any_more(tmp_path, quick):
+    from db.models import Contract
+    latest = books()
+    conn, cash, ex = executor(tmp_path, latest)
+    database.upsert_contracts(conn, [Contract(venue=v, contract_id=c, market_id=c, event_id="e", series_id=None, sport="nfl", event_title=None,
+                                              title="t", outcome="Yes", market_type=None, line=None, rules=None, start_time=KICKOFF,
+                                              close_time="2026-09-20T21:00:00+00:00", fee_info=None) for v, c in (("kalshi", "k"), ("polymarket_us", "pm"))], NOW)
+    conn.execute("INSERT INTO pairs (id, label, kind, venues, contracts, flags, matched_at) VALUES (1, ?, 'game_winner', '', 2, '[]', ?)", (PAIR["label"], NOW))
+    def kalshi_vanishes_and_polymarket_loses_its_bids():
+        latest.pop(("kalshi", "k"))
+        latest[("polymarket_us", "pm")] = Quote("polymarket_us", "pm", NOW, [], [[0.45, 100]])
+
+    run(ex, kalshi_vanishes_and_polymarket_loses_its_bids)
+    assert list(ex.exposed) == [stored(conn)[0]["id"]]                  # 50 yes held, with nothing to flatten against.
+    s = settle.Settler(conn, cash, lambda m: None, executor=ex)
+    s.results = {"polymarket_us": lambda events: {"pm": ("yes", "2026-09-20T17:40:00+00:00")}}
+    latest.update(books())                                              # Kalshi is back and could flatten the rest.
+
+    async def later():
+        await s.settle("2026-09-20T17:45:00+00:00")                     # The contract was decided during the game and has settled.
+        ex.tick("2026-09-20T17:46:00+00:00")
+        await asyncio.gather(*ex.tasks)
+    asyncio.run(later())
+    t = stored(conn)[0]
+    assert ex.exposed == {} and ex.tasks == set()
+    assert (t["yes_held"], t["no_held"], t["yes_payout"], t["settled_at"]) == (50, 0, 50, "2026-09-20T17:40:00+00:00")
+    assert [r[0] for r in conn.execute("SELECT reason FROM ledger ORDER BY id")] == ["buy", "payout"]     # No sale after the payout.
 
 
 def test_rejected_orders_fail_without_a_hedge(tmp_path, quick, monkeypatch):

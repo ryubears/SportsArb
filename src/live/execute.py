@@ -16,7 +16,9 @@ When the two legs fill unevenly the executor goes flat at once. It either
 sells the excess back on its own venue or buys the missing amount on the
 other venue, whichever leaves more money, and books the result with fees.
 What it cannot flatten stays on a list and is tried again on every tick,
-against the books as they are then, until it is flat or the bet pays out.
+against the books as they are then, until it is flat, the bet pays out, or
+the settler says its contracts have resolved. The settler leaves alone a
+trade while an order to flatten it is in flight.
 Only games being played are traded, so capital turns over the same day,
 and an Allocator from allocate.py caps each trade so the money covers every
 game in play. Every trade is stored in the trades table as soon as it is
@@ -90,7 +92,8 @@ class PaperExecutor:
         self.rng = rng or random.Random()
         self.tasks = set()          # Trades in flight, and the retry of exposed ones while it runs.
         self.done = []              # Trades finished since the last summary.
-        self.exposed = []           # (Trade, legs) still holding more on one side than the other.
+        self.exposed = {}           # Trade id maps to (Trade, legs) for trades still holding more on one side than the other.
+        self.flattening = set()     # Ids of exposed trades with an order in flight to flatten them, which the settler leaves alone.
         self.retrying = None        # The task flattening exposed trades while one runs.
         self.totals = {"trades": 0, "profit": 0.0, "hedge": 0.0}
 
@@ -251,7 +254,7 @@ class PaperExecutor:
             trade.hedge = trade.hedge + ", " + ", ".join(notes) if trade.hedge != "none" else ", ".join(notes)
         database.update_trade(self.conn, trade)
         if legs[0]["held"] != legs[1]["held"]:
-            self.exposed.append((trade, legs))
+            self.exposed[trade.id] = (trade, legs)
         self.totals["trades"] += 1
         self.totals["profit"] += trade.profit
         self.totals["hedge"] += trade.hedge_pnl
@@ -267,17 +270,29 @@ class PaperExecutor:
         trade.yes_cost, trade.no_cost = legs[0]["cost"], legs[1]["cost"]
         trade.status = "failed" if trade.matched == 0 else "partial" if trade.matched < trade.quantity else "filled"
 
+    def settled(self, trade_id):
+        """
+        Called by the settler when a trade has settled. Its contracts have resolved, so it is not flattened any more.
+        """
+        self.exposed.pop(trade_id, None)
+
     async def retry(self, now):
         """
         Try once more to flatten every exposed trade against the current books.
         A trade past its payout time is left to settle as it stands.
         """
-        for trade, legs in list(self.exposed):
+        for trade_id, (trade, legs) in list(self.exposed.items()):
+            if trade_id not in self.exposed:
+                continue        # Settled while an earlier trade was being flattened.
             if now >= trade.pays_at:
-                self.exposed.remove((trade, legs))
+                del self.exposed[trade_id]
                 continue
             before = trade.hedge_pnl
-            note = await self.flatten(trade, legs)
+            self.flattening.add(trade_id)
+            try:
+                note = await self.flatten(trade, legs)
+            finally:
+                self.flattening.discard(trade_id)
             if not note or note.startswith(("sold back 0", "bought 0")):
                 continue
             self.settle_legs(trade, legs)
@@ -287,7 +302,7 @@ class PaperExecutor:
             self.totals["hedge"] += trade.hedge_pnl - before
             self.log(f"paper flattened {trade.label}: {note}, {left} still exposed, hedge {trade.hedge_pnl:+.2f}$")
             if not left:
-                self.exposed.remove((trade, legs))
+                del self.exposed[trade_id]
 
     async def flatten(self, trade, legs):
         """
