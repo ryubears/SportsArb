@@ -175,10 +175,10 @@ def test_old_settlement_rows_are_folded_into_their_trades(tmp_path):
 
 
 def test_every_model_writes_only_columns_its_table_has():
-    from db.models import Ledger, Order, Settlement, Trade, Transfer
+    from db.models import Alert, Ledger, Order, Settlement, Trade, Transfer
     conn = database.connect(":memory:")
     for table, model in (("bets", Bet), ("gaps", Gap), ("opportunities", Opportunity), ("trades", Trade), ("settlements", Settlement),
-                         ("orders", Order), ("ledger", Ledger), ("transfers", Transfer)):
+                         ("orders", Order), ("ledger", Ledger), ("alerts", Alert), ("transfers", Transfer)):
         table_columns = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
         assert set(database.columns(model)) <= set(table_columns), table
         assert set(table_columns) - set(database.columns(model)) <= {"id"}, table      # Nothing in the table the model forgets.

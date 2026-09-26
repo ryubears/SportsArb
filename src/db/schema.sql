@@ -179,6 +179,17 @@ CREATE TABLE IF NOT EXISTS ledger (
     balance      REAL NOT NULL      -- The venue's balance after this entry, so the newest entry gives the balance.
 );
 
+-- Everything the live process told a human, by notify.py, whether or not the email went out.
+CREATE TABLE IF NOT EXISTS alerts (
+    id           INTEGER PRIMARY KEY,
+    ts           TEXT NOT NULL,
+    kind         TEXT NOT NULL,     -- 'rebalance' when the live venues drifted apart, 'halt' when live trading stopped.
+    subject      TEXT NOT NULL,
+    body         TEXT NOT NULL,
+    sent_at      TEXT,              -- When the email went out, null until it has.
+    error        TEXT               -- Why it could not be sent, for example no email settings in data/.
+);
+
 CREATE TABLE IF NOT EXISTS transfers (
     id           INTEGER PRIMARY KEY,
     from_venue   TEXT NOT NULL,

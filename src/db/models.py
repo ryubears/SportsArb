@@ -232,6 +232,20 @@ class Ledger:
 
 
 @dataclass
+class Alert:
+    """
+    Something the live process told a human by email.
+    """
+    id: int | None = row_id()
+    ts: str
+    kind: str               # 'rebalance' when the live venues drifted apart, 'halt' when live trading stopped.
+    subject: str
+    body: str
+    sent_at: str | None = None      # When the email went out, None until it has.
+    error: str | None = None        # Why it could not be sent.
+
+
+@dataclass
 class Transfer:
     """
     A rebalancing transfer between venues.

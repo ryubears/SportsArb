@@ -64,7 +64,7 @@ def print_storage(conn):
     print(f"database {DB_PATH}")
     print(f"size {size / 1e6:,.0f} MB")
     # Listed in pipeline order rather than alphabetically.
-    tables = ["contracts", "bets", "pairs", "quotes", "gaps", "opportunities", "trades", "settlements", "orders", "ledger", "transfers"]
+    tables = ["contracts", "bets", "pairs", "quotes", "gaps", "opportunities", "trades", "settlements", "orders", "ledger", "alerts", "transfers"]
     print_table("tables", ("table", "rows"), [(t, f"{first_value(conn, f'SELECT COUNT(*) FROM {t}'):,}") for t in tables])
 
 

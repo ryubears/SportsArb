@@ -14,6 +14,7 @@ SQLite browser. The tables follow the pipeline in order.
     settlements    how each trade's legs paid out, by settle.py
     orders         every real order the live executor sent, by execute/live.py
     ledger         every paper cash movement per venue, by balances.py
+    alerts         everything the live process emailed a human, by notify.py
     transfers      paper rebalancing transfers between venues, by rebalance.py
 
 Trades and settlements carry a mode, 'paper' or 'live', and every read of
@@ -28,7 +29,7 @@ from dataclasses import asdict, fields
 from common import jsonutil
 from common.paths import DATA_DIR
 from db import migrations, schema
-from db.models import Bet, Gap, Ledger, Opportunity, Order, Quote, Settlement, Trade, Transfer
+from db.models import Alert, Bet, Gap, Ledger, Opportunity, Order, Quote, Settlement, Trade, Transfer
 from pathlib import Path
 
 DB_PATH = DATA_DIR / "sportsarb.sqlite"
@@ -437,6 +438,33 @@ def last_balances(conn):
     """
     return {venue: balance for venue, balance in conn.execute(
         "SELECT venue, balance FROM ledger WHERE id IN (SELECT MAX(id) FROM ledger GROUP BY venue)")}
+
+
+# ALERTS
+
+def insert_alert(conn, alert):
+    """
+    Store an Alert as it is raised and set its id.
+    """
+    cur = conn.execute(insert_sql("alerts", Alert), asdict(alert))
+    conn.commit()
+    alert.id = cur.lastrowid
+    return alert.id
+
+
+def update_alert(conn, alert):
+    """
+    Write whether an Alert's email went out.
+    """
+    conn.execute(update_sql("alerts", ["sent_at", "error"]), asdict(alert))
+    conn.commit()
+
+
+def last_alert_ts(conn, kind):
+    """
+    When the newest alert of a kind was raised, or None when there has been none.
+    """
+    return conn.execute("SELECT MAX(ts) FROM alerts WHERE kind = ?", (kind,)).fetchone()[0]
 
 
 # TRANSFERS
