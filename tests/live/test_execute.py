@@ -5,6 +5,7 @@ Tests for the paper executor, with fixed latency and no randomness unless a test
 import asyncio
 import random
 import pytest
+from common import config
 from db import database
 from db.models import Quote
 from live import balances, execute, scan, settle
@@ -29,11 +30,11 @@ def books(pm_bid=0.44, pm_ask=0.45, k_bid=0.53, k_ask=0.54, size=100):
 
 @pytest.fixture
 def quick(monkeypatch):
-    monkeypatch.setattr(execute, "LATENCY_MS", {"kalshi": (1, 0), "polymarket_us": (1, 0)})
-    monkeypatch.setattr(execute, "REJECT_PROBABILITY", 0)
+    monkeypatch.setattr(config, "LATENCY_MS", {"kalshi": (1, 0), "polymarket_us": (1, 0)})
+    monkeypatch.setattr(config, "REJECT_PROBABILITY", 0)
 
 
-def executor(tmp_path, latest, log=lambda m: None, start=balances.BALANCE):
+def executor(tmp_path, latest, log=lambda m: None, start=config.START_BALANCE):
     conn = database.connect(tmp_path / "t.sqlite")
     cash = balances.Balances(conn, start)
     return conn, cash, execute.PaperExecutor(conn, cash, lambda: latest, log, random.Random(1))
@@ -181,7 +182,7 @@ def test_a_settled_trade_is_not_flattened_any_more(tmp_path, quick):
 
 
 def test_rejected_orders_fail_without_a_hedge(tmp_path, quick, monkeypatch):
-    monkeypatch.setattr(execute, "REJECT_PROBABILITY", 1)
+    monkeypatch.setattr(config, "REJECT_PROBABILITY", 1)
     latest = books()
     conn, cash, ex = executor(tmp_path, latest)
     run(ex)

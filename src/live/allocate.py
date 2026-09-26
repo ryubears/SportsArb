@@ -6,7 +6,7 @@ about half an hour after the final whistle. The games in that window at
 any moment are the active games, and they share the pool: the free cash
 on a venue plus what the active games already hold. Each active game's
 share is the pool divided by the number of active games. The cap on one
-trade is that share divided by DOLLARS_PER_CAP, which turns a dollar
+trade is that share divided by config.DOLLARS_PER_CAP, which turns a dollar
 budget into a cap: on the first live game, every contract of cap led to
 about 20 dollars of spending on each venue by the final whistle, so a
 budget of 1,000 dollars is spent by a cap of 50. Both venues are sized
@@ -19,13 +19,10 @@ games share it. A game that has spent its share gets nothing more, and a
 game not in play gets nothing at all, since trades are only taken live.
 """
 
+from common import config
 from common.venues import VENUES
 from db import database
 from live.gametime import in_play, in_play_or_settling
-
-DOLLARS_PER_CAP = 20    # Dollars a game spends on each venue, over the whole game, for every contract of cap. From the first live game.
-MIN_CAP = 5             # Contracts per trade, the least worth sending.
-MAX_CAP = 500           # Contracts per trade, the most one trade may hold.
 
 
 def game_key(pair):
@@ -91,8 +88,8 @@ class Allocator:
         held = self.deployed().get(key, {})
         if any(shares[venue] - held.get(venue, 0.0) <= 0 for venue in VENUES):
             return 0
-        cap = int(min(shares.values()) / DOLLARS_PER_CAP)
-        return 0 if cap < MIN_CAP else min(cap, MAX_CAP)
+        cap = int(min(shares.values()) / config.DOLLARS_PER_CAP)
+        return 0 if cap < config.MIN_CAP else min(cap, config.MAX_CAP)
 
     def summary(self, now):
         """
@@ -102,4 +99,4 @@ class Allocator:
         if not active:
             return "capital: no games in play"
         share = min(shares.values())
-        return f"capital: {len(active)} games in play or settling, {share:,.0f}$ a venue each, cap {int(share / DOLLARS_PER_CAP)}"
+        return f"capital: {len(active)} games in play or settling, {share:,.0f}$ a venue each, cap {int(share / config.DOLLARS_PER_CAP)}"

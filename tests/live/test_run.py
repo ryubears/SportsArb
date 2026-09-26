@@ -14,7 +14,7 @@ def test_run_survives_a_failing_refresh(tmp_path, monkeypatch, capsys, fake_stre
     for venue in streams.STREAMS:
         monkeypatch.setitem(streams.STREAMS, venue, fake_stream)
     conn = database.connect(tmp_path / "test.sqlite")
-    asyncio.run(run.run(conn, "nfl", seconds=3, catalog_seconds=1))
+    asyncio.run(run.run(conn, run.RunOptions(sport="nfl", seconds=3, catalog_seconds=1)))
     out = capsys.readouterr().out
     assert "starting nfl, code " in out.splitlines()[0]
     assert "catalog refresh failed (RuntimeError('kalshi is down')), starting with the stored catalog" in out

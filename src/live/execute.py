@@ -3,7 +3,7 @@ Paper trade the scanner's signals against the live books.
 
 When the scanner sees a pair with enough net edge, the executor pretends to
 send one limit order per leg. Each leg's limit is the deepest level that
-still leaves MIN_EDGE when both ladders are walked together, so the order
+still leaves config.MIN_EDGE when both ladders are walked together, so the order
 sweeps every level above the floor, not just the top one. Each order
 arrives at its venue after a random latency drawn from what we measured,
 and fills against the book as it is at that moment, from the same in
@@ -32,21 +32,13 @@ import dataclasses
 import math
 import random
 from dataclasses import dataclass
+from common import config
 from common.log import on_failure
 from common.timeutil import now_iso
 from db import database
 from db.models import Ledger, Trade
-from live import allocate, gametime
+from live import gametime
 from live.pricing import depth, ladder, sell_ladder, sweep, trade_words
-
-MIN_EDGE = 0.05             # Net dollars per contract at the top before orders are sent, and the floor for the deeper levels they sweep.
-                            # In-game, 2 to 3 cent edges lost money after hedging.
-FILL_SHARE = 0.5            # The share of visible size at a level assumed to be ours. Other takers get the rest.
-REJECT_PROBABILITY = 0.03   # The share of orders a venue rejects outright, for rate limits and errors.
-# Signal to fill latency per venue, as median milliseconds and the sigma of a lognormal draw. From us-east-1 a signed
-# request round trip is about 35 ms to Kalshi and 30 ms to Polymarket US, and on top of that sit the feed's own lag
-# in showing us the book and the venue's matching, so the medians are set above the round trips.
-LATENCY_MS = {"kalshi": (50, 0.35), "polymarket_us": (60, 0.35)}
 
 
 @dataclass
@@ -121,12 +113,12 @@ class PaperExecutor:
         when the edge, the game being in play, and the balances allow. Returns
         True when orders were sent, so the scanner sends no more for this episode.
         The scanner's size counts every level with a positive edge. The legs
-        are sized here from the levels that keep MIN_EDGE instead, and each
+        are sized here from the levels that keep config.MIN_EDGE instead, and each
         limit is set at the deepest of them. The cost is reserved here,
         before anything is awaited, so a second signal in the same moment
         sees what is left.
         """
-        if edge < MIN_EDGE:
+        if edge < config.MIN_EDGE:
             return False
         kickoff = gametime.kickoff((yes, no))
         if not kickoff or not gametime.in_play(kickoff, now):
@@ -136,10 +128,10 @@ class PaperExecutor:
         legs = [Leg(side, member, fee_infos[(member["venue"], member["contract_id"])]) for side, member in (("yes", yes), ("no", no))]
         yes_leg, no_leg = legs
         yes_leg.limit, no_leg.limit, available = depth(*(ladder(books[l.key], l.polarity, l.side) for l in legs),
-                                                       (yes_leg.venue, yes_leg.fee_info), (no_leg.venue, no_leg.fee_info), MIN_EDGE)
+                                                       (yes_leg.venue, yes_leg.fee_info), (no_leg.venue, no_leg.fee_info), config.MIN_EDGE)
         # Ask for the share of the visible size we expect to get, so an unchanged book fills in full.
-        cap = self.allocator.cap(pair, now) if self.allocator else allocate.MAX_CAP
-        quantity = int(min(available * FILL_SHARE, cap, *(self.cash[l.venue] // l.limit for l in legs))) if available else 0
+        cap = self.allocator.cap(pair, now) if self.allocator else config.MAX_CAP
+        quantity = int(min(available * config.FILL_SHARE, cap, *(self.cash[l.venue] // l.limit for l in legs))) if available else 0
         if quantity < 1:
             return False
         for l in legs:
@@ -169,7 +161,7 @@ class PaperExecutor:
     # ORDERS
 
     def latency(self, venue):
-        median, sigma = LATENCY_MS[venue]
+        median, sigma = config.LATENCY_MS[venue]
         return int(self.rng.lognormvariate(math.log(median), sigma))
 
     async def arrive(self, venue):
@@ -185,12 +177,12 @@ class PaperExecutor:
         Send one leg's buy order and fill it against the book as it is when the order arrives.
         """
         ms, ts = await self.arrive(leg.venue)
-        if self.rng.random() < REJECT_PROBABILITY:
+        if self.rng.random() < config.REJECT_PROBABILITY:
             return Fill(ms=ms, ts=ts, note="rejected")
         quote = self.books().get(leg.key)
         if quote is None:
             return Fill(ms=ms, ts=ts, note="no book")
-        filled, dollars = sweep(ladder(quote, leg.polarity, leg.side), leg.quantity, leg.venue, leg.fee_info, FILL_SHARE, limit=leg.limit)
+        filled, dollars = sweep(ladder(quote, leg.polarity, leg.side), leg.quantity, leg.venue, leg.fee_info, config.FILL_SHARE, limit=leg.limit)
         return Fill(filled, dollars, ms, ts)
 
     async def sell_back(self, leg, quantity):
@@ -202,7 +194,7 @@ class PaperExecutor:
         quote = self.books().get(leg.key)
         if quote is None:
             return Fill(ms=ms, ts=ts)
-        filled, dollars = sweep(sell_ladder(quote, leg.polarity, leg.side), quantity, leg.venue, leg.fee_info, FILL_SHARE, selling=True)
+        filled, dollars = sweep(sell_ladder(quote, leg.polarity, leg.side), quantity, leg.venue, leg.fee_info, config.FILL_SHARE, selling=True)
         return Fill(filled, dollars, ms, ts)
 
     # TRADES
@@ -296,13 +288,13 @@ class PaperExecutor:
         buyable = 0
         if books.get(long_leg.key):
             n, dollars = sweep(sell_ladder(books[long_leg.key], long_leg.polarity, long_leg.side), excess,
-                               long_leg.venue, long_leg.fee_info, FILL_SHARE, selling=True)
+                               long_leg.venue, long_leg.fee_info, config.FILL_SHARE, selling=True)
             sell_value = dollars - n * average if n else None
         if books.get(short_leg.key):
             levels = ladder(books[short_leg.key], short_leg.polarity, short_leg.side)
             # Only what the other venue's balance can pay for.
             buyable = min(excess, int(self.cash[short_leg.venue] // levels[0][0])) if levels else 0
-            n, dollars = sweep(levels, buyable, short_leg.venue, short_leg.fee_info, FILL_SHARE)
+            n, dollars = sweep(levels, buyable, short_leg.venue, short_leg.fee_info, config.FILL_SHARE)
             buy_value = n * (1 - average) - dollars if n else None
         if sell_value is None and buy_value is None:
             return None

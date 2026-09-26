@@ -146,11 +146,10 @@ resubscribes. The instance was
 first placed in Mexico to reach polymarket.com, which was then dropped as a
 venue for legal reasons in favor of Polymarket US, and moved to us-east-1.
 
-`scripts/ops.sh` runs the commands used to check the data, deploy, and
-operate the instance, for example `scripts/ops.sh health` or
-`scripts/ops.sh deploy`, and `scripts/ops.sh help` lists them. It reads
-the instance's address, key, and ids from `scripts/ops.env`, which is
-gitignored; copy `scripts/ops.env.example` to start one.
+`commands.txt` holds the commands used to check the data, deploy, and
+operate the instance, with the instance's address, key, and ids at the top
+as variables the commands read. It is gitignored, so it lives only on the
+machine that operates the instance.
 
 The process is light. It holds 4,900 books in about 190 MB of memory,
 and the database grows by roughly 500 MB a day.
@@ -255,7 +254,11 @@ python3 -m live.run --sport nfl
 ```
 
 `--no-trade` scans without paper trading, `--no-scan` only records, and
-`--seconds 120` runs a short test. The streams need venue keys in `data/`:
+`--seconds 120` runs a short test. The settings a run is tuned by, such as
+the minimum edge, the trade caps, and the starting balance, are in
+`src/common/config.py`, and `--set NAME=VALUE` overrides one for a run,
+for example `python3 -m live.run --sport nfl --set min_edge=0.03`. The run
+logs every setting when it starts. The streams need venue keys in `data/`:
 `kalshi_key_id.txt` and `kalshi_private_key.pem` for Kalshi,
 `polymarket_us_key_id.txt` and `polymarket_us_secret_key.txt` for
 Polymarket US. Then read the report:
@@ -270,10 +273,10 @@ python3 src/tools/summary.py --hours 24
 src/
   api/        venue clients and the shared websocket book stream
   catalog/    fetch, classify (one parser per venue), match, pipeline
-  common/     paths, time helpers, json helpers, the venue list, the logger
+  common/     the settings a run is tuned by, paths, time and json helpers, the venue list, the logger
   db/         models, the SQLite schema and its migrations, reads and writes
   live/       run, record, streams, scan, pricing, fees, execute, allocate, gametime, balances, settle, rebalance
   tools/      summary report
 tests/        mirrors src, run with pytest, configured in pyproject.toml
-scripts/      ops.sh for operating the AWS instance
+commands.txt  operating the AWS instance, gitignored, kept locally
 ```

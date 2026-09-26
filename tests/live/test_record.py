@@ -2,6 +2,7 @@
 Tests for the recorder's write rules.
 """
 
+from common import config
 from db import database
 from live import record
 
@@ -23,7 +24,7 @@ def test_flush_writes_only_when_the_best_level_changes(tmp_path):
 def test_books_are_trimmed_to_the_kept_levels(tmp_path):
     r = record.Recorder(database.connect(tmp_path / "test.sqlite"))
     r.on_book("polymarket_us", "T", [[0.5 - i / 100, 1] for i in range(10)], [[0.51, 1]])
-    assert len(r.latest[("polymarket_us", "T")].bids) == record.LEVELS
+    assert len(r.latest[("polymarket_us", "T")].bids) == config.BOOK_LEVELS
 
 
 def test_status_reports_time_since_each_venue_updated(tmp_path):

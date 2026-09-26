@@ -94,7 +94,7 @@ def test_scanner_marks_live_and_uses_kickoff_for_payout(tmp_path):
                       quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]])])[0]
     assert o.live == 1
     assert o.end_ts == "2026-09-19T12:00:01+00:00"
-    assert o.days_held == pytest.approx((gametime.PAYOUT_HOURS - 1) / 24, rel=1e-3)
+    assert o.days_held == pytest.approx((gametime.payout_hours() - 1) / 24, rel=1e-3)
 
 
 def test_scanner_holds_until_the_slower_leg_pays(tmp_path):

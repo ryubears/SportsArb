@@ -16,16 +16,12 @@ pricing itself lives in pricing.py.
 """
 
 from collections import defaultdict
+from common import config
 from common.timeutil import now_iso, seconds_between
 from db import database
 from db.models import Opportunity
 from live.gametime import pays_at as payout_time
 from live.pricing import best_trade, trade_words
-
-TARGET_ANNUAL_PCT = 10  # The return an opportunity must beat to be worth the risk.
-MAX_QUOTE_AGE = 60      # Seconds. A member whose newest book is older than this is left out, it may be stale.
-SUMMARY_SECONDS = 600   # How often the live scanner logs its episode summary.
-LOG_PROFIT_DOLLARS = 10 # Live episodes worth at least this at the peak are logged as they end.
 
 
 # EPISODES
@@ -66,7 +62,7 @@ class Scanner:
     Tracks episodes for the pairs of a sport from a map of the newest
     books, keyed by (venue, contract_id). Only the pairs a contract belongs
     to are priced when its book changes. A member is left out while its book
-    is older than MAX_QUOTE_AGE or missing from the map, which is how the
+    is older than config.MAX_QUOTE_AGE or missing from the map, which is how the
     recorder says a venue's books went unseen. Groups and fee schedules come
     from the database and are reloaded after each catalog refresh. Every
     finished episode is stored at once, and the big ones are logged. With
@@ -103,7 +99,7 @@ class Scanner:
         """
         members = [m for m in pair["members"]
                    if (m["venue"], m["contract_id"]) in latest
-                   and seconds_between(latest[(m["venue"], m["contract_id"])].ts, now) <= MAX_QUOTE_AGE]
+                   and seconds_between(latest[(m["venue"], m["contract_id"])].ts, now) <= config.MAX_QUOTE_AGE]
         if len(members) < 2:
             return None
         return best_trade(members, latest, self.fee_infos)
@@ -148,7 +144,7 @@ class Scanner:
         o = finish(episode["pair"], episode["peak"], episode["start_ts"], now)
         database.insert_opportunities(self.conn, [o])
         self.finished.append((episode["pair"]["kind"], o))
-        if o.peak_profit >= LOG_PROFIT_DOLLARS:
+        if o.peak_profit >= config.LOG_PROFIT_DOLLARS:
             self.log(f"episode {episode['pair']['label']}: {o.trade}, {100 * o.peak_edge:.1f}c x {o.peak_size:.0f} = {o.peak_profit:.2f}$, lasted {o.seconds:.1f}s")
 
     def summary(self):
@@ -161,7 +157,7 @@ class Scanner:
         parts = []
         for kind, os in sorted(by_kind.items()):
             best = max(os, key=lambda o: o.peak_profit)
-            beat = sum(1 for o in os if o.annual_pct is not None and o.annual_pct >= TARGET_ANNUAL_PCT)
+            beat = sum(1 for o in os if o.annual_pct is not None and o.annual_pct >= config.TARGET_ANNUAL_PCT)
             parts.append(f"{kind} {len(os)} episodes, {beat} beat target, best {best.peak_profit:.2f}$ for {best.seconds:.0f}s")
         self.finished = []
         return f"scanner: {'; '.join(parts) if parts else 'no episodes'}; {len(self.episodes)} open"
