@@ -16,8 +16,8 @@ the two paper balances level. No real orders are sent.
 
 Everything lives in `src/` and reads or writes one SQLite file,
 `data/sportsarb.sqlite`. The tables follow the pipeline in order:
-contracts, bets, pairs, quotes, gaps, opportunities, trades, ledger,
-transfers. Every table has a model in `db/models.py` and its
+contracts, bets, pairs, quotes, gaps, opportunities, trades, settlements,
+ledger, transfers. Every table has a model in `db/models.py` and its
 schema in `db/schema.sql`. Changes to a table for databases that
 already exist are numbered steps in `db/migrations.py`, and
 `db/database.py` holds the reads and writes.
@@ -94,8 +94,12 @@ including the venue's taker fee from **fees.py**. An episode is a stretch
 where the net edge stays positive. When it ends it is stored as an
 `Opportunity` with its legs, duration, peak edge, how many contracts the
 recorded depth would have filled at the peak, and the return on the capital
-tied up, annualized as if held until the bet pays out. The scanner also
-calls the executor once per episode.
+tied up, annualized as if held until the bet pays out. While an episode
+is open the scanner offers it to the executor on every update until the
+executor takes a trade, and then not again: paper orders take nothing out
+of the recorded books, so a second trade on the same quotes would count
+the same contracts twice. The edge coming back after it has gone is a new
+episode.
 
 **execute.py** paper trades the signal. It pretends to send one limit order
 per leg. Both ladders are walked together and each leg's limit is set at
@@ -108,11 +112,19 @@ Only half the visible size at a level is assumed to be ours, and 3% of
 orders are rejected outright. A leg that filled short is flattened at
 once, by selling the excess back or buying the missing side on the other
 venue, whichever the books say leaves more money, and whatever stays
-exposed is tried again on every tick until it is flat or the bet pays
-out. Signals need a net edge of at least five cents per contract and a
-payout within a day, and a trade is capped at 50 contracts, about $50 of
-capital across both legs, so a full Sunday slate fits the balances. Every
-trade is stored as soon as it is sent and updated when it is done.
+exposed is tried again on every tick until it is flat, the bet pays out,
+or the settler settles it. Signals need a net edge of at least five cents
+per contract, and only games being played are traded, so the money comes
+back the same day. Every trade is stored as soon as it is sent and
+updated when it is done.
+
+**allocate.py** sets how many contracts one trade may hold, so the money
+covers every game in play. The games from kickoff until they settle share
+each venue's pool, its free cash plus what they already hold, equally.
+A game's share becomes a cap at $20 of spending per contract of cap, the
+rate the first live game showed, between 5 and 500 contracts. A game that
+has spent its share gets nothing more until others settle and fewer games
+share the pool.
 
 **balances.py**, **settle.py**, **rebalance.py** keep the paper books.
 Each venue starts with $10,000. Money for an order in flight is reserved
@@ -124,7 +136,10 @@ reads the newest row instead of replaying history. From kickoff, every 30
 seconds, the settler asks the venues how the contracts of open trades
 resolved, pays the winning leg a dollar a contract, and stores each leg's
 result, payout, and settlement time as the trade's `Settlement`, which is
-what a tax return needs. On Tuesdays, once Monday night's trades have
+what a tax return needs. A trade still exposed on one side is settled as
+it stands, each leg paid for what it holds. The settler skips a trade
+while an order to flatten it is in flight, and once a trade settles the
+executor stops flattening it. On Tuesdays, once Monday night's trades have
 settled, the rebalancer compares the venues and, when one sits more than
 25% above the average, sends the excess to the other as a `Transfer` that
 takes four business days, during which the money is on neither venue. A
@@ -134,7 +149,8 @@ venue under $500 is topped up on any day, also once no trade is open.
 
 `src/tools/summary.py` prints a report from the database: row counts,
 pairs by kind, recording health, opportunities by kind with the largest
-that beat a 10% annual return, and paper trades by outcome and kind.
+that beat a 10% annual return, paper trades by outcome and kind, settled
+legs by venue, and each venue's balance with any transfer in transit.
 `--hours` sets the window.
 
 ## Deployment
@@ -147,7 +163,8 @@ and restarts it on any exit. The venue API keys live in `data/`, which is
 gitignored, and are copied to the instance by `scp` only. Deploying is
 `git pull` on the instance, the tests, and a service restart only if they
 pass, which refreshes the catalog for about 80 seconds and then
-resubscribes. The instance was
+resubscribes. Each run logs the commit it runs and every setting when it
+starts, so the log says what produced its results. The instance was
 first placed in Mexico to reach polymarket.com, which was then dropped as a
 venue for legal reasons in favor of Polymarket US, and moved to us-east-1.
 
@@ -229,7 +246,8 @@ resolutions happened to go the right way.
 That game set the current limits. Thin edges are not worth the race, so
 the minimum is five cents. At 500 contracts the game wanted $31,000
 against $20,000 available and the last quarter hour went untraded, so
-the cap is 50, which fits the nine games of a Sunday early window. Two
+the cap was set to 50, which fits the nine games of a Sunday early
+window; the allocator has since replaced that fixed cap. Two
 execution flaws it exposed are fixed: orders now sweep the levels above
 the edge floor instead of only the top level, and a level too small for a
 whole contract no longer ends a ladder walk, which is what had turned
