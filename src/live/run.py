@@ -31,6 +31,7 @@ import asyncio
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from catalog import pipeline
 from common import config
 from common.log import log, with_traceback
@@ -42,6 +43,19 @@ from live.record import Recorder, load_targets
 from live.streams import Streams
 
 CATALOG_MINUTES = 60    # How often the catalog is refreshed and subscriptions updated. Zero disables it.
+
+
+@dataclass(frozen=True)
+class RunOptions:
+    """
+    What one run of the live process does, as the command line sets it.
+    """
+    sport: str = "nfl"
+    seconds: float = 0                              # Stop after this many seconds, or never when zero.
+    catalog_seconds: float = CATALOG_MINUTES * 60   # Between catalog refreshes, or never when zero.
+    refresh_at_start: bool = True                   # Refresh the catalog before streaming, when refreshes are on.
+    scan: bool = True                               # Price the books and store episodes.
+    trade: bool = True                              # Paper trade the scanner's signals, when scanning.
 
 
 def code_version():
@@ -163,21 +177,22 @@ class Session:
         log(self.recorder.status())
 
 
-async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True, with_scanner=True, with_trading=True):
+async def run(conn, options):
     """
-    Refresh the catalog, start a Session, tick it every config.FLUSH_SECONDS, and
-    keep the catalog fresh on a timer. Stops after the given seconds, or
-    never when zero. A refresh that fails is logged and tried again at the
-    next interval, so a bad fetch never stops the recording.
+    Refresh the catalog, start a Session, tick it every config.FLUSH_SECONDS,
+    and keep the catalog fresh on a timer, as the RunOptions say. A refresh
+    that fails is logged and tried again at the next interval, so a bad
+    fetch never stops the recording.
     """
+    sport, seconds, catalog_seconds = options.sport, options.seconds, options.catalog_seconds
     log(f"starting {sport}, code {code_version()}")
-    if catalog_seconds and refresh_at_start:
+    if catalog_seconds and options.refresh_at_start:
         log("refreshing catalog before starting")
         try:
             log(await asyncio.to_thread(pipeline.refresh, sport, log))
         except Exception as e:
             log(with_traceback(f"catalog refresh failed ({e!r}), starting with the stored catalog", e))
-    session = Session(conn, sport, with_scanner, with_trading)
+    session = Session(conn, sport, options.scan, options.trade)
     session.start()
     started = last_catalog = time.time()
     refresh = None      # The background catalog refresh while one is running.
@@ -219,9 +234,11 @@ if __name__ == "__main__":
         config.override(args.set)
     except ValueError as e:
         ap.error(str(e))
+    options = RunOptions(sport=args.sport, seconds=args.seconds, catalog_seconds=args.catalog_minutes * 60,
+                         refresh_at_start=not args.skip_refresh, scan=not args.no_scan, trade=not args.no_trade)
     sys.stdout.reconfigure(line_buffering=True)     # Print immediately even when output goes to a file.
     with database.connect() as conn:
         try:
-            asyncio.run(run(conn, args.sport, args.seconds, args.catalog_minutes * 60, not args.skip_refresh, not args.no_scan, not args.no_trade))
+            asyncio.run(run(conn, options))
         except KeyboardInterrupt:
             print("stopped")
