@@ -7,10 +7,11 @@ prop as soon as it is decided and both venues settle the rest within
 half an hour of the final whistle. A trade with no game behind it is
 checked from its payout time. Each pass costs one Kalshi call per fifty
 tickers and one Polymarket US call per event, and the next pass starts
-config.SETTLE_CHECK_SECONDS after the previous one began. Winning legs are paid a
-dollar a contract through the shared Balances and each leg's result and
-payout is stored as the trade's Settlement. A trade settles only once every held leg
-has a result, so a venue that is slow to resolve just delays it.
+config.SETTLE_CHECK_SECONDS after the previous one began. Winning legs are
+paid a dollar a contract through the shared Balances, and each leg's
+result and payout is stored as the trade's Settlement. A trade settles
+only once every held leg has a result, so a venue that is slow to resolve
+just delays it.
 
 A trade still exposed on one side may be settled while the executor keeps
 trying to flatten it. The two stay apart: the settler skips a trade while
@@ -58,7 +59,8 @@ class Settler:
     async def settle(self, now):
         """
         Ask the venues how the contracts of open trades whose game has
-        started resolved, pay the winning legs, and write each leg's result on the trade.
+        started resolved, pay the winning legs, and store each leg's result
+        and payout as the trade's Settlement once every held leg has one.
         """
         due = [t for t in database.load_open_trades(self.conn) if (t.starts_at or t.pays_at) <= now]
         if not due:
