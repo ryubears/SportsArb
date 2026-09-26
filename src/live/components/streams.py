@@ -43,8 +43,8 @@ class Streams:
         """
         Open one more connection for a venue, carrying these contracts.
         """
-        stream = self.stream_classes[venue](list(contract_ids), lambda cid, b, a: self.on_book(venue, cid, b, a), log,
-                                            on_gap=lambda start_ts, end_ts: self.recorder.on_gap(venue, start_ts, end_ts))
+        stream = self.stream_classes[venue](list(contract_ids), lambda cid, b, a: self.on_book(venue, cid, b, a),
+                                            lambda start_ts, end_ts: self.recorder.on_gap(venue, start_ts, end_ts), log)
         self.streams[venue].append(stream)
         self.tasks.append(asyncio.create_task(stream.run()))
         return stream
@@ -58,7 +58,7 @@ class Streams:
         for i in range(0, max(len(ids), 1), size):
             self.open(venue, ids[i:i + size])
 
-    def place(self, venue, contract_ids):
+    def add(self, venue, contract_ids):
         """
         Add contracts to the venue's connections with room, opening new ones when they are full.
         """
@@ -88,7 +88,7 @@ class Streams:
             for stream in self.streams[venue]:
                 stream.remove(gone & stream.wanted)
             self.recorder.forget(venue, gone)
-            self.place(venue, new)
+            self.add(venue, new)
             if new or gone:
                 changes.append(f"{venue} +{len(new)} -{len(gone)}")
         return ", ".join(changes) or "no changes"

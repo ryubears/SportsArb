@@ -5,7 +5,7 @@ Tests for the paper balances and the ledger behind them.
 import pytest
 from db import database
 from db.models import Ledger
-from live import balances
+from live.components import balances
 
 
 def test_balances_follow_reservations_and_ledger_entries_and_survive_a_restart(tmp_path):
@@ -18,7 +18,7 @@ def test_balances_follow_reservations_and_ledger_entries_and_survive_a_restart(t
     cash.book(Ledger("2026-09-20T17:30:00+00:00", "kalshi", -23.5, "buy", 1))
     cash.book(Ledger("2026-09-20T21:00:00+00:00", "polymarket_us", 50.0, "payout", 1))
     assert cash.amounts == pytest.approx({"kalshi": 9976.5, "polymarket_us": 10050.0})
-    assert (cash.richest(), cash.poorest(), cash.average()) == ("polymarket_us", "kalshi", pytest.approx(10013.25))
+    assert (cash.largest(), cash.smallest(), cash.average()) == ("polymarket_us", "kalshi", pytest.approx(10013.25))
     assert cash.summary() == "kalshi 9,976$, polymarket_us 10,050$"
     assert [tuple(r) for r in conn.execute("SELECT venue, amount, balance FROM ledger ORDER BY id")] == [
         ("kalshi", -23.5, 9976.5), ("polymarket_us", 50.0, 10050.0)]

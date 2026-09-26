@@ -3,7 +3,7 @@ Tests for rebalancing paper money between the venues.
 """
 
 from db import database
-from live import balances, rebalance
+from live.components import balances, rebalance
 
 
 def test_weekly_check_moves_the_excess_and_it_lands_after_four_business_days(tmp_path):

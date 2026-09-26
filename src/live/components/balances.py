@@ -48,10 +48,10 @@ class Balances:
         entry.balance = self.amounts[entry.venue]
         database.add_ledger(self.conn, entry)
 
-    def richest(self):
+    def largest(self):
         return max(self.amounts, key=self.amounts.get)
 
-    def poorest(self):
+    def smallest(self):
         return min(self.amounts, key=self.amounts.get)
 
     def average(self):

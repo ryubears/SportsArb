@@ -12,7 +12,7 @@ class FakeStream:
     """
     instances = []
 
-    def __init__(self, contract_ids, on_book, log, on_gap=None):
+    def __init__(self, contract_ids, on_book, on_gap=None, log=print):
         self.wanted = set(contract_ids)
         self.on_book = on_book
         self.on_gap = on_gap

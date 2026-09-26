@@ -5,7 +5,8 @@ Tests for the scanner's episode detection over the recorder's in memory books.
 import pytest
 from db import database
 from db.models import Bet, Pair, Contract, Opportunity, Quote
-from live import gametime, record, scan
+from common import gametime
+from live.components import record, scan
 
 NO_PM_FEES = {"feeCoefficient": 0}
 NO_K_FEES = {"fee_type": "quadratic", "fee_multiplier": 0}
@@ -61,9 +62,9 @@ def replay(conn, quotes, drops=()):
                 latest = {k: x for k, x in latest.items() if k[0] != venue}
         latest[(q.venue, q.contract_id)] = q
         scanner.on_book(q.venue, q.contract_id, latest, q.ts)
-        scanner.sweep(latest, q.ts)
+        scanner.tick(latest, q.ts)
     if events:
-        scanner.sweep({}, events[-1].ts)
+        scanner.tick({}, events[-1].ts)
     return stored(conn)
 
 
@@ -172,9 +173,9 @@ def test_sweep_closes_an_episode_whose_book_went_stale_or_unseen(tmp_path):
     latest = {("kalshi", "k"): book("kalshi", "k", TL % (0, 1), 0.53, 0.54),
               ("polymarket_us", "pm"): book("polymarket_us", "pm", TL % (0, 2), 0.44, 0.45)}
     s.on_book("polymarket_us", "pm", latest, TL % (0, 2))
-    s.sweep(latest, TL % (0, 30))
+    s.tick(latest, TL % (0, 30))
     assert len(s.episodes) == 1                                 # Still fresh.
-    s.sweep(latest, TL % (1, 30))                               # Kalshi's book is now 89 seconds old.
+    s.tick(latest, TL % (1, 30))                               # Kalshi's book is now 89 seconds old.
     assert s.episodes == {}
     assert stored(conn)[0].end_ts == TL % (1, 30)
     latest = {("kalshi", "k"): book("kalshi", "k", TL % (1, 31), 0.53, 0.54),
@@ -182,7 +183,7 @@ def test_sweep_closes_an_episode_whose_book_went_stale_or_unseen(tmp_path):
     s.on_book("kalshi", "k", latest, TL % (1, 31))
     assert len(s.episodes) == 1
     del latest[("polymarket_us", "pm")]                            # The recorder forgot Polymarket US's books after a drop.
-    s.sweep(latest, TL % (1, 32))
+    s.tick(latest, TL % (1, 32))
     assert s.episodes == {}
 
 

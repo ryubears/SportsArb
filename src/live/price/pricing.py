@@ -11,7 +11,7 @@ positive net edge, and the executor, which fills against the same ladders.
 
 from typing import NamedTuple
 from common.venues import SHORT_NAMES
-from live import fees
+from live.price import fees
 
 
 class Priced(NamedTuple):

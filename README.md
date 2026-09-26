@@ -76,7 +76,8 @@ and rebalancer together, and a one-second timer ticks it: flush the changed
 books, price them, settle and rebalance, and log a status line every
 minute and each component's summary every ten. The same loop starts the
 hourly catalog refresh in a background thread and applies the result to
-the live connections.
+the live connections. The pieces it wires together are in
+`live/components/`, and the pricing they share is in `live/price/`.
 
 **record.py** holds the newest book for every paired contract in memory
 and, on each tick, writes a row with five levels a side for each contract
@@ -273,9 +274,11 @@ python3 src/tools/summary.py --hours 24
 src/
   api/        venue clients and the shared websocket book stream
   catalog/    fetch, classify (one parser per venue), match, pipeline
-  common/     the settings a run is tuned by, paths, time and json helpers, the venue list, the logger
+  common/     the settings a run is tuned by, game timing, paths, time and json helpers, the venue list, the logger
   db/         models, the SQLite schema and its migrations, reads and writes
-  live/       run, record, streams, scan, pricing, fees, execute, allocate, gametime, balances, settle, rebalance
+  live/       run, the process that wires the components together
+    components/  record, streams, scan, execute, allocate, balances, settle, rebalance
+    price/       pricing and fees
   tools/      summary report
 tests/        mirrors src, run with pytest, configured in pyproject.toml
 commands.txt  operating the AWS instance, gitignored, kept locally

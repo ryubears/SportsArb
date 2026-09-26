@@ -6,7 +6,7 @@ import asyncio
 import pytest
 from db import database
 from db.models import Trade
-from live import balances, settle
+from live.components import balances, settle
 
 KICKOFF = "2026-09-20T17:00:00+00:00"
 PAYS_AT = "2026-09-20T21:00:00+00:00"

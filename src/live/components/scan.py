@@ -20,8 +20,8 @@ from common import config
 from common.timeutil import now_iso, seconds_between
 from db import database
 from db.models import Opportunity
-from live.gametime import pays_at as payout_time
-from live.pricing import best_trade, trade_words
+from common.gametime import pays_at as payout_time
+from live.price.pricing import best_trade, trade_words
 
 
 # EPISODES
@@ -111,7 +111,7 @@ class Scanner:
         for pair_id in self.by_contract.get((venue, contract_id), ()):
             self.update(pair_id, latest, now)
 
-    def sweep(self, latest, now):
+    def tick(self, latest, now):
         """
         Price every open episode again, so ones whose books went stale or unseen end.
         """

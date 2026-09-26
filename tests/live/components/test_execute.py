@@ -8,7 +8,7 @@ import pytest
 from common import config
 from db import database
 from db.models import Quote
-from live import balances, execute, scan, settle
+from live.components import balances, execute, scan, settle
 
 NO_PM_FEES = {"feeCoefficient": 0}
 NO_K_FEES = {"fee_type": "quadratic", "fee_multiplier": 0}

@@ -2,7 +2,7 @@
 Tests for the game timing shared by the scanner, executor, allocator, and recorder.
 """
 
-from live import gametime
+from common import gametime
 
 KICKOFF = "2026-09-20T17:00:00+00:00"
 GAME = {"start_time": KICKOFF, "close_time": "2026-09-20T17:00:00+00:00"}

@@ -1,5 +1,5 @@
 """
-When a game is played and when the bets on it pay out.
+Which game a bet is on, when the game is played, and when the bets on it pay out.
 
 Every timing assumption about games lives here, so the recorder, the
 scanner, the executor, and the allocator agree on them. The numbers come
@@ -9,6 +9,13 @@ took 3.05 hours, and both venues settled within half an hour of it.
 
 from common import config
 from common.timeutil import shift
+
+
+def game_key(pair):
+    """
+    What identifies a game across its pairs, or None for a bet with no game.
+    """
+    return (pair["game_date"], pair["team_a"], pair["team_b"]) if pair.get("game_date") else None
 
 
 def payout_hours():

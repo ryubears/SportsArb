@@ -36,7 +36,7 @@ class Rebalancer:
         """
         if database.load_transfers(self.conn, pending_only=True):
             return
-        rich, poor = self.cash.richest(), self.cash.poorest()
+        rich, poor = self.cash.largest(), self.cash.smallest()
         excess = self.cash[rich] - self.cash.average()
         reason = None
         today = now[:10]

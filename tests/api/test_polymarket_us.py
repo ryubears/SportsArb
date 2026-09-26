@@ -24,7 +24,7 @@ def test_levels_drop_empty_sizes_and_sort_best_first():
 
 def test_error_frames_are_logged_and_do_not_count_as_data():
     logs = []
-    stream = polymarket_us.PolymarketUSBookStream(["s"], lambda *args: None, logs.append)
+    stream = polymarket_us.PolymarketUSBookStream(["s"], lambda *args: None, log=logs.append)
     stream.reset()
     assert stream.handle('{"requestId": "md-11", "error": "max subscriptions per connection reached"}') is False
     assert logs == ["polymarket_us stream error max subscriptions per connection reached on md-11"]

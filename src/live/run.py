@@ -38,9 +38,9 @@ from common.log import log, with_traceback
 from common.paths import ROOT
 from common.timeutil import now_iso
 from db import database
-from live import allocate, balances, execute, rebalance, scan, settle
-from live.record import Recorder, load_targets
-from live.streams import Streams
+from live.components import allocate, balances, execute, rebalance, scan, settle
+from live.components.record import Recorder, load_targets
+from live.components.streams import Streams
 
 CATALOG_MINUTES = 60    # How often the catalog is refreshed and subscriptions updated. Zero disables it.
 
@@ -92,16 +92,16 @@ class Session:
     def __init__(self, conn, sport, with_scanner=True, with_trading=True):
         self.conn = conn
         self.sport = sport
-        self.recorder = Recorder(conn)
-        self.streams = Streams(self.recorder)
         trading = with_scanner and with_trading
         cash = balances.Balances(conn) if trading else None
         self.allocator = allocate.Allocator(conn, cash) if trading else None
+        # The executor trades against the recorder's books, which exist once the recorder does, below.
         self.executor = execute.PaperExecutor(conn, cash, lambda: self.recorder.latest, log, allocator=self.allocator) if trading else None
         self.settler = settle.Settler(conn, cash, log, executor=self.executor) if trading else None
         self.rebalancer = rebalance.Rebalancer(conn, cash, log) if trading else None
         self.scanner = scan.Scanner(conn, sport, log, self.executor.signal if self.executor else None) if with_scanner else None
-        self.recorder.scanner = self.scanner
+        self.recorder = Recorder(conn, self.scanner)
+        self.streams = Streams(self.recorder)
         self.last_status = self.last_summary = time.time()
 
     def start(self):
@@ -127,7 +127,7 @@ class Session:
         now = now_iso()
         self.recorder.flush()
         if self.scanner:
-            self.scanner.sweep(self.recorder.latest, now)
+            self.scanner.tick(self.recorder.latest, now)
         if self.executor:
             self.executor.tick(now)
             self.settler.tick(now, time.time())
@@ -170,7 +170,7 @@ class Session:
         await self.streams.stop_all()
         self.recorder.flush()
         if self.scanner:
-            self.scanner.sweep({}, now_iso())
+            self.scanner.tick({}, now_iso())
         if self.executor and self.executor.tasks:
             await asyncio.gather(*self.executor.tasks, return_exceptions=True)
         self.summaries()

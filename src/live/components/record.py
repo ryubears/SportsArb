@@ -35,6 +35,15 @@ def load_targets(conn, sport):
                                            shift(now, hours=-config.RECORD_HOURS))
 
 
+def top(quote):
+    """
+    The best bid and the best ask, each a [price, size] level, or None for a
+    side with no orders. A side can be empty, so the first level is not
+    always there to index.
+    """
+    return (quote.bids[0] if quote.bids else None, quote.asks[0] if quote.asks else None)
+
+
 class Recorder:
     """
     Collects book updates from both venues and writes the changed ones on a
@@ -45,7 +54,7 @@ class Recorder:
         self.conn = conn
         self.scanner = scanner
         self.latest = {}        # (venue, contract_id) maps to the newest Quote seen.
-        self.written = {}       # (venue, contract_id) maps to the best levels last written to the database.
+        self.best = {}          # (venue, contract_id) maps to the best bid and ask in the row last written, see top().
         self.updates = {venue: 0 for venue in VENUES}
         self.last_update = {venue: None for venue in VENUES}       # Wall clock seconds of the newest update per venue.
         self.gaps = {venue: 0 for venue in VENUES}
@@ -60,7 +69,7 @@ class Recorder:
         key = (venue, contract_id)
         before = self.latest.get(key)
         quote = self.latest[key] = Quote(venue, contract_id, now_iso(), bids[:config.BOOK_LEVELS], asks[:config.BOOK_LEVELS])
-        if self.scanner and (before is None or (before.bids[:1], before.asks[:1]) != (quote.bids[:1], quote.asks[:1])):
+        if self.scanner and (before is None or top(before) != top(quote)):
             self.scanner.on_book(venue, contract_id, self.latest, quote.ts)
 
     def on_gap(self, venue, start_ts, end_ts):
@@ -71,7 +80,7 @@ class Recorder:
         database.insert_gap(self.conn, Gap(venue, start_ts, end_ts))
         self.gaps[venue] += 1
         self.latest = {key: q for key, q in self.latest.items() if key[0] != venue}
-        self.written = {key: best for key, best in self.written.items() if key[0] != venue}
+        self.best = {key: best for key, best in self.best.items() if key[0] != venue}
 
     def forget(self, venue, contract_ids):
         """
@@ -79,7 +88,7 @@ class Recorder:
         """
         for contract_id in contract_ids:
             self.latest.pop((venue, contract_id), None)
-            self.written.pop((venue, contract_id), None)
+            self.best.pop((venue, contract_id), None)
 
     def flush(self):
         """
@@ -87,11 +96,11 @@ class Recorder:
         """
         quotes = []
         for key, quote in list(self.latest.items()):
-            best = (quote.bids[:1], quote.asks[:1])
-            if self.written.get(key) == best:
+            best = top(quote)
+            if self.best.get(key) == best:
                 continue
             quotes.append(quote)
-            self.written[key] = best
+            self.best[key] = best
         if quotes:
             database.insert_quotes(self.conn, quotes)
             self.rows_written += len(quotes)

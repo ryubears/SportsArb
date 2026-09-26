@@ -3,8 +3,9 @@ Tests for overriding settings for one run.
 """
 
 import pytest
-from common import config
-from live import balances, gametime, run
+from common import config, gametime
+from live import run
+from live.components import balances
 
 
 @pytest.fixture

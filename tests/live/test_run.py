@@ -4,7 +4,8 @@ Tests for the live process's refresh loop.
 
 import asyncio
 from db import database
-from live import run, streams
+from live import run
+from live.components import streams
 
 
 def test_run_survives_a_failing_refresh(tmp_path, monkeypatch, capsys, fake_stream):
