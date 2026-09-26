@@ -117,14 +117,17 @@ trade is stored as soon as it is sent and updated when it is done.
 Each venue starts with $10,000. Money for an order in flight is reserved
 before anything is awaited, so two signals in the same moment cannot spend
 the same dollars. Every cash movement is a `Ledger` row that records the
-balance it left behind, so a restart reads the newest row instead of
-replaying history. Every ten minutes the settler asks the venues how the
-contracts of trades past their payout time resolved, pays the winning leg
-a dollar a contract, and writes each leg's result, payout, and settlement
-time on the trade, which is what a tax return needs. On Mondays the rebalancer
-compares the venues and, when one sits more than 25% above the average,
-sends the excess to the other as a `Transfer` that takes four business
-days, during which the money is on neither venue.
+balance it left behind, starting with a `transfer_in` of each venue's
+opening balance, so the ledger accounts for every dollar and a restart
+reads the newest row instead of replaying history. From kickoff, every 30
+seconds, the settler asks the venues how the contracts of open trades
+resolved, pays the winning leg a dollar a contract, and stores each leg's
+result, payout, and settlement time as the trade's `Settlement`, which is
+what a tax return needs. On Tuesdays, once Monday night's trades have
+settled, the rebalancer compares the venues and, when one sits more than
+25% above the average, sends the excess to the other as a `Transfer` that
+takes four business days, during which the money is on neither venue. A
+venue under $500 is topped up on any day, also once no trade is open.
 
 ### Tools
 

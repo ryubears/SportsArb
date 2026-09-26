@@ -349,6 +349,15 @@ def load_open_trades(conn):
           AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id) ORDER BY t.id""")]
 
 
+def has_open_trades(conn):
+    """
+    Whether any trade is still in flight or holds contracts that have not settled.
+    """
+    return conn.execute("""
+        SELECT 1 FROM trades t WHERE (t.status = 'sent' OR t.yes_held + t.no_held > 0)
+          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id) LIMIT 1""").fetchone() is not None
+
+
 def load_open_game_costs(conn):
     """
     What each unsettled trade on a game still holds, as [((game_date, team_a, team_b), [(venue, dollars), (venue, dollars)])],
