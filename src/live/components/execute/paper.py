@@ -44,7 +44,7 @@ class PaperExecutor(Executor):
         await asyncio.sleep(ms / 1000)
         return ms, self.clock()
 
-    async def fill(self, leg):
+    async def fill(self, trade, leg, purpose):
         """
         Send one leg's buy order and fill it against the book as it is when the order arrives.
         """
@@ -57,7 +57,7 @@ class PaperExecutor(Executor):
         filled, dollars = sweep(ladder(quote, leg.polarity, leg.side), leg.quantity, leg.venue, leg.fee_info, config.FILL_SHARE, limit=leg.limit)
         return Fill(filled, dollars, ms, ts)
 
-    async def sell_back(self, leg, quantity, floor):
+    async def sell_back(self, trade, leg, quantity, floor):
         """
         Sell back contracts held through a leg at whatever the book offers when the order arrives, whatever the floor.
         """

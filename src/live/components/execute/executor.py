@@ -30,6 +30,7 @@ from common.log import on_failure
 from common.timeutil import now_iso, seconds_between
 from db import database
 from db.models import Ledger, Trade
+from live.components.allocate import cap_range
 from live.helper import config, game
 from live.helper.pricing import depth, ladder, reach, sell_ladder, sweep, trade_words
 
@@ -133,7 +134,7 @@ class Executor:
         yes_leg.limit, no_leg.limit, available = depth(*(ladder(books[l.key], l.polarity, l.side) for l in legs),
                                                        (yes_leg.venue, yes_leg.fee_info), (no_leg.venue, no_leg.fee_info), config.MIN_EDGE)
         # Ask for the share of the visible size we expect to get, so an unchanged book fills in full.
-        cap = self.allocator.cap(pair, now) if self.allocator else config.MAX_CAP
+        cap = self.allocator.cap(pair, now) if self.allocator else cap_range(self.mode)[1]
         quantity = int(min(available * config.FILL_SHARE, cap, *(self.cash[l.venue] // l.limit for l in legs))) if available else 0
         if quantity < 1:
             return False
@@ -177,16 +178,19 @@ class Executor:
             return None
         return quote
 
-    async def fill(self, leg):
+    async def fill(self, trade, leg, purpose):
         """
-        Buy leg.quantity contracts of one leg at no more than leg.limit each. Returns a Fill.
+        Buy leg.quantity contracts of one leg of a trade at no more than
+        leg.limit each, to open the trade or to flatten it, as purpose says.
+        Returns a Fill.
         """
         raise NotImplementedError
 
-    async def sell_back(self, leg, quantity, floor):
+    async def sell_back(self, trade, leg, quantity, floor):
         """
-        Sell back contracts held through a leg at no less than floor each, where
-        the books said they would sell. Returns a Fill whose dollars are the proceeds after fees.
+        Sell back contracts held through a leg of a trade at no less than
+        floor each, where the books said they would sell. Returns a Fill whose
+        dollars are the proceeds after fees.
         """
         raise NotImplementedError
 
@@ -203,7 +207,7 @@ class Executor:
         """
         Fill both legs, flatten any mismatch, book the result.
         """
-        fills = await asyncio.gather(*(self.fill(leg) for leg in legs))
+        fills = await asyncio.gather(*(self.fill(trade, leg, "open") for leg in legs))
         for leg, fill in zip(legs, fills):
             self.cash.release(leg.venue, leg.quantity * leg.limit)
             leg.held, leg.cost = fill.filled, fill.dollars
@@ -300,7 +304,7 @@ class Executor:
         if sell_value is None and buy_value is None:
             return None
         if buy_value is None or (sell_value is not None and sell_value >= buy_value):
-            fill = await self.sell_back(long_leg, excess, reach(selling, excess, config.FILL_SHARE))
+            fill = await self.sell_back(trade, long_leg, excess, reach(selling, excess, config.FILL_SHARE))
             if fill.filled:
                 self.cash.book(Ledger(fill.ts, long_leg.venue, fill.dollars, "sell", trade.id))
             long_leg.held -= fill.filled
@@ -310,7 +314,7 @@ class Executor:
         else:
             limit = self.flatten_limit(reach(buying, buyable, config.FILL_SHARE))
             self.cash.reserve(short_leg.venue, buyable * limit)
-            fill = await self.fill(dataclasses.replace(short_leg, quantity=buyable, limit=limit))
+            fill = await self.fill(trade, dataclasses.replace(short_leg, quantity=buyable, limit=limit), "flatten")
             self.cash.release(short_leg.venue, buyable * limit)
             if fill.filled:
                 self.cash.book(Ledger(fill.ts, short_leg.venue, -fill.dollars, "buy", trade.id))

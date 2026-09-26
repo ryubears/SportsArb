@@ -4,7 +4,8 @@ Tests for the capital allocator on a Sunday schedule.
 
 from db import database
 from db.models import Bet, Contract, Pair, Trade
-from live.components import allocate, balances
+import asyncio
+from live.components import accounts, allocate, balances
 from live.helper import config
 
 SUNDAY = "2026-09-27"
@@ -84,3 +85,17 @@ def test_money_a_game_holds_stays_in_the_pool_and_a_game_past_its_share_stops(tm
     cash.amounts = {"kalshi": 4500.0, "polymarket_us": 4500.0}
     assert allocator.cap(first_pair, now) == 0
     assert allocator.cap(pair_for(*second), now) == 250
+
+
+def test_live_caps_come_from_the_live_money_and_stay_under_the_live_bounds(tmp_path):
+    conn = schedule(tmp_path, EARLY)
+    cash = accounts.Accounts(lambda m: None, {"kalshi": lambda: 5000.0, "polymarket_us": lambda: 4000.0})
+    asyncio.run(cash.refresh(f"{SUNDAY}T17:00:00+00:00"))
+    allocator = allocate.Allocator(conn, cash)
+    early = EARLY[0]
+    assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == config.LIVE_MAX_CAP     # 4,000 over nine games would allow 22.
+    cash.read["polymarket_us"] = 1500.0
+    assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == 8                       # 1,500 over nine games, at 20$ a contract.
+    cash.read["polymarket_us"] = 100.0
+    assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == 0                       # Under one contract.
+    assert allocator.summary(f"{SUNDAY}T17:00:00+00:00").startswith("live capital: 9 games")

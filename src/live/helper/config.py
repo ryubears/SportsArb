@@ -40,6 +40,8 @@ TRANSFER_DAYS = 4           # Business days a transfer between venues takes.
 LIVE_MIN_CAP = 1            # Contracts per live trade, the least worth sending.
 LIVE_MAX_CAP = 10           # Contracts per live trade, the most one trade may hold, whatever the allocator would give.
 LIVE_BALANCE_SECONDS = 30   # Between readings of the venues' balances.
+LIVE_REJECT_LIMIT = 3       # Orders a venue may refuse in a row before live trading halts.
+LIVE_MAX_HEDGE_LOSS = 25.0  # Dollars flattening may lose since the start before live trading halts.
 
 # GAMES, game.py. Measured on the first live game, Atlanta at Green Bay.
 

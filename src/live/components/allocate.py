@@ -1,5 +1,5 @@
 """
-Size paper trades so the money covers every game in play.
+Size trades so the money covers every game in play.
 
 A game's money is out from its first trade until its contracts settle,
 about half an hour after the final whistle. The games in that window at
@@ -10,7 +10,9 @@ trade is that share divided by config.DOLLARS_PER_CAP, which turns a dollar
 budget into a cap: on the first live game, every contract of cap led to
 about 20 dollars of spending on each venue by the final whistle, so a
 budget of 1,000 dollars is spent by a cap of 50. Both venues are sized
-and the smaller cap wins.
+and the smaller cap wins. Paper and live trading each size from their own
+money and trades, and a live cap stays between config.LIVE_MIN_CAP and
+config.LIVE_MAX_CAP rather than the paper bounds.
 
 The cap only moves when the active set changes. It holds through a game
 while the same games are in play, then grows for the games still running
@@ -23,6 +25,13 @@ from common.venues import VENUES
 from db import database
 from live.helper import config
 from live.helper.game import game_key, in_play, in_play_or_settling
+
+
+def cap_range(mode):
+    """
+    The least and most contracts one trade may hold, kept smaller for live trades than paper ones.
+    """
+    return (config.LIVE_MIN_CAP, config.LIVE_MAX_CAP) if mode == "live" else (config.MIN_CAP, config.MAX_CAP)
 
 
 class Allocator:
@@ -83,7 +92,8 @@ class Allocator:
         if any(shares[venue] - held.get(venue, 0.0) <= 0 for venue in VENUES):
             return 0
         cap = int(min(shares.values()) / config.DOLLARS_PER_CAP)
-        return 0 if cap < config.MIN_CAP else min(cap, config.MAX_CAP)
+        least, most = cap_range(self.mode)
+        return 0 if cap < least else min(cap, most)
 
     def summary(self, now):
         """
