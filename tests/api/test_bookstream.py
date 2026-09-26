@@ -144,7 +144,9 @@ def test_loop_survives_a_rejected_handshake(monkeypatch):
     monkeypatch.setattr(bookstream, "RECONNECT_SECONDS", (0,))
     stream = ScriptedStream(["x"], [RefusingConnection(), FakeConnection(["a"], then="hang")])
     run_until_connections_used(stream)
-    assert stream.logs[0] == "scripted stream failed (ValueError: server rejected WebSocket connection: HTTP 403), reconnecting"
+    first, *trace = stream.logs[0].splitlines()
+    assert first == "scripted stream failed (ValueError: server rejected WebSocket connection: HTTP 403), reconnecting"
+    assert trace[0] == "    Traceback (most recent call last):" and trace[-1] == "    ValueError: server rejected WebSocket connection: HTTP 403"
     assert stream.handled == ["a"]                                       # The next connection was used normally.
 
 

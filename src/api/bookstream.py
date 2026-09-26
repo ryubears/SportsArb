@@ -13,6 +13,7 @@ into a frame, and how to apply one message.
 import asyncio
 import time
 import websockets
+from common.log import with_traceback
 from common.timeutil import now_iso
 
 # Pause before each attempt after a failure. The first retry is immediate, since most drops are
@@ -178,7 +179,8 @@ class BookStream:
                 self.log(f"{self.name} stream dropped ({type(e).__name__}: {str(e)[:100]}), reconnecting")
             except Exception as e:
                 # A rejected handshake or a bad message must never end the stream for good.
-                self.log(f"{self.name} stream failed ({type(e).__name__}: {str(e)[:120]}), reconnecting")
+                # It may also be a bug in the code the stream feeds, so the traceback goes with it.
+                self.log(with_traceback(f"{self.name} stream failed ({type(e).__name__}: {str(e)[:120]}), reconnecting", e))
             if self.down_since is None:
                 self.down_since = now_iso()
             self.num_failures += 1

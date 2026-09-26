@@ -27,22 +27,43 @@ For a long run on a laptop, stop the Mac from sleeping while it runs:
 
 import argparse
 import asyncio
+import subprocess
 import sys
 import time
 from catalog import pipeline
-from common.log import log
+from common.log import log, with_traceback
+from common.paths import ROOT
 from common.timeutil import now_iso
 from db import database
-from live import allocate, balances, execute, rebalance, scan, settle
+from live import allocate, balances, execute, gametime, rebalance, scan, settle
 from live.record import Recorder, load_targets
 from live.streams import Streams
-
-# Print immediately even when output goes to a file.
-sys.stdout.reconfigure(line_buffering=True)
 
 FLUSH_SECONDS = 1.0     # How often changed books are written.
 STATUS_SECONDS = 60     # How often a status line is printed.
 CATALOG_MINUTES = 60    # How often the catalog is refreshed and subscriptions updated. Zero disables it.
+
+
+def code_version():
+    """
+    The commit the process runs, with '-dirty' when files differ from it, or 'unknown' outside a git checkout.
+    """
+    try:
+        return subprocess.run(["git", "describe", "--always", "--dirty"], cwd=ROOT, capture_output=True, text=True,
+                              timeout=5).stdout.strip() or "unknown"
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
+def trading_settings():
+    """
+    The settings that decide what the paper trader does, in one line, so each run's log says what it ran with.
+    """
+    latency = ", ".join(f"{venue} {median}ms" for venue, (median, _) in execute.LATENCY_MS.items())
+    return (f"settings: min edge {execute.MIN_EDGE:.2f}$, fill share {execute.FILL_SHARE}, rejects {execute.REJECT_PROBABILITY:.0%}, "
+            f"latency {latency}, cap {allocate.MIN_CAP} to {allocate.MAX_CAP} at {allocate.DOLLARS_PER_CAP}$ a contract, "
+            f"game {gametime.GAME_HOURS}h + settle {gametime.SETTLE_HOURS}h, start balance {balances.BALANCE:,.0f}$, "
+            f"rebalance over {rebalance.DRIFT:.0%} or under {rebalance.FLOOR:,.0f}$")
 
 
 class Session:
@@ -72,6 +93,8 @@ class Session:
         """
         Open the venue connections for everything the catalog says to record.
         """
+        if self.executor:
+            log(trading_settings())
         targets = load_targets(self.conn, self.sport)
         log("recording " + ", ".join(f"{len(ids)} {venue}" for venue, ids in targets.items()) + " contracts")
         if not any(targets.values()):
@@ -146,12 +169,13 @@ async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True, with
     never when zero. A refresh that fails is logged and tried again at the
     next interval, so a bad fetch never stops the recording.
     """
+    log(f"starting {sport}, code {code_version()}")
     if catalog_seconds and refresh_at_start:
         log("refreshing catalog before starting")
         try:
             log(await asyncio.to_thread(pipeline.refresh, sport, log))
         except Exception as e:
-            log(f"catalog refresh failed ({e!r}), starting with the stored catalog")
+            log(with_traceback(f"catalog refresh failed ({e!r}), starting with the stored catalog", e))
     session = Session(conn, sport, with_scanner, with_trading)
     session.start()
     started = last_catalog = time.time()
@@ -164,7 +188,7 @@ async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True, with
                 refresh = asyncio.create_task(asyncio.to_thread(pipeline.refresh, sport, log))
             if refresh is not None and refresh.done():
                 if refresh.exception():
-                    log(f"catalog refresh failed ({refresh.exception()!r}), keeping current subscriptions")
+                    log(with_traceback(f"catalog refresh failed ({refresh.exception()!r}), keeping current subscriptions", refresh.exception()))
                 else:
                     log(f"catalog refreshed, {refresh.result()}")
                     session.refreshed()
@@ -188,6 +212,7 @@ if __name__ == "__main__":
     ap.add_argument("--no-scan", action="store_true", help="record only, without the live scanner")
     ap.add_argument("--no-trade", action="store_true", help="scan without paper trading")
     args = ap.parse_args()
+    sys.stdout.reconfigure(line_buffering=True)     # Print immediately even when output goes to a file.
     with database.connect() as conn:
         try:
             asyncio.run(run(conn, args.sport, args.seconds, args.catalog_minutes * 60, not args.skip_refresh, not args.no_scan, not args.no_trade))
