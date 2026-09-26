@@ -35,6 +35,12 @@ REBALANCE_DRIFT = 0.25      # A venue this far above the two venue average on th
 REBALANCE_FLOOR = 500.0     # A venue below this is topped up to the average on any day.
 TRANSFER_DAYS = 4           # Business days a transfer between venues takes.
 
+# LIVE, execute/live.py, accounts.py, and rebalance.py. Real money, so each limit is kept small until the live results earn more.
+
+LIVE_MIN_CAP = 1            # Contracts per live trade, the least worth sending.
+LIVE_MAX_CAP = 10           # Contracts per live trade, the most one trade may hold, whatever the allocator would give.
+LIVE_BALANCE_SECONDS = 30   # Between readings of the venues' balances.
+
 # GAMES, game.py. Measured on the first live game, Atlanta at Green Bay.
 
 GAME_HOURS = 3.25           # Kickoff to final whistle, with a little margin over the 3.05 measured.

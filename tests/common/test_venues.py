@@ -6,7 +6,7 @@ import pytest
 from catalog import fetch
 from catalog.classify import classify
 from common.venues import SHORT_NAMES, VENUES
-from live.components import settle, streams
+from live.components import accounts, settle, streams
 from live.helper import config, fees
 
 
@@ -21,6 +21,7 @@ from live.helper import config, fees
     ("streams.STREAMS", streams.STREAMS),
     ("settle.RESULTS", settle.RESULTS),
     ("settle.RESULTS_BY_EVENT", settle.RESULTS_BY_EVENT),
+    ("accounts.READERS", accounts.READERS),
     ("config.LATENCY_MS", config.LATENCY_MS),
 ])
 def test_table_covers_every_venue(name, table):
