@@ -5,7 +5,7 @@ The recorder from record.py holds the newest book for every paired
 contract, fed by the venue connections from streams.py, and once a second
 writes the books whose top changed. The scanner from scan.py prices pairs
 from the same in memory books as they change and stores every episode it
-finds in the opportunities table. The paper executor from execute.py
+finds in the opportunities table. The paper executor from execute/paper.py
 trades the scanner's signals against the same books, settle.py pays the
 trades out when their contracts resolve, and rebalance.py keeps the two
 paper balances level.
@@ -37,7 +37,8 @@ from common.log import log, with_traceback
 from common.paths import ROOT
 from common.timeutil import now_iso
 from db import database
-from live.components import allocate, balances, execute, rebalance, scan, settle
+from live.components import allocate, balances, rebalance, scan, settle
+from live.components.execute.paper import PaperExecutor
 from live.components.record import Recorder, load_targets
 from live.components.streams import Streams
 from live.helper import config
@@ -96,7 +97,7 @@ class Session:
         cash = balances.Balances(conn) if trading else None
         self.allocator = allocate.Allocator(conn, cash) if trading else None
         # The executor trades against the recorder's books, which exist once the recorder does, below.
-        self.executor = execute.PaperExecutor(conn, cash, lambda: self.recorder.latest, log, allocator=self.allocator) if trading else None
+        self.executor = PaperExecutor(conn, cash, lambda: self.recorder.latest, log, allocator=self.allocator) if trading else None
         self.settler = settle.Settler(conn, cash, log, executor=self.executor) if trading else None
         self.rebalancer = rebalance.Rebalancer(conn, cash, log) if trading else None
         self.scanner = scan.Scanner(conn, sport, log, self.executor.signal if self.executor else None) if with_scanner else None

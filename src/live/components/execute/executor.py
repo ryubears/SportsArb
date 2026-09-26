@@ -1,43 +1,37 @@
 """
-Paper trade the scanner's signals against the live books.
+Trade the scanner's signals, the part paper and live trading share.
 
-When the scanner sees a pair with enough net edge, the executor pretends to
-send one limit order per leg. Each leg's limit is the deepest level that
-still leaves config.MIN_EDGE when both ladders are walked together, so the order
-sweeps every level above the floor, not just the top one. Each order
-arrives at its venue after a random latency drawn from what we measured,
-and fills against the book as it is at that moment, from the same in
-memory books the scanner reads. A level still there fills, a level that
-shrank fills partly, and a level that is gone does not fill. Only a share
-of the visible size is assumed to be ours, since other takers see the same
-thing, and a small share of orders is rejected outright.
+When the scanner sees a pair with enough net edge, the executor sends one
+limit order per leg. Each leg's limit is the deepest level that still
+leaves config.MIN_EDGE when both ladders are walked together, so the order
+sweeps every level above the floor, not just the top one. How an order
+reaches its venue and what comes back is the one thing that differs:
+paper.py fills it against the in memory books after a simulated latency,
+live.py sends it to the venue. Everything else is here.
 
 When the two legs fill unevenly the executor goes flat at once. It either
 sells the excess back on its own venue or buys the missing amount on the
-other venue, whichever leaves more money, and books the result with fees.
-What it cannot flatten stays on a list and is tried again on every tick,
-against the books as they are then, until it is flat, the bet pays out, or
-the settler says its contracts have resolved. The settler leaves alone a
-trade while an order to flatten it is in flight.
+other venue, whichever the books say leaves more money, and books the
+result with fees. What it cannot flatten stays on a list and is tried
+again on every tick, against the books as they are then, until it is
+flat, the bet pays out, or the settler says its contracts have resolved.
+The settler leaves alone a trade while an order to flatten it is in flight.
 Only games being played are traded, so capital turns over the same day,
 and an Allocator from allocate.py caps each trade so the money covers every
 game in play. Every trade is stored in the trades table as soon as it is
 sent and updated when it is done, and every dollar moved goes through
-the shared Balances. Settling what was bought is settle.py's job, and
-keeping the venues funded is rebalance.py's.
+the cash the executor was given. Settling what was bought is settle.py's job.
 """
 
 import asyncio
 import dataclasses
-import math
-import random
 from dataclasses import dataclass
 from common.log import on_failure
 from common.timeutil import now_iso, seconds_between
 from db import database
 from db.models import Ledger, Trade
 from live.helper import config, game
-from live.helper.pricing import depth, ladder, sell_ladder, sweep, trade_words
+from live.helper.pricing import depth, ladder, reach, sell_ladder, sweep, trade_words
 
 
 @dataclass
@@ -57,6 +51,10 @@ class Leg:
     @property
     def venue(self):
         return self.member["venue"]
+
+    @property
+    def contract_id(self):
+        return self.member["contract_id"]
 
     @property
     def polarity(self):
@@ -84,20 +82,23 @@ class Fill:
         return self.dollars / self.filled if self.filled else 0.0
 
 
-class PaperExecutor:
+class Executor:
     """
-    Turns scanner signals into paper trades against the recorder's books.
+    Turns scanner signals into trades against the recorder's books. A
+    subclass says how an order is filled, through fill() and sell_back().
     books is a function returning the newest quotes keyed by (venue, contract_id).
+    cash is the money on each venue, with reserve(), release(), and book().
     """
 
-    def __init__(self, conn, cash, books, log=print, rng=None, allocator=None, clock=now_iso):
+    mode = None     # 'paper' or 'live', set by each subclass. It starts every log line.
+
+    def __init__(self, conn, cash, books, log=print, allocator=None, clock=now_iso):
         self.conn = conn
         self.cash = cash
         self.books = books
         self.clock = clock          # The current time in ISO 8601 UTC, for fills and for how old a book is.
         self.log = log
         self.allocator = allocator
-        self.rng = rng or random.Random()
         self.tasks = set()          # Trades in flight, and the retry of exposed ones while it runs.
         self.done = []              # Trades finished since the last summary.
         self.exposed = {}           # Trade id maps to (Trade, [yes Leg, no Leg]) for trades holding more on one side than the other.
@@ -148,7 +149,7 @@ class PaperExecutor:
         task = asyncio.create_task(coroutine)
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
-        task.add_done_callback(on_failure(self.log, "paper trade task"))
+        task.add_done_callback(on_failure(self.log, f"{self.mode} trade task"))
         return task
 
     def tick(self, now):
@@ -158,19 +159,7 @@ class PaperExecutor:
         if self.exposed and (self.retrying is None or self.retrying.done()):
             self.retrying = self.spawn(self.retry(now))
 
-    # ORDERS
-
-    def latency(self, venue):
-        median, sigma = config.LATENCY_MS[venue]
-        return int(self.rng.lognormvariate(math.log(median), sigma))
-
-    async def arrive(self, venue):
-        """
-        Wait for an order to reach its venue. Returns the latency in milliseconds and the time it arrived.
-        """
-        ms = self.latency(venue)
-        await asyncio.sleep(ms / 1000)
-        return ms, self.clock()
+    # ORDERS, which each subclass fills its own way.
 
     def book(self, key):
         """
@@ -188,28 +177,23 @@ class PaperExecutor:
 
     async def fill(self, leg):
         """
-        Send one leg's buy order and fill it against the book as it is when the order arrives.
+        Buy leg.quantity contracts of one leg at no more than leg.limit each. Returns a Fill.
         """
-        ms, ts = await self.arrive(leg.venue)
-        if self.rng.random() < config.REJECT_PROBABILITY:
-            return Fill(ms=ms, ts=ts, note="rejected")
-        quote = self.book(leg.key)
-        if quote is None:
-            return Fill(ms=ms, ts=ts, note="no book")
-        filled, dollars = sweep(ladder(quote, leg.polarity, leg.side), leg.quantity, leg.venue, leg.fee_info, config.FILL_SHARE, limit=leg.limit)
-        return Fill(filled, dollars, ms, ts)
+        raise NotImplementedError
 
-    async def sell_back(self, leg, quantity):
+    async def sell_back(self, leg, quantity, floor):
         """
-        Sell back contracts held through a leg at whatever the book offers when the order arrives.
-        Returns a Fill whose dollars are the proceeds after fees.
+        Sell back contracts held through a leg at no less than floor each, where
+        the books said they would sell. Returns a Fill whose dollars are the proceeds after fees.
         """
-        ms, ts = await self.arrive(leg.venue)
-        quote = self.book(leg.key)
-        if quote is None:
-            return Fill(ms=ms, ts=ts)
-        filled, dollars = sweep(sell_ladder(quote, leg.polarity, leg.side), quantity, leg.venue, leg.fee_info, config.FILL_SHARE, selling=True)
-        return Fill(filled, dollars, ms, ts)
+        raise NotImplementedError
+
+    def flatten_limit(self, reached):
+        """
+        The limit for an order that buys the missing side of an exposed trade,
+        given the deepest price the books said it would pay.
+        """
+        raise NotImplementedError
 
     # TRADES
 
@@ -242,7 +226,7 @@ class PaperExecutor:
         self.totals["profit"] += trade.profit
         self.totals["hedge"] += trade.hedge_pnl
         self.done.append(trade)
-        self.log(f"paper {trade.status}: {trade.label}, {trade.trade}, wanted {trade.quantity}, filled {trade.yes_filled}/{trade.no_filled}, "
+        self.log(f"{self.mode} {trade.status}: {trade.label}, {trade.trade}, wanted {trade.quantity}, filled {trade.yes_filled}/{trade.no_filled}, "
                  f"locked in {trade.profit:.2f}$, hedge {trade.hedge} {trade.hedge_pnl:+.2f}$")
 
     def settle_legs(self, trade, legs):
@@ -283,7 +267,7 @@ class PaperExecutor:
             trade.hedge += f", then {note} at {now[11:19]}"
             database.update_trade(self.conn, trade)
             self.totals["hedge"] += trade.hedge_pnl - before
-            self.log(f"paper flattened {trade.label}: {note}, {left} still exposed, hedge {trade.hedge_pnl:+.2f}$")
+            self.log(f"{self.mode} flattened {trade.label}: {note}, {left} still exposed, hedge {trade.hedge_pnl:+.2f}$")
             if not left:
                 del self.exposed[trade_id]
 
@@ -299,21 +283,22 @@ class PaperExecutor:
         average = long_leg.cost / long_leg.held
         long_book, short_book = self.book(long_leg.key), self.book(short_leg.key)
         sell_value = buy_value = None
+        selling = buying = []
         buyable = 0
         if long_book:
-            n, dollars = sweep(sell_ladder(long_book, long_leg.polarity, long_leg.side), excess,
-                               long_leg.venue, long_leg.fee_info, config.FILL_SHARE, selling=True)
+            selling = sell_ladder(long_book, long_leg.polarity, long_leg.side)
+            n, dollars = sweep(selling, excess, long_leg.venue, long_leg.fee_info, config.FILL_SHARE, selling=True)
             sell_value = dollars - n * average if n else None
         if short_book:
-            levels = ladder(short_book, short_leg.polarity, short_leg.side)
+            buying = ladder(short_book, short_leg.polarity, short_leg.side)
             # Only what the other venue's balance can pay for.
-            buyable = min(excess, int(self.cash[short_leg.venue] // levels[0][0])) if levels else 0
-            n, dollars = sweep(levels, buyable, short_leg.venue, short_leg.fee_info, config.FILL_SHARE)
+            buyable = min(excess, int(self.cash[short_leg.venue] // buying[0][0])) if buying else 0
+            n, dollars = sweep(buying, buyable, short_leg.venue, short_leg.fee_info, config.FILL_SHARE)
             buy_value = n * (1 - average) - dollars if n else None
         if sell_value is None and buy_value is None:
             return None
         if buy_value is None or (sell_value is not None and sell_value >= buy_value):
-            fill = await self.sell_back(long_leg, excess)
+            fill = await self.sell_back(long_leg, excess, reach(selling, excess, config.FILL_SHARE))
             if fill.filled:
                 self.cash.book(Ledger(fill.ts, long_leg.venue, fill.dollars, "sell", trade.id))
             long_leg.held -= fill.filled
@@ -321,9 +306,10 @@ class PaperExecutor:
             trade.hedge_pnl += fill.dollars - fill.filled * average
             note = f"sold back {fill.filled} of {excess} on {long_leg.venue}"
         else:
-            self.cash.reserve(short_leg.venue, buyable * 1.0)
-            fill = await self.fill(dataclasses.replace(short_leg, quantity=buyable, limit=1.0))
-            self.cash.release(short_leg.venue, buyable * 1.0)
+            limit = self.flatten_limit(reach(buying, buyable, config.FILL_SHARE))
+            self.cash.reserve(short_leg.venue, buyable * limit)
+            fill = await self.fill(dataclasses.replace(short_leg, quantity=buyable, limit=limit))
+            self.cash.release(short_leg.venue, buyable * limit)
             if fill.filled:
                 self.cash.book(Ledger(fill.ts, short_leg.venue, -fill.dollars, "buy", trade.id))
             short_leg.held += fill.filled
@@ -342,6 +328,6 @@ class PaperExecutor:
         recent = self.done
         self.done = []
         counts = {s: sum(1 for t in recent if t.status == s) for s in ("filled", "partial", "failed")}
-        return (f"paper: {len(recent)} trades ({counts['filled']} filled, {counts['partial']} partial, {counts['failed']} failed), "
+        return (f"{self.mode}: {len(recent)} trades ({counts['filled']} filled, {counts['partial']} partial, {counts['failed']} failed), "
                 f"locked in {sum(t.profit for t in recent):.2f}$, hedges {sum(t.hedge_pnl for t in recent):+.2f}$; "
                 f"total {self.totals['trades']} trades, {self.totals['profit'] + self.totals['hedge']:.2f}$; balances {self.cash.summary()}")

@@ -10,7 +10,7 @@ Override one for a run with --set, for example:
     python3 -m live.run --sport nfl --set min_edge=0.03 --set max_cap=100
 """
 
-# TRADING, execute.py
+# TRADING, execute/executor.py and execute/paper.py
 
 MIN_EDGE = 0.05             # Net dollars per contract at the top before orders are sent, and the floor for the deeper levels they sweep.
                             # In-game, 2 to 3 cent edges lost money after hedging.

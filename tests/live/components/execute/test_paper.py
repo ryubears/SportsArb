@@ -7,7 +7,8 @@ import random
 import pytest
 from db import database
 from db.models import Quote
-from live.components import balances, execute, scan, settle
+from live.components import balances, scan, settle
+from live.components.execute.paper import PaperExecutor
 from live.helper import config
 
 NO_PM_FEES = {"feeCoefficient": 0}
@@ -37,7 +38,7 @@ def quick(monkeypatch):
 def executor(tmp_path, latest, log=lambda m: None, start=config.START_BALANCE, clock=lambda: NOW):
     conn = database.connect(tmp_path / "t.sqlite")
     cash = balances.Balances(conn, start)
-    return conn, cash, execute.PaperExecutor(conn, cash, lambda: latest, log, random.Random(1), clock=clock)
+    return conn, cash, PaperExecutor(conn, cash, lambda: latest, log, random.Random(1), clock=clock)
 
 
 def run(ex, after_signal=None, signals=1):

@@ -67,7 +67,7 @@ class Scanner:
     from the database and are reloaded after each catalog refresh. Every
     finished episode is stored at once, and the big ones are logged. With
     on_signal, the first moment of each episode that the callback accepts
-    becomes a trade, see execute.py.
+    becomes a trade, see execute/executor.py.
     """
 
     def __init__(self, conn, sport, log=print, on_signal=None):

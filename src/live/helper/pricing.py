@@ -49,30 +49,53 @@ def sell_ladder(quote, polarity, side):
     return [(round(1 - price, 4), size) for price, size in quote.asks]
 
 
-def sweep(levels, quantity, venue, fee_info, share=1.0, limit=None, selling=False):
+def takes(levels, quantity, share=1.0, limit=None):
     """
-    What an order for quantity contracts gets from one ladder, best level
-    first, as (contracts, dollars). Only share of each level's size is
-    taken, whole contracts only, so a level too small for one is skipped
-    and the next may still fill. A buy stops at levels priced above limit.
-    Dollars include the venue's fee, charged on buys and sells alike and
-    rounded once per level: added to what a buy pays, and deducted from
-    what a sale brings in.
+    The contracts an order for quantity takes from each level of one ladder,
+    best level first, as (price, contracts). Only share of each level's
+    size is taken, whole contracts only, so a level too small for one is
+    skipped and the next may still fill. A buy stops at levels priced above limit.
     """
-    filled, dollars, remaining = 0, 0.0, quantity
+    remaining = quantity
     for price, size in levels:
         if limit is not None and price > limit + 1e-9:
             break
         take = int(min(remaining, size * share))
         if take < 1:
             continue
-        fee = fees.fee(venue, price, take, fee_info)      # Each level fills as one trade, with its fee rounded once.
-        filled += take
-        dollars += take * price - fee if selling else take * price + fee
+        yield price, take
         remaining -= take
         if remaining < 1:
             break
+
+
+def sweep(levels, quantity, venue, fee_info, share=1.0, limit=None, selling=False):
+    """
+    What an order for quantity contracts gets from one ladder, as
+    (contracts, dollars), taking from the levels as takes() does. Dollars
+    include the venue's fee, charged on buys and sells alike and rounded
+    once per level: added to what a buy pays, and deducted from what a
+    sale brings in.
+    """
+    filled, dollars = 0, 0.0
+    for price, take in takes(levels, quantity, share, limit):
+        fee = fees.fee(venue, price, take, fee_info)      # Each level fills as one trade, with its fee rounded once.
+        filled += take
+        dollars += take * price - fee if selling else take * price + fee
     return filled, dollars
+
+
+def reach(levels, quantity, share=1.0):
+    """
+    The price of the deepest level an order for quantity contracts takes
+    from, as takes() walks the ladder, or None when it takes nothing. For a
+    buy it is the highest price paid, for a sale the lowest price accepted,
+    so it is the limit that lets a real order do what the sweep did.
+    """
+    price = None
+    for price, _ in takes(levels, quantity, share):
+        pass
+    return price
 
 
 def walk_pair(leg_a, leg_b, fee_a, fee_b):

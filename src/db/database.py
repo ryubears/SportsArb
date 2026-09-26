@@ -10,7 +10,7 @@ SQLite browser. The tables follow the pipeline in order.
     quotes         order book snapshots for paired contracts, by record.py
     gaps           stretches when a venue's feed was down, also by record.py
     opportunities  every episode the live scanner saw, by scan.py
-    trades         every paper trade the executor made, by execute.py
+    trades         every trade the executors made, by execute/
     settlements    how each trade's legs paid out, by settle.py
     ledger         every paper cash movement per venue, by balances.py
     transfers      paper rebalancing transfers between venues, by rebalance.py
