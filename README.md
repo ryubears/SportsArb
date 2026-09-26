@@ -146,11 +146,10 @@ resubscribes. The instance was
 first placed in Mexico to reach polymarket.com, which was then dropped as a
 venue for legal reasons in favor of Polymarket US, and moved to us-east-1.
 
-`scripts/ops.sh` runs the commands used to check the data, deploy, and
-operate the instance, for example `scripts/ops.sh health` or
-`scripts/ops.sh deploy`, and `scripts/ops.sh help` lists them. It reads
-the instance's address, key, and ids from `scripts/ops.env`, which is
-gitignored; copy `scripts/ops.env.example` to start one.
+`commands.txt` holds the commands used to check the data, deploy, and
+operate the instance. They read the instance's address, key, and ids from
+`commands.env`, which is gitignored: copy `commands.env.example` to start
+one, and `source commands.env` in each new terminal.
 
 The process is light. It holds 4,900 books in about 190 MB of memory,
 and the database grows by roughly 500 MB a day.
@@ -279,5 +278,5 @@ src/
   live/       run, record, streams, scan, pricing, fees, execute, allocate, gametime, balances, settle, rebalance
   tools/      summary report
 tests/        mirrors src, run with pytest, configured in pyproject.toml
-scripts/      ops.sh for operating the AWS instance
+commands.txt  operating the AWS instance, with its details in commands.env
 ```

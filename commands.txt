@@ -1,0 +1,64 @@
+SportsArb on AWS. The recorder runs on an EC2 instance in us-east-1, the region Kalshi runs in.
+
+Instance      t3.medium, Ubuntu 24.04, repo at ~/SportsArb
+Service       sportsarb-recorder (systemd), runs python3 -m live.run from ~/SportsArb/src until stopped, restarts itself on any exit, log in ~/SportsArb/data/record.log
+Settings      The instance's address, key, and ids are in commands.env, which is gitignored. Copy commands.env.example to start one,
+              and load it in each new terminal before using the commands below:
+    source commands.env
+
+
+CHECK THE DATA
+
+Quick health check: service state, last status line, drops, rows per venue, gaps, episodes by kind.
+    ssh -i $SPORTSARB_KEY $SPORTSARB_USER@$SPORTSARB_HOST 'systemctl is-active sportsarb-recorder; tail -1 SportsArb/data/record.log | cut -c1-170; echo "drops: $(grep -c dropped SportsArb/data/record.log)"; sqlite3 SportsArb/data/sportsarb.sqlite "select venue, count(*), count(distinct contract_id), max(ts) from quotes group by 1; select venue, count(*), round(sum((julianday(end_ts)-julianday(start_ts))*86400)) as seconds_down from gaps group by 1; select kind, count(*), round(max(peak_profit),2), sum(annual_pct >= 10) from opportunities o join pairs p on p.id = o.pair_id group by 1;"'
+
+Full summary from the summary script, last 24 hours.
+    ssh -i $SPORTSARB_KEY $SPORTSARB_USER@$SPORTSARB_HOST 'cd SportsArb && python3 src/tools/summary.py --hours 24'
+
+Watch the log live. Stop with ctrl-c.
+    ssh -i $SPORTSARB_KEY $SPORTSARB_USER@$SPORTSARB_HOST tail -f SportsArb/data/record.log
+
+Episodes the scanner logged, and its ten minute summaries.
+    ssh -i $SPORTSARB_KEY $SPORTSARB_USER@$SPORTSARB_HOST 'grep -E "episode|scanner:" SportsArb/data/record.log | tail -40'
+
+Paper trading: the executor, settlement, and transfer lines from the log, then trades by outcome, each venue's balance, and open positions.
+    ssh -i $SPORTSARB_KEY $SPORTSARB_USER@$SPORTSARB_HOST 'grep -E "paper|settled|transfer" SportsArb/data/record.log | tail -30; sqlite3 -header -column SportsArb/data/sportsarb.sqlite "select status, count(*) as trades, sum(matched) as matched, round(sum(profit + hedge_pnl), 2) as net from trades group by 1; select venue, round(balance, 2) as balance from ledger where id in (select max(id) from ledger group by venue); select count(*) as open_trades from trades where settled_at is null and yes_held + no_held > 0;"'
+
+Largest episodes in the database.
+    ssh -i $SPORTSARB_KEY $SPORTSARB_USER@$SPORTSARB_HOST 'sqlite3 -header -column SportsArb/data/sportsarb.sqlite "select p.label, trade, round(100*peak_edge,1) as edge_c, round(peak_size) as size, round(peak_profit,2) as profit, round(seconds) as secs, substr(peak_ts,12,8) as at_utc from opportunities o join pairs p on p.id = o.pair_id order by peak_profit desc limit 15"'
+
+Copy the database home for analysis. The recorder keeps running.
+    rsync -avz -e "ssh -i $SPORTSARB_KEY" $SPORTSARB_USER@$SPORTSARB_HOST:SportsArb/data/sportsarb.sqlite* ~/Projects/SportsArb/data/aws/
+
+
+RUN THE RECORDER
+
+Start the recorder if it was stopped. It also starts on boot.
+    ssh -i $SPORTSARB_KEY $SPORTSARB_USER@$SPORTSARB_HOST 'sudo systemctl start sportsarb-recorder'
+
+Stop the run.
+    ssh -i $SPORTSARB_KEY $SPORTSARB_USER@$SPORTSARB_HOST 'sudo systemctl stop sportsarb-recorder'
+
+Deploy after committing and pushing. Restarts the recorder only when the tests pass, and shows the failures otherwise. A restart refreshes the catalog for about 80 seconds.
+    ssh -i $SPORTSARB_KEY $SPORTSARB_USER@$SPORTSARB_HOST 'cd SportsArb && git pull && if python3 -m pytest -q > /tmp/sportsarb-tests.log 2>&1; then tail -1 /tmp/sportsarb-tests.log; sudo systemctl restart sportsarb-recorder; else tail -30 /tmp/sportsarb-tests.log; echo "tests failed, the recorder was not restarted"; fi'
+
+Start fresh. Deletes the database on the instance and starts a new run.
+    ssh -i $SPORTSARB_KEY $SPORTSARB_USER@$SPORTSARB_HOST 'sudo systemctl stop sportsarb-recorder && rm -f SportsArb/data/sportsarb.sqlite* && mv SportsArb/data/record.log SportsArb/data/record_old.log; sudo systemctl start sportsarb-recorder'
+
+
+INSTANCE
+
+Open a shell.
+    ssh -i $SPORTSARB_KEY $SPORTSARB_USER@$SPORTSARB_HOST
+
+Allow SSH from the laptop's current IP. Needed when the IP changes, for example when the VPN toggles.
+    aws ec2 authorize-security-group-ingress --region $SPORTSARB_REGION --group-id $SPORTSARB_SECURITY_GROUP --protocol tcp --port 22 --cidr $(curl -s https://checkip.amazonaws.com)/32
+
+Instance state, CPU over the last hour, disk.
+    aws ec2 describe-instances --region $SPORTSARB_REGION --instance-ids $SPORTSARB_INSTANCE --query "Reservations[].Instances[].[State.Name,PublicIpAddress]" --output text
+    aws cloudwatch get-metric-statistics --region $SPORTSARB_REGION --namespace AWS/EC2 --metric-name CPUUtilization --dimensions Name=InstanceId,Value=$SPORTSARB_INSTANCE --start-time $(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ) --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) --period 300 --statistics Average Maximum --query "sort_by(Datapoints,&Timestamp)[].[Timestamp,Average,Maximum]" --output text
+    ssh -i $SPORTSARB_KEY $SPORTSARB_USER@$SPORTSARB_HOST 'df -h / | tail -1; ls -la --block-size=M SportsArb/data/sportsarb.sqlite'
+
+Stop and start the instance itself. Stopping saves the compute cost but keeps the disk. The public IP changes on start, so update SPORTSARB_HOST in commands.env and source it again.
+    aws ec2 stop-instances --region $SPORTSARB_REGION --instance-ids $SPORTSARB_INSTANCE
+    aws ec2 start-instances --region $SPORTSARB_REGION --instance-ids $SPORTSARB_INSTANCE
