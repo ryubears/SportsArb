@@ -20,6 +20,7 @@ Run with:
     python3 -m live.run --sport nfl --skip-refresh
     python3 -m live.run --sport nfl --no-scan
     python3 -m live.run --sport nfl --no-trade
+    python3 -m live.run --sport nfl --set min_edge=0.03 --set max_cap=100
 
 For a long run on a laptop, stop the Mac from sleeping while it runs:
     caffeinate -i -s python3 -m live.run --sport nfl
@@ -31,16 +32,15 @@ import subprocess
 import sys
 import time
 from catalog import pipeline
+from common import config
 from common.log import log, with_traceback
 from common.paths import ROOT
 from common.timeutil import now_iso
 from db import database
-from live import allocate, balances, execute, gametime, rebalance, scan, settle
+from live import allocate, balances, execute, rebalance, scan, settle
 from live.record import Recorder, load_targets
 from live.streams import Streams
 
-FLUSH_SECONDS = 1.0     # How often changed books are written.
-STATUS_SECONDS = 60     # How often a status line is printed.
 CATALOG_MINUTES = 60    # How often the catalog is refreshed and subscriptions updated. Zero disables it.
 
 
@@ -59,11 +59,12 @@ def trading_settings():
     """
     The settings that decide what the paper trader does, in one line, so each run's log says what it ran with.
     """
-    latency = ", ".join(f"{venue} {median}ms" for venue, (median, _) in execute.LATENCY_MS.items())
-    return (f"settings: min edge {execute.MIN_EDGE:.2f}$, fill share {execute.FILL_SHARE}, rejects {execute.REJECT_PROBABILITY:.0%}, "
-            f"latency {latency}, cap {allocate.MIN_CAP} to {allocate.MAX_CAP} at {allocate.DOLLARS_PER_CAP}$ a contract, "
-            f"game {gametime.GAME_HOURS}h + settle {gametime.SETTLE_HOURS}h, start balance {balances.BALANCE:,.0f}$, "
-            f"rebalance over {rebalance.DRIFT:.0%} or under {rebalance.FLOOR:,.0f}$")
+    c = config
+    latency = ", ".join(f"{venue} {median}ms" for venue, (median, _) in c.LATENCY_MS.items())
+    return (f"settings: min edge {c.MIN_EDGE:.2f}$, fill share {c.FILL_SHARE}, rejects {c.REJECT_PROBABILITY:.0%}, "
+            f"latency {latency}, cap {c.MIN_CAP} to {c.MAX_CAP} at {c.DOLLARS_PER_CAP}$ a contract, "
+            f"game {c.GAME_HOURS}h + settle {c.SETTLE_HOURS}h, start balance {c.START_BALANCE:,.0f}$, "
+            f"rebalance over {c.REBALANCE_DRIFT:.0%} or under {c.REBALANCE_FLOOR:,.0f}$")
 
 
 class Session:
@@ -117,10 +118,10 @@ class Session:
             self.executor.tick(now)
             self.settler.tick(now, time.time())
             self.rebalancer.tick(now)
-        if self.scanner and time.time() - self.last_summary >= scan.SUMMARY_SECONDS:
+        if self.scanner and time.time() - self.last_summary >= config.SUMMARY_SECONDS:
             self.summaries()
             self.last_summary = time.time()
-        if time.time() - self.last_status >= STATUS_SECONDS:
+        if time.time() - self.last_status >= config.STATUS_SECONDS:
             log(self.recorder.status())
             self.last_status = time.time()
 
@@ -164,7 +165,7 @@ class Session:
 
 async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True, with_scanner=True, with_trading=True):
     """
-    Refresh the catalog, start a Session, tick it every FLUSH_SECONDS, and
+    Refresh the catalog, start a Session, tick it every config.FLUSH_SECONDS, and
     keep the catalog fresh on a timer. Stops after the given seconds, or
     never when zero. A refresh that fails is logged and tried again at the
     next interval, so a bad fetch never stops the recording.
@@ -182,7 +183,7 @@ async def run(conn, sport, seconds, catalog_seconds, refresh_at_start=True, with
     refresh = None      # The background catalog refresh while one is running.
     try:
         while not seconds or time.time() - started < seconds:
-            await asyncio.sleep(FLUSH_SECONDS)
+            await asyncio.sleep(config.FLUSH_SECONDS)
             session.tick()
             if catalog_seconds and refresh is None and time.time() - last_catalog >= catalog_seconds:
                 refresh = asyncio.create_task(asyncio.to_thread(pipeline.refresh, sport, log))
@@ -211,7 +212,13 @@ if __name__ == "__main__":
                     help="start streaming at once from the stored catalog instead of refreshing first")
     ap.add_argument("--no-scan", action="store_true", help="record only, without the live scanner")
     ap.add_argument("--no-trade", action="store_true", help="scan without paper trading")
+    ap.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
+                    help="override a setting from common/config.py for this run, for example --set min_edge=0.03, repeatable")
     args = ap.parse_args()
+    try:
+        config.override(args.set)
+    except ValueError as e:
+        ap.error(str(e))
     sys.stdout.reconfigure(line_buffering=True)     # Print immediately even when output goes to a file.
     with database.connect() as conn:
         try:

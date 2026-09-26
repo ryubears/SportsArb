@@ -3,22 +3,18 @@ Keep both venues funded by moving paper money between them.
 
 Balances drift apart as games resolve, because the venue holding the
 winning leg receives the whole dollar and the other receives nothing. On
-REBALANCE_WEEKDAY the balances are compared, and when the richer venue
-sits more than DRIFT above the two venue average the excess is sent to
-the other one. A venue under FLOOR is topped up on any day. A transfer
-takes TRANSFER_DAYS business days, during which the money is on neither
+config.REBALANCE_WEEKDAY the balances are compared, and when the richer venue
+sits more than config.REBALANCE_DRIFT above the two venue average the excess is sent to
+the other one. A venue under config.REBALANCE_FLOOR is topped up on any day. A transfer
+takes config.TRANSFER_DAYS business days, during which the money is on neither
 venue, and one is in flight at a time. Every transfer is stored.
 """
 
-from common.timeutil import add_business_days
 from datetime import datetime
+from common import config
+from common.timeutil import add_business_days
 from db import database
 from db.models import Ledger, Transfer
-
-REBALANCE_WEEKDAY = 0   # Monday, when balances are compared.
-DRIFT = 0.25            # A venue this far above the two venue average on the weekly check sends the excess over.
-FLOOR = 500.0           # A venue below this is topped up to the average on any day.
-TRANSFER_DAYS = 4       # Business days a transfer between venues takes.
 
 
 class Rebalancer:
@@ -44,15 +40,15 @@ class Rebalancer:
         excess = self.cash[rich] - self.cash.average()
         reason = None
         today = now[:10]
-        if datetime.fromisoformat(now).weekday() == REBALANCE_WEEKDAY and self.last_check != today:
+        if datetime.fromisoformat(now).weekday() == config.REBALANCE_WEEKDAY and self.last_check != today:
             self.last_check = today
-            if excess > DRIFT * self.cash.average():
+            if excess > config.REBALANCE_DRIFT * self.cash.average():
                 reason = "drift"
-        if reason is None and self.cash[poor] < FLOOR and excess > 0:
+        if reason is None and self.cash[poor] < config.REBALANCE_FLOOR and excess > 0:
             reason = "floor"
         if reason is None:
             return
-        transfer = Transfer(rich, poor, round(excess, 2), now, add_business_days(now, TRANSFER_DAYS), reason)
+        transfer = Transfer(rich, poor, round(excess, 2), now, add_business_days(now, config.TRANSFER_DAYS), reason)
         database.insert_transfer(self.conn, transfer)
         self.cash.book(Ledger(now, rich, -transfer.amount, "transfer_out"))
         self.log(f"transfer {transfer.id}: {transfer.amount:.2f}$ from {rich} to {poor} for {reason}, expected {transfer.expected_at[:16]}")

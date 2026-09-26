@@ -14,19 +14,16 @@ unseen.
 With a scanner from scan.py, every change at the top of a book is priced
 as it lands, from the same in memory books.
 
-Only futures and games within GAME_WINDOW_DAYS of kickoff are recorded.
+Only futures and games within config.GAME_WINDOW_DAYS of kickoff are recorded.
 The process that runs all this is run.py.
 """
 
 import time
+from common import config
 from common.timeutil import now_iso, shift
 from common.venues import VENUES
 from db import database
 from db.models import Quote, Gap
-from live.gametime import RECORD_HOURS
-
-LEVELS = 5              # Price levels kept per side.
-GAME_WINDOW_DAYS = 7    # Games further out than this are not recorded.
 
 
 def load_targets(conn, sport):
@@ -34,8 +31,8 @@ def load_targets(conn, sport):
     The contracts to record right now, as {venue: [contract_id, ...]}.
     """
     now = now_iso()
-    return database.load_recording_targets(conn, sport, now, shift(now, days=GAME_WINDOW_DAYS), list(VENUES),
-                                           shift(now, hours=-RECORD_HOURS))
+    return database.load_recording_targets(conn, sport, now, shift(now, days=config.GAME_WINDOW_DAYS), list(VENUES),
+                                           shift(now, hours=-config.RECORD_HOURS))
 
 
 class Recorder:
@@ -62,7 +59,7 @@ class Recorder:
         self.last_update[venue] = time.time()
         key = (venue, contract_id)
         before = self.latest.get(key)
-        quote = self.latest[key] = Quote(venue, contract_id, now_iso(), bids[:LEVELS], asks[:LEVELS])
+        quote = self.latest[key] = Quote(venue, contract_id, now_iso(), bids[:config.BOOK_LEVELS], asks[:config.BOOK_LEVELS])
         if self.scanner and (before is None or (before.bids[:1], before.asks[:1]) != (quote.bids[:1], quote.asks[:1])):
             self.scanner.on_book(venue, contract_id, self.latest, quote.ts)
 

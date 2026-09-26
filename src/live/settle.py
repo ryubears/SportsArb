@@ -7,7 +7,7 @@ prop as soon as it is decided and both venues settle the rest within
 half an hour of the final whistle. A trade with no game behind it is
 checked from its payout time. Each pass costs one Kalshi call per fifty
 tickers and one Polymarket US call per event, and the next pass starts
-SETTLE_SECONDS after the previous one began. Winning legs are paid a
+config.SETTLE_CHECK_SECONDS after the previous one began. Winning legs are paid a
 dollar a contract through the shared Balances and each leg's result and
 payout is written on the trade. A trade settles only once every held leg
 has a result, so a venue that is slow to resolve just delays it.
@@ -21,11 +21,11 @@ has settled so it stops flattening it.
 
 import asyncio
 from api import kalshi, polymarket_us
+from common import config
 from common.log import on_failure, with_traceback
 from db import database
 from db.models import Ledger
 
-SETTLE_SECONDS = 30     # Seconds between passes over the open trades whose game has started.
 RESULTS = {"kalshi": kalshi.results, "polymarket_us": polymarket_us.results}    # How each venue reports how a contract resolved.
 RESULTS_BY_EVENT = {"kalshi": False, "polymarket_us": True}     # Whether a venue's lookup takes event ids rather than contract ids.
 
@@ -109,7 +109,7 @@ class Settler:
         """
         Once a second from the session, with the wall clock in seconds. Starts a pass when one is due and none is running.
         """
-        if clock - self.last_check >= SETTLE_SECONDS and (self.running is None or self.running.done()):
+        if clock - self.last_check >= config.SETTLE_CHECK_SECONDS and (self.running is None or self.running.done()):
             self.last_check = clock
             self.running = asyncio.create_task(self.settle(now))
             self.running.add_done_callback(on_failure(self.log, "settlement pass"))

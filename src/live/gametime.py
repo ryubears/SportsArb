@@ -7,26 +7,29 @@ from the first live game, Atlanta at Green Bay: kickoff to final whistle
 took 3.05 hours, and both venues settled within half an hour of it.
 """
 
+from common import config
 from common.timeutil import shift
 
-GAME_HOURS = 3.25       # Kickoff to final whistle, with a little margin over the 3.05 measured.
-SETTLE_HOURS = 0.5      # Final whistle to the venues settling.
-PAYOUT_HOURS = GAME_HOURS + SETTLE_HOURS   # Kickoff to payout, when the money a game holds comes back.
-RECORD_HOURS = 5        # Kickoff to when a game's contracts stop being recorded, whatever their close time says.
+
+def payout_hours():
+    """
+    Kickoff to payout, when the money a game holds comes back: the game, then the venues settling.
+    """
+    return config.GAME_HOURS + config.SETTLE_HOURS
 
 
 def in_play(kickoff, now):
     """
     Whether a game that kicked off at kickoff is being played at now.
     """
-    return kickoff <= now < shift(kickoff, hours=GAME_HOURS)
+    return kickoff <= now < shift(kickoff, hours=config.GAME_HOURS)
 
 
 def in_play_or_settling(kickoff, now):
     """
     Whether a game that kicked off at kickoff is being played or waiting on the venues to settle at now.
     """
-    return kickoff <= now < shift(kickoff, hours=PAYOUT_HOURS)
+    return kickoff <= now < shift(kickoff, hours=payout_hours())
 
 
 def resolution_time(start_time, close_time):
@@ -34,7 +37,7 @@ def resolution_time(start_time, close_time):
     When a contract pays out. Games pay once the venues settle after the final whistle. Futures pay near their close time.
     """
     if start_time:
-        return shift(start_time, hours=PAYOUT_HOURS)
+        return shift(start_time, hours=payout_hours())
     return close_time
 
 

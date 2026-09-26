@@ -255,7 +255,11 @@ python3 -m live.run --sport nfl
 ```
 
 `--no-trade` scans without paper trading, `--no-scan` only records, and
-`--seconds 120` runs a short test. The streams need venue keys in `data/`:
+`--seconds 120` runs a short test. The settings a run is tuned by, such as
+the minimum edge, the trade caps, and the starting balance, are in
+`src/common/config.py`, and `--set NAME=VALUE` overrides one for a run,
+for example `python3 -m live.run --sport nfl --set min_edge=0.03`. The run
+logs every setting when it starts. The streams need venue keys in `data/`:
 `kalshi_key_id.txt` and `kalshi_private_key.pem` for Kalshi,
 `polymarket_us_key_id.txt` and `polymarket_us_secret_key.txt` for
 Polymarket US. Then read the report:
@@ -270,7 +274,7 @@ python3 src/tools/summary.py --hours 24
 src/
   api/        venue clients and the shared websocket book stream
   catalog/    fetch, classify (one parser per venue), match, pipeline
-  common/     paths, time helpers, json helpers, the venue list, the logger
+  common/     the settings a run is tuned by, paths, time and json helpers, the venue list, the logger
   db/         models, the SQLite schema and its migrations, reads and writes
   live/       run, record, streams, scan, pricing, fees, execute, allocate, gametime, balances, settle, rebalance
   tools/      summary report

@@ -2,6 +2,7 @@
 Tests for the capital allocator on a Sunday schedule.
 """
 
+from common import config
 from db import database
 from db.models import Bet, Contract, Pair, Trade
 from live import allocate, balances
@@ -51,7 +52,7 @@ def test_caps_follow_the_active_games(tmp_path):
     # Once the early games have settled at 20:45, the four late games have the pool.
     assert allocator.cap(pair_for(*late), f"{SUNDAY}T21:00:00+00:00") == int(10000 / 4 / 20)
     # The night game is alone.
-    assert allocator.cap(pair_for(*night), "2026-09-28T01:00:00+00:00") == allocate.MAX_CAP
+    assert allocator.cap(pair_for(*night), "2026-09-28T01:00:00+00:00") == config.MAX_CAP
     # Nothing before kickoff, after the final whistle, or for a bet with no game.
     assert allocator.cap(pair_for(*early), f"{SUNDAY}T16:59:00+00:00") == 0
     assert allocator.cap(pair_for(*early), f"{SUNDAY}T20:16:00+00:00") == 0
