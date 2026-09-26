@@ -55,8 +55,9 @@ def sweep(levels, quantity, venue, fee_info, share=1.0, limit=None, selling=Fals
     first, as (contracts, dollars). Only share of each level's size is
     taken, whole contracts only, so a level too small for one is skipped
     and the next may still fill. A buy stops at levels priced above limit.
-    Dollars include the venue's fee: paid on top of the price when buying,
-    taken off the proceeds when selling.
+    Dollars include the venue's fee, charged on buys and sells alike and
+    rounded once per level: added to what a buy pays, and deducted from
+    what a sale brings in.
     """
     filled, dollars, remaining = 0, 0.0, quantity
     for price, size in levels:
@@ -65,9 +66,9 @@ def sweep(levels, quantity, venue, fee_info, share=1.0, limit=None, selling=Fals
         take = int(min(remaining, size * share))
         if take < 1:
             continue
-        fee = fees.fee(venue, price, 1, fee_info)
+        fee = fees.fee(venue, price, take, fee_info)      # Each level fills as one trade, with its fee rounded once.
         filled += take
-        dollars += take * (price - fee if selling else price + fee)
+        dollars += take * price - fee if selling else take * price + fee
         remaining -= take
         if remaining < 1:
             break
@@ -89,7 +90,8 @@ def walk_pair(leg_a, leg_b, fee_a, fee_b):
         left_a = size_a if left_a is None else left_a
         left_b = size_b if left_b is None else left_b
         contracts = min(left_a, left_b)
-        edge = 1 - cost_a - cost_b - fees.fee(fee_a[0], cost_a, 1, fee_a[1]) - fees.fee(fee_b[0], cost_b, 1, fee_b[1])
+        edge = (1 - cost_a - cost_b - fees.fee_per_contract(fee_a[0], cost_a, fee_a[1])
+                - fees.fee_per_contract(fee_b[0], cost_b, fee_b[1]))
         yield cost_a, cost_b, contracts, edge
         left_a -= contracts
         left_b -= contracts
@@ -143,7 +145,7 @@ def cheapest(members, quotes, side, fee_infos):
         levels = ladder(quotes[(m["venue"], m["contract_id"])], m["polarity"], side)
         if not levels:
             continue
-        cost = levels[0][0] + fees.fee(m["venue"], levels[0][0], 1, fee_infos[(m["venue"], m["contract_id"])])
+        cost = levels[0][0] + fees.fee_per_contract(m["venue"], levels[0][0], fee_infos[(m["venue"], m["contract_id"])])
         if best_cost is None or cost < best_cost:
             best, best_cost = m, cost
     return best, best_cost

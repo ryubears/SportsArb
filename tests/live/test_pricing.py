@@ -118,3 +118,19 @@ def test_best_trade_returns_none_without_two_quoted_sides():
     members = [member("kalshi", "k")]
     quotes = {("kalshi", "k"): quote("kalshi", "k", "t", [[0.53, 100]], [])}
     assert pricing.best_trade(members, quotes, {("kalshi", "k"): NO_K_FEES}) is None
+
+
+def test_fees_are_charged_once_per_level_on_buys_and_sells():
+    kalshi = ("kalshi", {"fee_type": "quadratic", "fee_multiplier": 1})
+    assert pricing.sweep([(0.5, 100)], 100, *kalshi) == (100, pytest.approx(50 + 1.75))                  # Not 100 fees of 2 cents.
+    assert pricing.sweep([(0.5, 100)], 100, *kalshi, selling=True) == (100, pytest.approx(50 - 1.75))
+    # Two levels are two trades, each rounded up to the cent on its own.
+    assert pricing.sweep([(0.5, 10), (0.6, 10)], 20, *kalshi) == (20, pytest.approx(5 + 0.18 + 6 + 0.17))
+
+
+def test_edges_use_the_unrounded_fee_per_contract():
+    kalshi = ("kalshi", {"fee_type": "quadratic", "fee_multiplier": 1})
+    edge, size, profit = pricing.positive_depth([(0.45, 100)], [(0.47, 100)], kalshi, kalshi)
+    expected = 1 - 0.45 - 0.47 - 0.07 * 0.45 * 0.55 - 0.07 * 0.47 * 0.53
+    assert edge == pytest.approx(expected)          # About 4.53 cents. Rounding each fee up to 2 cents would have said 4.
+    assert (size, profit) == (100, pytest.approx(100 * expected))
