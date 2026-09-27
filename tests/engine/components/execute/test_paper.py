@@ -11,23 +11,7 @@ from engine.components import scan, settle
 from engine.components.balance.paper import PaperBalances
 from engine.components.execute.paper import PaperExecutor
 from engine.helper import config
-
-NO_PM_FEES = {"feeCoefficient": 0}
-NO_K_FEES = {"fee_type": "quadratic", "fee_multiplier": 0}
-KICKOFF = "2026-09-20T17:00:00+00:00"
-NOW = "2026-09-20T17:30:00+00:00"
-PAIR = {"id": 1, "label": "game_winner 2026-09-20 CAR@ATL CAR", "kind": "game_winner"}
-YES = {"venue": "polymarket_us", "contract_id": "pm", "polarity": "yes", "start_time": KICKOFF, "close_time": "2026-09-20T21:00:00+00:00"}
-NO = {"venue": "kalshi", "contract_id": "k", "polarity": "yes", "start_time": KICKOFF, "close_time": "2026-09-20T21:00:00+00:00"}
-FEES = {("polymarket_us", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES}
-
-
-def books(pm_bid=0.44, pm_ask=0.45, k_bid=0.53, k_ask=0.54, size=100):
-    """
-    Books where yes is cheapest on Polymarket US at the ask and no is cheapest on Kalshi through the bid.
-    """
-    return {("polymarket_us", "pm"): Quote("polymarket_us", "pm", NOW, [[pm_bid, size]], [[pm_ask, size]]),
-            ("kalshi", "k"): Quote("kalshi", "k", NOW, [[k_bid, size]], [[k_ask, size]])}
+from trade_setup import FEES, KICKOFF, NO, NO_K_FEES, NO_PM_FEES, NOW, PAIR, YES, books, stored
 
 
 @pytest.fixture
@@ -54,10 +38,6 @@ def run(ex, after_signal=None, signals=1):
             await asyncio.gather(*ex.tasks)
         return sent
     return asyncio.run(scenario())
-
-
-def stored(conn):
-    return [dict(r) for r in conn.execute("SELECT * FROM trades ORDER BY id")]
 
 
 def test_unchanged_books_fill_both_legs_and_lock_in_the_edge(tmp_path, quick):
@@ -162,6 +142,7 @@ def test_a_settled_trade_is_not_flattened_any_more(tmp_path, quick):
                                               title="t", outcome="Yes", market_type=None, line=None, rules=None, start_time=KICKOFF,
                                               close_time="2026-09-20T21:00:00+00:00", fee_info=None) for v, c in (("kalshi", "k"), ("polymarket_us", "pm"))], NOW)
     conn.execute("INSERT INTO pairs (id, label, kind, venues, contracts, flags, matched_at) VALUES (1, ?, 'game_winner', '', 2, '[]', ?)", (PAIR["label"], NOW))
+
     def kalshi_vanishes_and_polymarket_loses_its_bids():
         latest.pop(("kalshi", "k"))
         latest[("polymarket_us", "pm")] = Quote("polymarket_us", "pm", NOW, [], [[0.45, 100]])
