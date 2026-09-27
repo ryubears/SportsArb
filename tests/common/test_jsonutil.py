@@ -2,6 +2,7 @@
 Tests for the shared JSON helpers.
 """
 
+import pytest
 from common import jsonutil
 
 
@@ -33,3 +34,9 @@ def test_float_or_none():
     assert jsonutil.float_or_none(3) == 3.0
     assert jsonutil.float_or_none(None) is None
     assert jsonutil.float_or_none("n/a") is None
+
+
+def test_float_or_zero_reads_a_missing_value_as_zero_and_refuses_one_that_is_not_a_number():
+    assert (jsonutil.float_or_zero("0.4650"), jsonutil.float_or_zero(3), jsonutil.float_or_zero(None), jsonutil.float_or_zero("")) == (0.465, 3.0, 0.0, 0.0)
+    with pytest.raises(ValueError):
+        jsonutil.float_or_zero("n/a")
