@@ -4,10 +4,11 @@ Hold the live order books of every paired contract.
 Both venues push every book change over a websocket. The recorder keeps
 the newest book per contract in memory, config.BOOK_LEVELS levels a side,
 which is what the scanner prices and the executors trade against. Books
-are not stored. When a venue's connection is lost the stretch until the
-next connection is subscribed is stored as a gap, and the venue's books
-are dropped until the new connection sends them again, so the scanner can
-tell a quiet book from one that went unseen.
+are not stored. When one of a venue's connections is lost the stretch
+until its next connection is subscribed is stored as a gap, and the books
+of the contracts that connection carries are dropped until it sends them
+again, so the scanner can tell a quiet book from one that went unseen. A
+venue's other connections carry on, and so do their books.
 
 With a scanner from scan.py, every change at the top of a book is priced
 as it lands, from the same in memory books.
@@ -68,21 +69,22 @@ class Recorder:
         if self.scanner and (before is None or top(before) != top(quote)):
             self.scanner.on_book(venue, contract_id, self.latest, quote.ts)
 
-    def on_gap(self, venue, start_ts, end_ts):
-        """
-        Store a venue's connection gap and drop what was known of its books,
-        which the scanner leaves out until the new connection sends them again.
-        """
-        database.insert_gap(self.conn, Gap(venue, start_ts, end_ts))
-        self.gaps[venue] += 1
-        self.latest = {key: q for key, q in self.latest.items() if key[0] != venue}
-
     def forget(self, venue, contract_ids):
         """
-        Drop contracts that are no longer recorded.
+        Drop the books of contracts that are no longer recorded, or not seen for a while.
         """
         for contract_id in contract_ids:
             self.latest.pop((venue, contract_id), None)
+
+    def on_gap(self, venue, start_ts, end_ts, contract_ids):
+        """
+        Store a gap in one of a venue's connections and drop the books of the
+        contracts it carries, which the scanner leaves out until the new
+        connection sends them again.
+        """
+        database.insert_gap(self.conn, Gap(venue, start_ts, end_ts))
+        self.gaps[venue] += 1
+        self.forget(venue, contract_ids)
 
     def status(self):
         """

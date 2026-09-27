@@ -63,7 +63,8 @@ the pairs while it records.
 carrying every wanted contract, a live book per contract, changes to the
 wanted set applied without reconnecting, and a reconnect that is
 immediate on the first drop and backs off only on repeated ones, with the
-stretch until the new subscription is confirmed stored as a gap.
+stretch until the new subscription is confirmed stored as a gap, and the
+books of that connection's contracts dropped until it sends them again.
 **kalshi.py** signs each connection and request with RSA-PSS and holds the
 whole catalog on one connection. **polymarket_us.py** signs with Ed25519,
 subscribes in chunks of 100 slugs, and, because the feed refuses an

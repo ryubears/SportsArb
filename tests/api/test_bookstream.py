@@ -59,7 +59,7 @@ class ScriptedStream(bookstream.BookStream):
     def __init__(self, contract_ids, connections, on_book=lambda *a: None, log=None):
         self.logs = []
         self.gaps = []
-        super().__init__(contract_ids, on_book, lambda start, end: self.gaps.append((start, end)), self.logs.append)
+        super().__init__(contract_ids, on_book, lambda start, end, carried: self.gaps.append((start, end, carried)), self.logs.append)
         self.connections = list(connections)
         self.used = []
         self.resets = 0
@@ -120,7 +120,8 @@ def test_loop_subscribes_and_reconnects_on_silence_gap_and_drop(monkeypatch):
                            "scripted stream dropped (ConnectionResetError: peer reset), reconnecting"]
     assert stream.resets >= 4
     assert stream.books == {}                                            # Cleared before the last connection.
-    assert len(stream.gaps) == 3 and all(start <= end for start, end in stream.gaps)   # One gap per failure, closed on resubscribe.
+    assert len(stream.gaps) == 3 and all(start <= end for start, end, _ in stream.gaps)    # One gap per failure, closed on resubscribe.
+    assert all(carried == ["x", "y"] for _, _, carried in stream.gaps)                     # Each names the contracts to drop.
     assert stream.num_failures == 1                                          # Reset by each resubscribe, then the last connection stalled.
 
 
