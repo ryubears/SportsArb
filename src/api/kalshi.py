@@ -2,13 +2,13 @@
 Kalshi API client.
 
 Three jobs. The query half walks sports series to events to markets on
-the public API and turns every open market into a Contract. The trading
-half reads the account's balance and sends signed orders for the live
-executor. The streaming half opens one websocket with a signed API key,
-subscribes to order book updates, and keeps a live book for each ticker
-restated from the Yes side so it matches Polymarket US's shape. Tickers
-can be added and removed while the connection runs. This is the only file
-that knows Kalshi's field names and message formats.
+the public API and turns every open market into a Contract. The streaming
+half opens one websocket with a signed API key, subscribes to order book
+updates, and keeps a live book for each ticker restated from the Yes side
+so it matches Polymarket US's shape. Tickers can be added and removed
+while the connection runs. The trading half reads the account's balance
+and sends signed orders for the live executor. This is the only file that
+knows Kalshi's field names and message formats.
 """
 
 import asyncio
@@ -20,7 +20,7 @@ import urllib.parse
 from api import orders
 from api.bookstream import BookStream, Reconnect
 from api.http import RequestFailed, get_json, send_json
-from common.jsonutil import float_or_none
+from common.jsonutil import float_or_none, float_or_zero
 from common.paths import DATA_DIR
 from common.timeutil import iso
 from cryptography.hazmat.primitives import hashes, serialization
@@ -184,80 +184,6 @@ def signed_headers(method, path):
     }
 
 
-# TRADING
-
-def signed_request(method, path, body=None, params=None):
-    """
-    A signed call to the trading API at a path under BASE, for example
-    '/portfolio/balance'. The signature covers the path without its query.
-    """
-    url = BASE + path + (f"?{urllib.parse.urlencode(params)}" if params else "")
-    return send_json(method, url, signed_headers(method, BASE_PATH + path), body)
-
-
-def dollars(value):
-    """
-    A fixed point dollar string from the API as a float, zero when missing.
-    """
-    return float(value) if value not in (None, "") else 0.0
-
-
-def balance():
-    """
-    Dollars available for trading on the account.
-    """
-    answer = signed_request("GET", "/portfolio/balance")
-    return dollars(answer["balance_dollars"]) if "balance_dollars" in answer else answer["balance"] / 100
-
-
-# The book side of an order for each action on each outcome. Orders are quoted on the yes side:
-# buying no is selling yes, and selling no back is buying yes.
-BOOK_SIDES = {("buy", "yes"): "bid", ("sell", "no"): "bid", ("buy", "no"): "ask", ("sell", "yes"): "ask"}
-
-
-def order_body(ticker, action, outcome, quantity, price, client_id):
-    """
-    An immediate or cancel limit order for quantity contracts of one side of
-    a market, at price or better for that side. The order endpoint quotes
-    every order on the yes side, so a no side price p is sent as 1 - p. A
-    sale is reduce only, so it can close what is held but never open the
-    other side, and an order that would trade against one of our own is
-    cancelled rather than filled.
-    """
-    yes_price = price if outcome == "yes" else 1 - price
-    body = {"ticker": ticker, "client_order_id": client_id, "side": BOOK_SIDES[(action, outcome)], "count": str(quantity),
-            "price": f"{yes_price:.4f}", "time_in_force": "immediate_or_cancel", "self_trade_prevention_type": "taker_at_cross"}
-    if action == "sell":
-        body["reduce_only"] = True
-    return body
-
-
-def place_order(ticker, action, outcome, quantity, price, client_id):
-    """
-    Send an immediate or cancel limit order and return what came back as an
-    orders.Answer. action is 'buy' or 'sell', outcome 'yes' or 'no', and
-    price the worst price per contract accepted for that outcome. The answer
-    gives the contracts filled, their average price on the yes side, so a no
-    side fill at p cost 1 - p, and the average fee per contract. Contracts
-    are whole in our books, so a fractional fill counts its whole contracts
-    and says so in the note.
-    """
-    try:
-        answer = signed_request("POST", "/portfolio/events/orders", order_body(ticker, action, outcome, quantity, price, client_id))
-    except RequestFailed as e:
-        return orders.refused(e) if e.status < 500 else orders.unknown(e)
-    except Exception as e:
-        return orders.unknown(e)
-    exact = dollars(answer.get("fill_count"))
-    filled = int(exact)
-    note = f"fractional fill of {exact} contracts" if exact != filled else None
-    yes_price = dollars(answer.get("average_fill_price"))
-    traded = filled * (yes_price if outcome == "yes" else 1 - yes_price)
-    fees = filled * dollars(answer.get("average_fee_paid"))
-    paid = traded + fees if action == "buy" else traded - fees
-    return orders.Answer(answer.get("order_id"), orders.status(filled, quantity), filled, paid, fees, note, answer)
-
-
 # STREAMING
 
 def update_frame(message_id, sid, tickers, action):
@@ -342,3 +268,70 @@ class KalshiBookStream(BookStream):
         bids = [[p, s] for p, s in sorted(b["yes"].items(), reverse=True) if s > 0]
         asks = [[p, s] for p, s in sorted(b["no"].items()) if s > 0]
         self.on_book(ticker, bids, asks)
+
+
+# TRADING
+
+def signed_request(method, path, body=None, params=None):
+    """
+    A signed call to the trading API at a path under BASE, for example
+    '/portfolio/balance'. The signature covers the path without its query.
+    """
+    url = BASE + path + (f"?{urllib.parse.urlencode(params)}" if params else "")
+    return send_json(method, url, signed_headers(method, BASE_PATH + path), body)
+
+
+def balance():
+    """
+    Dollars available for trading on the account.
+    """
+    answer = signed_request("GET", "/portfolio/balance")
+    return float_or_zero(answer["balance_dollars"]) if "balance_dollars" in answer else answer["balance"] / 100
+
+
+# The book side of an order for each action on each outcome. Orders are quoted on the yes side:
+# buying no is selling yes, and selling no back is buying yes.
+BOOK_SIDES = {("buy", "yes"): "bid", ("sell", "no"): "bid", ("buy", "no"): "ask", ("sell", "yes"): "ask"}
+
+
+def order_body(ticker, action, outcome, quantity, price, client_id):
+    """
+    An immediate or cancel limit order for quantity contracts of one side of
+    a market, at price or better for that side. The order endpoint quotes
+    every order on the yes side, so a no side price p is sent as 1 - p. A
+    sale is reduce only, so it can close what is held but never open the
+    other side, and an order that would trade against one of our own is
+    cancelled rather than filled.
+    """
+    yes_price = price if outcome == "yes" else 1 - price
+    body = {"ticker": ticker, "client_order_id": client_id, "side": BOOK_SIDES[(action, outcome)], "count": str(quantity),
+            "price": f"{yes_price:.4f}", "time_in_force": "immediate_or_cancel", "self_trade_prevention_type": "taker_at_cross"}
+    if action == "sell":
+        body["reduce_only"] = True
+    return body
+
+
+def place_order(ticker, action, outcome, quantity, price, client_id):
+    """
+    Send an immediate or cancel limit order and return what came back as an
+    Answer. action is 'buy' or 'sell', outcome 'yes' or 'no', and
+    price the worst price per contract accepted for that outcome. The answer
+    gives the contracts filled, their average price on the yes side, so a no
+    side fill at p cost 1 - p, and the average fee per contract. Contracts
+    are whole in our books, so a fractional fill counts its whole contracts
+    and says so in the note.
+    """
+    try:
+        answer = signed_request("POST", "/portfolio/events/orders", order_body(ticker, action, outcome, quantity, price, client_id))
+    except RequestFailed as e:
+        return orders.refused(e) if e.status < 500 else orders.unknown(e)
+    except Exception as e:
+        return orders.unknown(e)
+    exact = float_or_zero(answer.get("fill_count"))
+    filled = int(exact)
+    note = f"fractional fill of {exact} contracts" if exact != filled else None
+    yes_price = float_or_zero(answer.get("average_fill_price"))
+    traded = filled * (yes_price if outcome == "yes" else 1 - yes_price)
+    fees = filled * float_or_zero(answer.get("average_fee_paid"))
+    paid = traded + fees if action == "buy" else traded - fees
+    return orders.Answer(answer.get("order_id"), orders.status(filled, quantity), filled, paid, fees, note, answer)

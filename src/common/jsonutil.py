@@ -39,3 +39,13 @@ def float_or_none(value):
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def float_or_zero(value):
+    """
+    Convert to float, or return zero when the value is missing, as the venues
+    leave out a dollar amount or a count that is nothing. A value that is
+    there but not a number still raises, so a venue that changes its format
+    is noticed rather than read as nothing.
+    """
+    return float(value) if value not in (None, "") else 0.0

@@ -71,7 +71,7 @@ eleventh subscription on one connection, opens as many connections as the
 contract count needs. Both clients also report how a contract resolved,
 which the settler uses, and carry the live trading calls: the account's
 balance, and an immediate or cancel limit order whose answer they turn
-into an `orders.Answer`, the same for both venues. Polymarket US prices
+into an `Answer`, the same for both venues. Polymarket US prices
 every order on the long side, so a short side order at p is sent at 1 - p,
 and when its answer does not say how an order ended, the order itself is
 looked up, since a returned order id does not mean the order is done.
