@@ -99,5 +99,24 @@ def test_live_caps_come_from_the_live_money_and_stay_under_the_live_bounds(tmp_p
     cash.read["polymarket_us"] = 1500.0
     assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == 8                       # 1,500 over nine games, at 20$ a contract.
     cash.read["polymarket_us"] = 100.0
-    assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == 0                       # Under one contract.
-    assert allocator.summary(f"{SUNDAY}T17:00:00+00:00").startswith("live capital: 9 games")
+    assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == 1                       # 11 a game, under one contract of cap.
+    assert allocator.summary(f"{SUNDAY}T17:00:00+00:00") == "live capital: 9 games in play or settling, 11$ a venue each, cap 1"
+
+
+def test_a_small_live_test_trades_one_contract_a_game_until_the_game_has_spent_its_share(tmp_path):
+    conn = schedule(tmp_path, EARLY)
+    cash = LiveBalances(lambda m: None, {"kalshi": lambda: 88.0, "polymarket_us": lambda: 88.0})
+    asyncio.run(cash.refresh(f"{SUNDAY}T17:00:00+00:00"))
+    allocator = allocate.Allocator(conn, cash)
+    first_pair = next(p for p in database.load_pairs(conn, "nfl").values() if p["team_a"] == "E0")
+    now = f"{SUNDAY}T17:30:00+00:00"
+    assert allocator.cap(first_pair, now) == allocator.cap(pair_for(*EARLY[1]), now) == 1
+    # The first game has put 12 into a trade on each venue, past its share of the 100 in the pool, 11.
+    database.insert_trade(conn, Trade(mode="live", pair_id=first_pair["id"], trade="t", signal_ts=now, edge=0.08, quantity=10,
+                                      yes_venue="kalshi", yes_contract="kalshi-E0H0", yes_polarity="yes", yes_limit=0.6,
+                                      no_venue="polymarket_us", no_contract="polymarket_us-E0H0", no_polarity="yes", no_limit=0.6,
+                                      pays_at=f"{SUNDAY}T21:00:00+00:00", yes_filled=20, yes_cost=12.0, no_filled=20, no_cost=12.0,
+                                      yes_held=20, no_held=20, matched=20, status="filled"))
+    assert allocator.cap(first_pair, now) == 0 and allocator.cap(pair_for(*EARLY[1]), now) == 1
+    paper = allocate.Allocator(conn, PaperBalances(conn, start=100.0))
+    assert paper.cap(pair_for(*EARLY[1]), now) == 0                     # Paper keeps its least of 5, and so sends nothing.

@@ -19,6 +19,13 @@ while the same games are in play, then grows for the games still running
 when others settle, since their money comes back to the pool and fewer
 games share it. A game that has spent its share gets nothing more, and a
 game not in play gets nothing at all, since trades are only taken live.
+
+A paper game whose share is too small for config.MIN_CAP gets nothing. A
+live game in the same spot still gets config.LIVE_MIN_CAP, one contract,
+until it has spent its share, since a small live test is thinner than the
+paper rate expects: 100 dollars a venue over a nine game Sunday window is
+11 dollars a game, short of the 20 one contract of cap stands for, and
+would otherwise trade nothing.
 """
 
 from common.venues import VENUES
@@ -91,9 +98,16 @@ class Allocator:
         held = self.deployed().get(key, {})
         if any(shares[venue] - held.get(venue, 0.0) <= 0 for venue in VENUES):
             return 0
-        cap = int(min(shares.values()) / config.DOLLARS_PER_CAP)
+        return self.bounded(int(min(shares.values()) / config.DOLLARS_PER_CAP))
+
+    def bounded(self, cap):
+        """
+        A cap within the mode's range. Under the least, paper sends nothing and live sends the least.
+        """
         least, most = cap_range(self.mode)
-        return 0 if cap < least else min(cap, most)
+        if cap < least:
+            return least if self.mode == "live" else 0
+        return min(cap, most)
 
     def summary(self, now):
         """
@@ -103,4 +117,4 @@ class Allocator:
         if not active:
             return f"{self.mode} capital: no games in play"
         share = min(shares.values())
-        return f"{self.mode} capital: {len(active)} games in play or settling, {share:,.0f}$ a venue each, cap {int(share / config.DOLLARS_PER_CAP)}"
+        return f"{self.mode} capital: {len(active)} games in play or settling, {share:,.0f}$ a venue each, cap {self.bounded(int(share / config.DOLLARS_PER_CAP))}"

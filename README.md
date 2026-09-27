@@ -181,7 +181,10 @@ A game's share becomes a cap at $20 of spending per contract of cap, the
 rate the first live game showed, between 5 and 500 contracts on paper and
 1 and 10 live. A game that has spent its share gets nothing more until
 others settle and fewer games share the pool. Paper and live each size
-from their own money and trades.
+from their own money and trades. A live game whose share is too small for
+one contract of cap still gets one contract until it has spent its share,
+so a test with $100 a venue trades a nine game Sunday window, $11 a game,
+rather than nothing.
 
 **balance/**, **settle.py**, **rebalance.py** keep the books: paper money
 in **balance/paper.py** and live money in **balance/live.py**, with what
