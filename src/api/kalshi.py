@@ -2,13 +2,13 @@
 Kalshi API client.
 
 Three jobs. The query half walks sports series to events to markets on
-the public API and turns every open market into a Contract. The streaming
-half opens one websocket with a signed API key, subscribes to order book
-updates, and keeps a live book for each ticker restated from the Yes side
-so it matches Polymarket US's shape. Tickers can be added and removed
-while the connection runs. The trading half reads the account's balance
-and sends signed orders for the live executor. This is the only file that
-knows Kalshi's field names and message formats.
+the public API, turns every open market into a Contract, and reads the
+account's balance. The streaming half opens one websocket with a signed
+API key, subscribes to order book updates, and keeps a live book for each
+ticker restated from the Yes side so it matches Polymarket US's shape.
+Tickers can be added and removed while the connection runs. The trading
+half sends signed orders for the live executor. This is the only file
+that knows Kalshi's field names and message formats.
 """
 
 import asyncio
@@ -35,6 +35,46 @@ WS_PATH = "/trade-api/ws/v2"
 KEY_ID_FILE = DATA_DIR / "kalshi_key_id.txt"
 PRIVATE_KEY_FILE = DATA_DIR / "kalshi_private_key.pem"
 RESULTS_BATCH = 50   # Tickers per markets call when looking up results.
+
+
+# SIGNING
+
+@functools.cache
+def credentials():
+    """
+    The account's key id and RSA private key, read from the data folder once.
+    """
+    return KEY_ID_FILE.read_text().strip(), serialization.load_pem_private_key(PRIVATE_KEY_FILE.read_bytes(), password=None)
+
+
+def signed_headers(method, path):
+    """
+    The three headers that authenticate a request. Kalshi wants the timestamp,
+    the method, and the path signed with the account's RSA key. The websocket
+    handshake and the trading endpoints use the same scheme.
+    """
+    key_id, key = credentials()
+    ts = str(int(time.time() * 1000))
+    message = (ts + method + path).encode()
+    signature = key.sign(
+        message,
+        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.DIGEST_LENGTH),
+        hashes.SHA256(),
+    )
+    return {
+        "KALSHI-ACCESS-KEY": key_id,
+        "KALSHI-ACCESS-TIMESTAMP": ts,
+        "KALSHI-ACCESS-SIGNATURE": base64.b64encode(signature).decode(),
+    }
+
+
+def signed_request(method, path, body=None, params=None):
+    """
+    A signed call to the API at a path under BASE, for example
+    '/portfolio/balance'. The signature covers the path without its query.
+    """
+    url = BASE + path + (f"?{urllib.parse.urlencode(params)}" if params else "")
+    return send_json(method, url, signed_headers(method, BASE_PATH + path), body)
 
 
 # QUERY
@@ -153,35 +193,12 @@ def results(tickers):
     return out
 
 
-# SIGNING
-
-@functools.cache
-def credentials():
+def balance():
     """
-    The account's key id and RSA private key, read from the data folder once.
+    Dollars available for trading on the account.
     """
-    return KEY_ID_FILE.read_text().strip(), serialization.load_pem_private_key(PRIVATE_KEY_FILE.read_bytes(), password=None)
-
-
-def signed_headers(method, path):
-    """
-    The three headers that authenticate a request. Kalshi wants the timestamp,
-    the method, and the path signed with the account's RSA key. The websocket
-    handshake and the trading endpoints use the same scheme.
-    """
-    key_id, key = credentials()
-    ts = str(int(time.time() * 1000))
-    message = (ts + method + path).encode()
-    signature = key.sign(
-        message,
-        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.DIGEST_LENGTH),
-        hashes.SHA256(),
-    )
-    return {
-        "KALSHI-ACCESS-KEY": key_id,
-        "KALSHI-ACCESS-TIMESTAMP": ts,
-        "KALSHI-ACCESS-SIGNATURE": base64.b64encode(signature).decode(),
-    }
+    answer = signed_request("GET", "/portfolio/balance")
+    return float_or_zero(answer["balance_dollars"]) if "balance_dollars" in answer else answer["balance"] / 100
 
 
 # STREAMING
@@ -271,23 +288,6 @@ class KalshiBookStream(BookStream):
 
 
 # TRADING
-
-def signed_request(method, path, body=None, params=None):
-    """
-    A signed call to the trading API at a path under BASE, for example
-    '/portfolio/balance'. The signature covers the path without its query.
-    """
-    url = BASE + path + (f"?{urllib.parse.urlencode(params)}" if params else "")
-    return send_json(method, url, signed_headers(method, BASE_PATH + path), body)
-
-
-def balance():
-    """
-    Dollars available for trading on the account.
-    """
-    answer = signed_request("GET", "/portfolio/balance")
-    return float_or_zero(answer["balance_dollars"]) if "balance_dollars" in answer else answer["balance"] / 100
-
 
 # The book side of an order for each action on each outcome. Orders are quoted on the yes side:
 # buying no is selling yes, and selling no back is buying yes.

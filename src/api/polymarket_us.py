@@ -2,11 +2,11 @@
 Polymarket US API client.
 
 Three jobs. The query half reads the public events listing on the gateway
-host, filtered by sport tag, and turns every open market into a Contract,
-one per market, for the market's long side. The streaming half opens the
-signed markets websocket and keeps a live book per market slug, replacing
-the whole book on every message because the feed sends full snapshots.
-The trading half reads the account's balance and sends signed orders for
+host, filtered by sport tag, turns every open market into a Contract, one
+per market, for the market's long side, and reads the account's balance.
+The streaming half opens the signed markets websocket and keeps a live
+book per market slug, replacing the whole book on every message because
+the feed sends full snapshots. The trading half sends signed orders for
 the live executor. This is the only file that knows Polymarket US field
 names and message formats.
 
@@ -37,6 +37,35 @@ WS_SUBSCRIPTIONS = 10   # Subscriptions per connection. The feed refuses an elev
 WS_DEBOUNCE = True      # Ask the feed to batch updates. Cuts bandwidth by a third, and the recorder writes once a second anyway.
 KEY_ID_FILE = DATA_DIR / "polymarket_us_key_id.txt"
 SECRET_KEY_FILE = DATA_DIR / "polymarket_us_secret_key.txt"
+
+
+# SIGNING
+
+@functools.cache
+def credentials():
+    """
+    The account's key id and Ed25519 private key, read from the data folder once.
+    """
+    secret = base64.b64decode(SECRET_KEY_FILE.read_text().strip())
+    return KEY_ID_FILE.read_text().strip(), Ed25519PrivateKey.from_private_bytes(secret[:32])
+
+
+def signed_headers(method, path):
+    """
+    The three headers that authenticate a request. The signature is the
+    account's Ed25519 key over the timestamp, method, and path.
+    """
+    key_id, key = credentials()
+    ts = str(int(time.time() * 1000))
+    signature = base64.b64encode(key.sign(f"{ts}{method}{path}".encode())).decode()
+    return {"X-PM-Access-Key": key_id, "X-PM-Timestamp": ts, "X-PM-Signature": signature}
+
+
+def signed_request(method, path, body=None):
+    """
+    A signed call to the API at a path under API, for example '/account/balances'.
+    """
+    return send_json(method, API + path, signed_headers(method, API_PATH + path), body)
 
 
 # QUERY
@@ -104,26 +133,14 @@ def results(event_slugs):
     return out
 
 
-# SIGNING
-
-@functools.cache
-def credentials():
+def balance():
     """
-    The account's key id and Ed25519 private key, read from the data folder once.
+    Dollars available for trading on the account: the buying power of its dollar balance.
     """
-    secret = base64.b64decode(SECRET_KEY_FILE.read_text().strip())
-    return KEY_ID_FILE.read_text().strip(), Ed25519PrivateKey.from_private_bytes(secret[:32])
-
-
-def signed_headers(method, path):
-    """
-    The three headers that authenticate a request. The signature is the
-    account's Ed25519 key over the timestamp, method, and path.
-    """
-    key_id, key = credentials()
-    ts = str(int(time.time() * 1000))
-    signature = base64.b64encode(key.sign(f"{ts}{method}{path}".encode())).decode()
-    return {"X-PM-Access-Key": key_id, "X-PM-Timestamp": ts, "X-PM-Signature": signature}
+    for b in signed_request("GET", "/account/balances").get("balances", []):
+        if b.get("currency", "USD") == "USD":
+            return float(b.get("buyingPower", b.get("currentBalance", 0.0)))
+    return 0.0
 
 
 # STREAMING
@@ -205,13 +222,6 @@ NO_LIQUIDITY = "ORD_REJECT_REASON_NO_LIQUIDITY"     # A rejection for finding no
 MAX_BLOCK_SECONDS = 5   # How long an order call waits for its order to end, as long as the latency stopgap gives it.
 
 
-def signed_request(method, path, body=None):
-    """
-    A signed call to the API at a path under API, for example '/account/balances'.
-    """
-    return send_json(method, API + path, signed_headers(method, API_PATH + path), body)
-
-
 def amount(value):
     """
     An Amount from the API, {'value': '0.55', 'currency': 'USD'}, as a float, zero when missing.
@@ -224,16 +234,6 @@ def price_text(price):
     A price as the API takes it, a decimal string without trailing zeros.
     """
     return f"{price:.4f}".rstrip("0").rstrip(".")
-
-
-def balance():
-    """
-    Dollars available for trading on the account: the buying power of its dollar balance.
-    """
-    for b in signed_request("GET", "/account/balances").get("balances", []):
-        if b.get("currency", "USD") == "USD":
-            return float(b.get("buyingPower", b.get("currentBalance", 0.0)))
-    return 0.0
 
 
 def order_body(slug, action, outcome, quantity, price):
