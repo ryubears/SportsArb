@@ -10,7 +10,7 @@ Override one for a run with --set, for example:
     python3 -m live.run --sport nfl --set min_edge=0.03 --set max_cap=100
 """
 
-# TRADING, execute.py
+# TRADING, execute/executor.py and execute/paper.py
 
 MIN_EDGE = 0.05             # Net dollars per contract at the top before orders are sent, and the floor for the deeper levels they sweep.
                             # In-game, 2 to 3 cent edges lost money after hedging.
@@ -34,6 +34,15 @@ REBALANCE_WEEKDAY = 1       # Tuesday in UTC, when balances are compared, once M
 REBALANCE_DRIFT = 0.25      # A venue this far above the two venue average on the weekly check sends the excess over.
 REBALANCE_FLOOR = 500.0     # A venue below this is topped up to the average on any day.
 TRANSFER_DAYS = 4           # Business days a transfer between venues takes.
+
+# LIVE, execute/live.py, accounts.py, and rebalance.py. Real money, so each limit is kept small until the live results earn more.
+
+LIVE_MIN_CAP = 1            # Contracts per live trade, the least worth sending.
+LIVE_MAX_CAP = 10           # Contracts per live trade, the most one trade may hold, whatever the allocator would give.
+LIVE_BALANCE_SECONDS = 30   # Between readings of the venues' balances.
+LIVE_REJECT_LIMIT = 3       # Orders a venue may refuse in a row before live trading halts.
+LIVE_MAX_HEDGE_LOSS = 25.0  # Dollars flattening may lose since the start before live trading halts.
+LIVE_ALERT_HOURS = 24       # Between emails asking for the live venues to be rebalanced, while they stay apart.
 
 # GAMES, game.py. Measured on the first live game, Atlanta at Green Bay.
 

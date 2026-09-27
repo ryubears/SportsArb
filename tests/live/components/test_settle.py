@@ -18,7 +18,7 @@ def filled_trade(conn):
     """
     conn.execute("INSERT INTO pairs (label, kind, venues, contracts, flags, matched_at) VALUES (?, 'game_winner', 'kalshi,polymarket_us', 2, '[]', ?)",
                  ("game_winner 2026-09-20 CAR@ATL CAR", KICKOFF))
-    t = Trade(pair_id=1, label="game_winner 2026-09-20 CAR@ATL CAR", trade="yes: PMUS buy, no: K buy other side",
+    t = Trade(mode="paper", pair_id=1, label="game_winner 2026-09-20 CAR@ATL CAR", trade="yes: PMUS buy, no: K buy other side",
               signal_ts="2026-09-20T17:30:00+00:00", edge=0.08, quantity=50,
               yes_venue="polymarket_us", yes_contract="pm", yes_polarity="yes", yes_limit=0.45,
               no_venue="kalshi", no_contract="k", no_polarity="yes", no_limit=0.47, pays_at=PAYS_AT,
@@ -55,7 +55,7 @@ def test_settlement_pays_the_winning_leg_only_and_records_each_leg(tmp_path):
     settled(s, "2026-09-20T21:05:00+00:00",
             {("polymarket_us", "pm"): ("yes", "2026-09-20T20:10:00+00:00"), ("kalshi", "k"): ("yes", "2026-09-20T20:09:00+00:00")})
     row = conn.execute("SELECT * FROM settlements").fetchone()
-    assert row["trade_id"] == trade.id
+    assert (row["trade_id"], row["mode"]) == (trade.id, "paper")
     # The bet resolved yes. The Polymarket US leg held the yes side and is paid a dollar each. The Kalshi leg held no and gets nothing.
     assert (row["yes_result"], row["yes_payout"], row["yes_settled_at"]) == ("yes", 50, "2026-09-20T20:10:00+00:00")
     assert (row["no_result"], row["no_payout"], row["no_settled_at"]) == ("yes", 0, "2026-09-20T20:09:00+00:00")
@@ -63,8 +63,8 @@ def test_settlement_pays_the_winning_leg_only_and_records_each_leg(tmp_path):
     assert cash.amounts == pytest.approx({"polymarket_us": 10000 + 50, "kalshi": 10000})
     assert [tuple(r) for r in conn.execute("SELECT venue, amount, reason, trade_id FROM ledger WHERE reason != 'transfer_in'")] == [
         ("polymarket_us", 50.0, "payout", trade.id)]                    # After the two opening balances.
-    assert logs == [f"settled {trade.label}: polymarket_us yes yes pays 50$, kalshi no yes pays 0$, realized +4.00$"]
-    assert s.summary() == "settled: 1 trades for +4.00$, 0 still open"
+    assert logs == [f"paper settled {trade.label}: polymarket_us yes yes pays 50$, kalshi no yes pays 0$, realized +4.00$"]
+    assert s.summary() == "paper settled: 1 trades for +4.00$, 0 still open"
 
 
 def test_a_trade_is_checked_from_kickoff_when_its_contracts_have_a_start_time(tmp_path):
@@ -76,7 +76,7 @@ def test_a_trade_is_checked_from_kickoff_when_its_contracts_have_a_start_time(tm
                                               title="t", outcome="Yes", market_type=None, line=None, rules=None, start_time=KICKOFF,
                                               close_time=PAYS_AT, fee_info=None) for v, c in (("polymarket_us", "pm"), ("kalshi", "k"))], KICKOFF)
     filled_trade(conn)
-    assert database.load_open_trades(conn)[0].starts_at == KICKOFF
+    assert database.load_open_trades(conn, "paper")[0].starts_at == KICKOFF
     results = {("polymarket_us", "pm"): ("yes", "2026-09-20T17:20:00+00:00"), ("kalshi", "k"): ("yes", "2026-09-20T17:19:00+00:00")}
     settled(s, "2026-09-20T16:59:00+00:00", results)                  # Before kickoff, not looked at.
     assert settled_at(conn) is None
@@ -91,7 +91,7 @@ def test_a_trade_waits_until_every_held_leg_has_a_result(tmp_path):
     filled_trade(conn)
     settled(s, "2026-09-20T21:05:00+00:00", {("kalshi", "k"): ("no", "2026-09-20T20:09:00+00:00")})
     assert settled_at(conn) is None
-    assert s.summary() == "settled: 0 trades for +0.00$, 1 still open"
+    assert s.summary() == "paper settled: 0 trades for +0.00$, 1 still open"
 
 
 def test_leg_won():

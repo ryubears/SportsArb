@@ -4,7 +4,8 @@ Tests for the capital allocator on a Sunday schedule.
 
 from db import database
 from db.models import Bet, Contract, Pair, Trade
-from live.components import allocate, balances
+import asyncio
+from live.components import accounts, allocate, balances
 from live.helper import config
 
 SUNDAY = "2026-09-27"
@@ -57,9 +58,9 @@ def test_caps_follow_the_active_games(tmp_path):
     assert allocator.cap(pair_for(*early), f"{SUNDAY}T16:59:00+00:00") == 0
     assert allocator.cap(pair_for(*early), f"{SUNDAY}T20:16:00+00:00") == 0
     assert allocator.cap({"game_date": None}, f"{SUNDAY}T17:00:00+00:00") == 0
-    assert allocator.summary(f"{SUNDAY}T18:00:00+00:00") == "capital: 9 games in play or settling, 1,111$ a venue each, cap 55"
-    assert allocator.summary(f"{SUNDAY}T23:00:00+00:00") == "capital: 4 games in play or settling, 2,500$ a venue each, cap 125"
-    assert allocator.summary("2026-09-28T05:00:00+00:00") == "capital: no games in play"
+    assert allocator.summary(f"{SUNDAY}T18:00:00+00:00") == "paper capital: 9 games in play or settling, 1,111$ a venue each, cap 55"
+    assert allocator.summary(f"{SUNDAY}T23:00:00+00:00") == "paper capital: 4 games in play or settling, 2,500$ a venue each, cap 125"
+    assert allocator.summary("2026-09-28T05:00:00+00:00") == "paper capital: no games in play"
 
 
 def test_money_a_game_holds_stays_in_the_pool_and_a_game_past_its_share_stops(tmp_path):
@@ -68,7 +69,7 @@ def test_money_a_game_holds_stays_in_the_pool_and_a_game_past_its_share_stops(tm
     allocator = allocate.Allocator(conn, cash)
     (first, second), pairs = EARLY[:2], database.load_pairs(conn, "nfl")
     first_pair = next(p for p in pairs.values() if p["team_a"] == "E0")
-    t = Trade(pair_id=first_pair["id"], trade="t", signal_ts=f"{SUNDAY}T17:00:00+00:00", edge=0.05, quantity=100,
+    t = Trade(mode="paper", pair_id=first_pair["id"], trade="t", signal_ts=f"{SUNDAY}T17:00:00+00:00", edge=0.05, quantity=100,
               yes_venue="kalshi", yes_contract="kalshi-E0H0", yes_polarity="yes", yes_limit=0.5,
               no_venue="polymarket_us", no_contract="polymarket_us-E0H0", no_polarity="yes", no_limit=0.45, pays_at=f"{SUNDAY}T21:00:00+00:00",
               yes_filled=100, yes_cost=4000.0, no_filled=100, no_cost=4000.0, yes_held=100, no_held=100, matched=100, status="filled")
@@ -84,3 +85,17 @@ def test_money_a_game_holds_stays_in_the_pool_and_a_game_past_its_share_stops(tm
     cash.amounts = {"kalshi": 4500.0, "polymarket_us": 4500.0}
     assert allocator.cap(first_pair, now) == 0
     assert allocator.cap(pair_for(*second), now) == 250
+
+
+def test_live_caps_come_from_the_live_money_and_stay_under_the_live_bounds(tmp_path):
+    conn = schedule(tmp_path, EARLY)
+    cash = accounts.Accounts(lambda m: None, {"kalshi": lambda: 5000.0, "polymarket_us": lambda: 4000.0})
+    asyncio.run(cash.refresh(f"{SUNDAY}T17:00:00+00:00"))
+    allocator = allocate.Allocator(conn, cash)
+    early = EARLY[0]
+    assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == config.LIVE_MAX_CAP     # 4,000 over nine games would allow 22.
+    cash.read["polymarket_us"] = 1500.0
+    assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == 8                       # 1,500 over nine games, at 20$ a contract.
+    cash.read["polymarket_us"] = 100.0
+    assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == 0                       # Under one contract.
+    assert allocator.summary(f"{SUNDAY}T17:00:00+00:00").startswith("live capital: 9 games")

@@ -72,6 +72,14 @@ def test_sweep_takes_a_share_of_each_level_skips_levels_too_small_and_stops_at_t
     assert bought[1] - 5.0 == pytest.approx(5.0 - sold[1]) and bought[1] > 5.0
 
 
+def test_reach_is_the_deepest_level_a_sweep_takes_from():
+    buying = [(0.40, 1), (0.41, 10), (0.45, 100), (0.60, 100)]
+    assert pricing.reach(buying, 5, share=0.5) == 0.41            # The 1-lot gives half a contract, so the 0.41 level fills all 5.
+    assert pricing.reach(buying, 30, share=0.5) == 0.45
+    assert pricing.reach([(0.44, 100), (0.40, 100)], 80, share=0.5) == 0.40     # A sale reaches down to its lowest price.
+    assert pricing.reach([(0.40, 1)], 5, share=0.5) is None
+
+
 def test_best_trade_picks_the_cheapest_leg_on_each_side_across_venues():
     members = [member("kalshi", "k"), member("polymarket_us", "us")]
     quotes = {("kalshi", "k"): quote("kalshi", "k", "t", [[0.53, 100]], [[0.54, 100]]),

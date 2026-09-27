@@ -7,7 +7,8 @@ import random
 import pytest
 from db import database
 from db.models import Quote
-from live.components import balances, execute, scan, settle
+from live.components import balances, scan, settle
+from live.components.execute.paper import PaperExecutor
 from live.helper import config
 
 NO_PM_FEES = {"feeCoefficient": 0}
@@ -37,7 +38,7 @@ def quick(monkeypatch):
 def executor(tmp_path, latest, log=lambda m: None, start=config.START_BALANCE, clock=lambda: NOW):
     conn = database.connect(tmp_path / "t.sqlite")
     cash = balances.Balances(conn, start)
-    return conn, cash, execute.PaperExecutor(conn, cash, lambda: latest, log, random.Random(1), clock=clock)
+    return conn, cash, PaperExecutor(conn, cash, lambda: latest, log, random.Random(1), clock=clock)
 
 
 def run(ex, after_signal=None, signals=1):
@@ -64,7 +65,7 @@ def test_unchanged_books_fill_both_legs_and_lock_in_the_edge(tmp_path, quick):
     conn, cash, ex = executor(tmp_path, latest, logs.append)
     assert run(ex) == [True]
     t = stored(conn)[0]
-    assert (t["status"], t["quantity"], t["yes_filled"], t["no_filled"], t["matched"]) == ("filled", 50, 50, 50, 50)   # Half the visible 100.
+    assert (t["mode"], t["status"], t["quantity"], t["yes_filled"], t["no_filled"], t["matched"]) == ("paper", "filled", 50, 50, 50, 50)   # Half the visible 100.
     assert (t["yes_limit"], t["no_limit"], t["yes_polarity"], t["no_polarity"]) == (0.45, 0.47, "yes", "yes")
     assert t["profit"] == pytest.approx(50 * (1 - 0.45 - 0.47))
     assert (t["hedge"], t["hedge_pnl"], t["yes_held"], t["no_held"]) == ("none", 0, 50, 50)
@@ -272,9 +273,39 @@ def test_scanner_signals_once_per_episode(tmp_path):
     database.replace_pairs(conn, "nfl", [Pair(PAIR["label"], "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, bets, [])], NOW)
     calls = []
     s = scan.Scanner(conn, "nfl", lambda m: None,
-                     on_signal=lambda pair, yes, no, edge, size, fee_infos, now: calls.append((pair["label"], round(edge, 2), now)) or True)
+                     on_signals=[lambda pair, yes, no, edge, size, fee_infos, now: calls.append((pair["label"], round(edge, 2), now)) or True])
     latest = books()
     s.on_book("polymarket_us", "pm", latest, NOW)
     latest[("polymarket_us", "pm")] = Quote("polymarket_us", "pm", NOW, [[0.40, 100]], [[0.41, 100]])
     s.on_book("polymarket_us", "pm", latest, "2026-09-20T17:30:01+00:00")     # A bigger edge in the same episode brings no second signal.
     assert calls == [(PAIR["label"], 0.08, NOW)]
+
+
+def test_a_paper_executor_refuses_money_of_another_mode(tmp_path):
+    conn = database.connect(tmp_path / "t.sqlite")
+    cash = balances.Balances(conn)
+    cash.mode = "live"
+    with pytest.raises(ValueError, match="a paper executor cannot trade live money"):
+        PaperExecutor(conn, cash, lambda: {})
+
+
+def test_each_executor_is_offered_the_episode_until_it_takes_a_trade(tmp_path):
+    from db.models import Bet, Contract, Pair
+    conn = database.connect(tmp_path / "t.sqlite")
+    members = [("kalshi", "k", NO_K_FEES), ("polymarket_us", "pm", NO_PM_FEES)]
+    database.upsert_contracts(conn, [Contract(venue=v, contract_id=c, market_id=c, event_id="e", series_id=None, sport="nfl", event_title=None,
+                                              title="t", outcome="Yes", market_type=None, line=None, rules=None, start_time=KICKOFF,
+                                              close_time="2026-09-20T21:00:00+00:00", fee_info=f) for v, c, f in members], NOW)
+    bets = [Bet(v, c, "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, "yes") for v, c, _ in members]
+    database.replace_bets(conn, "nfl", bets)
+    database.replace_pairs(conn, "nfl", [Pair(PAIR["label"], "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, bets, [])], NOW)
+    live, paper = [], []
+    busy = [True]           # The live executor turns the first moment down, say while its balance has not been read.
+    s = scan.Scanner(conn, "nfl", lambda m: None, on_signals=[lambda *args: live.append(args[-1]) or not busy[0],
+                                                             lambda *args: paper.append(args[-1]) or True])
+    latest = books()
+    s.on_book("polymarket_us", "pm", latest, NOW)
+    busy[0] = False
+    s.on_book("polymarket_us", "pm", latest, "2026-09-20T17:30:01+00:00")
+    s.on_book("polymarket_us", "pm", latest, "2026-09-20T17:30:02+00:00")
+    assert live == [NOW, "2026-09-20T17:30:01+00:00"] and paper == [NOW]
