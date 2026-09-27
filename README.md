@@ -53,9 +53,9 @@ that differ between venues carry a note, for example both venues settle
 props to the pre-game price if the player never takes a snap, but
 Polymarket US ignores stat corrections made after the game.
 
-**pipeline.py** runs fetch, classify, and match in one call. The recorder
-runs it every hour in a background thread, so new games and props enter
-the pairs while it records.
+**pipeline.py** runs fetch, classify, and match in one call. The live
+process runs it every hour in a background thread, so new games and props
+enter the pairs while it runs.
 
 ### Venue clients (`src/api`)
 
@@ -246,7 +246,7 @@ before the first live run.
 
 ## Deployment
 
-The recorder runs on a t3.medium in us-east-1, the region Kalshi's
+The live process runs on a t3.medium in us-east-1, the region Kalshi's
 matching engine runs in, where a signed round trip is about 35 ms to
 Kalshi and 30 ms to Polymarket US. A systemd service, `sportsarb-recorder`,
 starts `python3 -m engine.run --sport nfl` from `~/SportsArb/src` on boot
@@ -362,7 +362,7 @@ pip3 install -r requirements.txt
 python3 -m pytest tests -q
 ```
 
-Build the catalog and run the recorder locally, from `src/`:
+Build the catalog and run the live process locally, from `src/`:
 
 ```bash
 cd src

@@ -75,7 +75,7 @@ def connect(db_path=None):
     # A long busy timeout lets the recorder and the hourly catalog job share the file.
     conn = sqlite3.connect(db_path, timeout=30)
     conn.row_factory = sqlite3.Row
-    # Write ahead logging lets readers query while the recorder writes.
+    # Write ahead logging lets readers query while the live process writes.
     conn.execute("PRAGMA journal_mode=WAL")
     fresh = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table'").fetchone() is None
     schema.create(conn)

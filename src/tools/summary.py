@@ -2,9 +2,9 @@
 Print a summary of everything in the database.
 
 Row counts and time ranges for each table, pairs by kind, and for the
-recent window the recording health, the opportunities found, and the
-trades made, paper and live apart. Reads
-only, so it is safe to run while the recorder is writing.
+recent window the feed drops, the opportunities found, and the trades
+made, paper and live apart. Reads only, so it is safe to run while the
+live process is writing.
 
 This script opens the database file directly rather than importing the
 db package, so it runs from any folder without setting an import path.
@@ -100,7 +100,7 @@ def print_opportunities(conn, since, hours):
     total = first_value(conn, "SELECT COUNT(*) FROM opportunities")
     recent = first_value(conn, "SELECT COUNT(*) FROM opportunities WHERE start_ts >= ?", (since,))
     if not total:
-        print("\nopportunities: none yet, the recorder's scanner writes them")
+        print("\nopportunities: none yet, the live process's scanner writes them")
         return
     covered = conn.execute("SELECT MIN(start_ts), MAX(end_ts) FROM opportunities").fetchone()
     print(f"\nopportunities {total:,} episodes in all, covering {short_time(covered[0])} to {short_time(covered[1])} UTC, "
@@ -204,7 +204,7 @@ def print_trades(conn, since, hours):
     """
     modes = [m for m, in conn.execute("SELECT DISTINCT mode FROM trades ORDER BY mode DESC")]
     if not modes:
-        print("\ntrades: none yet, the recorder's executors write them")
+        print("\ntrades: none yet, the live process's executors write them")
         return
     for mode in modes:
         print_mode_trades(conn, since, hours, mode)

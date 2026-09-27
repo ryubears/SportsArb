@@ -284,14 +284,14 @@ async def run(conn, options):
 # MAIN
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Record live order books for paired contracts.")
+    ap = argparse.ArgumentParser(description="Stream the books of paired contracts, scan them, and trade.")
     ap.add_argument("--sport", default="nfl")
     ap.add_argument("--seconds", type=int, default=0, help="stop after this many seconds, 0 means run forever")
     ap.add_argument("--catalog-minutes", type=int, default=CATALOG_MINUTES,
                     help="minutes between catalog refreshes, 0 means never refresh")
     ap.add_argument("--skip-refresh", action="store_true",
                     help="start streaming at once from the stored catalog instead of refreshing first")
-    ap.add_argument("--no-scan", action="store_true", help="record only, without the live scanner")
+    ap.add_argument("--no-scan", action="store_true", help="stream the books only, without the scanner, to check the connections")
     ap.add_argument("--no-trade", action="store_true", help="scan without trading")
     ap.add_argument("--execute", choices=sorted(EXECUTE), default="paper",
                     help="trade on paper, with real money on the venues, or both at once on the same signals")

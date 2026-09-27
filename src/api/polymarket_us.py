@@ -34,7 +34,7 @@ WS_URL = "wss://api.polymarket.us/v1/ws/markets"
 WS_PATH = "/v1/ws/markets"
 WS_CHUNK = 100          # Market slugs per subscription, the documented maximum.
 WS_SUBSCRIPTIONS = 10   # Subscriptions per connection. The feed refuses an eleventh with 'max subscriptions per connection reached'.
-WS_DEBOUNCE = True      # Ask the feed to batch updates. Cuts bandwidth by a third, and the recorder writes once a second anyway.
+WS_DEBOUNCE = True      # Ask the feed to batch updates, which cuts bandwidth by a third and the messages to parse with it.
 KEY_ID_FILE = DATA_DIR / "polymarket_us_key_id.txt"
 SECRET_KEY_FILE = DATA_DIR / "polymarket_us_secret_key.txt"
 
