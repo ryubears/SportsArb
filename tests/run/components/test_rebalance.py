@@ -34,14 +34,16 @@ def test_weekly_check_moves_the_excess_and_it_lands_after_four_business_days(tmp
         ("polymarket_us", -2000.0, "transfer_out"), ("kalshi", 2000.0, "transfer_in")]              # After the two openings.
 
 
-def test_a_venue_under_the_floor_is_topped_up_on_any_day(tmp_path):
+def test_a_venue_running_low_waits_for_the_weekly_check(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
     cash = PaperBalances(conn)
     cash.amounts = {"kalshi": 400.0, "polymarket_us": 6000.0}
     r = rebalance.Rebalancer(conn, cash, lambda m: None)
     r.rebalance("2026-09-23T12:00:00+00:00")                        # A Wednesday.
+    assert database.load_transfers(conn) == []
+    r.rebalance("2026-09-29T12:00:00+00:00")                        # The next Tuesday.
     (transfer,) = database.load_transfers(conn)
-    assert (transfer.reason, transfer.amount) == ("floor", 2800)
+    assert (transfer.reason, transfer.amount) == ("drift", 2800)
 
 
 def test_balanced_venues_need_no_transfer(tmp_path):
@@ -76,19 +78,6 @@ def test_the_tuesday_check_waits_for_monday_nights_trades_to_settle(tmp_path):
     database.insert_settlement(conn, Settlement(t.id, "2026-09-22T04:20:00+00:00", mode="paper"))
     r.rebalance("2026-09-22T04:30:00+00:00")                        # Still Tuesday, and nothing is open now.
     assert [x.reason for x in database.load_transfers(conn)] == ["drift"]
-
-
-def test_a_venue_under_the_floor_waits_until_no_trade_is_open(tmp_path):
-    conn = database.connect(tmp_path / "t.sqlite")
-    cash = PaperBalances(conn)
-    cash.amounts = {"kalshi": 400.0, "polymarket_us": 6000.0}
-    r = rebalance.Rebalancer(conn, cash, lambda m: None)
-    t = open_trade(conn)
-    r.rebalance("2026-09-23T12:00:00+00:00")                        # Its payout may be what brings the venue back.
-    assert database.load_transfers(conn) == []
-    database.insert_settlement(conn, Settlement(t.id, "2026-09-23T12:30:00+00:00", mode="paper"))
-    r.rebalance("2026-09-23T13:00:00+00:00")
-    assert [(x.reason, x.amount) for x in database.load_transfers(conn)] == [("floor", 2800)]
 
 
 # LIVE

@@ -32,7 +32,6 @@ MAX_CAP = 500               # Contracts per trade, the most one trade may hold.
 START_BALANCE = 10000.0     # Paper dollars per venue at the start.
 REBALANCE_WEEKDAY = 1       # Tuesday in UTC, when balances are compared, once Monday night's trades have settled.
 REBALANCE_DRIFT = 0.25      # A venue this far above the two venue average on the weekly check sends the excess over.
-REBALANCE_FLOOR = 500.0     # A venue below this is topped up to the average on any day.
 TRANSFER_DAYS = 4           # Business days a transfer between venues takes.
 
 # LIVE, execute/live.py, balance/live.py, and rebalance.py. Real money, so each limit is kept small until the live results earn more.

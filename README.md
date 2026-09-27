@@ -178,7 +178,6 @@ the executor stops flattening it. On Tuesdays, once Monday night's trades
 have settled, the rebalancer compares the venues and, when one sits more
 than 25% above the average, sends the excess to the other as a `Transfer`
 that takes four business days, during which the money is on neither venue.
-A venue under $500 is topped up on any day, also once no trade is open.
 
 Live money has no ledger of ours. `LiveBalances` reads each venue's balance
 every 30 seconds, and at once after a payout, and applies what our own

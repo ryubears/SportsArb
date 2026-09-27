@@ -256,5 +256,5 @@ class Transfer:
     amount: float
     requested_at: str
     expected_at: str        # When the money should land, business days after the request.
-    reason: str             # 'drift' for the weekly check, 'floor' for a venue running low.
+    reason: str             # 'drift' for the weekly check, or 'floor' on transfers from before the any-day top up was dropped.
     arrived_at: str | None = None   # Set when the money was credited to the receiving venue.

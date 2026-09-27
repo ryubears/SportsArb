@@ -8,8 +8,7 @@ The paper Rebalancer moves the money itself. On
 config.REBALANCE_WEEKDAY, a Tuesday so that Monday night's game has paid
 out, the balances are compared, and when the larger sits more than
 config.REBALANCE_DRIFT above the two venue average the excess is sent to
-the other venue. A venue under config.REBALANCE_FLOOR is topped up on any
-day. Either way a transfer waits until no trade is open, since money still
+the other venue. The check waits until no trade is open, since money still
 out in trades comes back as they settle and the balances only mean
 something once it has. A transfer takes config.TRANSFER_DAYS business
 days, during which the money is on neither venue, and one is in flight at
@@ -20,8 +19,7 @@ no live trade is open, it compares the venues' balances each minute, and
 when the larger sits more than config.REBALANCE_DRIFT above the average it
 sends an alert saying how much to move where, again every
 config.LIVE_ALERT_HOURS while they stay apart. Any day will do, since a
-person decides when to move the money, and the drift rule alone covers a
-venue running dry, since the live balances may be too small for a floor.
+person decides when to move the money.
 """
 
 from datetime import datetime
@@ -45,31 +43,22 @@ class Rebalancer:
     def rebalance(self, now):
         """
         Request a transfer from the larger balance to the smaller one when
-        they have drifted apart on the weekly check, or on any day when a
-        venue is under the floor, once no trade is open.
+        they have drifted apart on the weekly check, once no trade is open.
         """
-        if database.load_transfers(self.conn, pending_only=True):
+        today = now[:10]
+        if datetime.fromisoformat(now).weekday() != config.REBALANCE_WEEKDAY or self.last_check == today:
             return
+        if database.load_transfers(self.conn, pending_only=True) or database.has_open_trades(self.conn, self.cash.mode):
+            return          # One transfer at a time, and money still out in trades comes back first.
+        self.last_check = today
         rich, poor = self.cash.largest(), self.cash.smallest()
         excess = self.cash[rich] - self.cash.average()
-        today = now[:10]
-        weekly = datetime.fromisoformat(now).weekday() == config.REBALANCE_WEEKDAY and self.last_check != today
-        low = self.cash[poor] < config.REBALANCE_FLOOR and excess > 0
-        if not (weekly or low) or database.has_open_trades(self.conn, self.cash.mode):
-            return          # Nothing is due, or money is still out in trades. The weekly check waits for them too.
-        reason = None
-        if weekly:
-            self.last_check = today
-            if excess > config.REBALANCE_DRIFT * self.cash.average():
-                reason = "drift"
-        if reason is None and low:
-            reason = "floor"
-        if reason is None:
+        if excess <= config.REBALANCE_DRIFT * self.cash.average():
             return
-        transfer = Transfer(rich, poor, round(excess, 2), now, add_business_days(now, config.TRANSFER_DAYS), reason)
+        transfer = Transfer(rich, poor, round(excess, 2), now, add_business_days(now, config.TRANSFER_DAYS), "drift")
         database.insert_transfer(self.conn, transfer)
         self.cash.book(Ledger(now, rich, -transfer.amount, "transfer_out"))
-        self.log(f"transfer {transfer.id}: {transfer.amount:.2f}$ from {rich} to {poor} for {reason}, expected {transfer.expected_at[:16]}")
+        self.log(f"transfer {transfer.id}: {transfer.amount:.2f}$ from {rich} to {poor} for drift, expected {transfer.expected_at[:16]}")
 
     def receive(self, now):
         """
