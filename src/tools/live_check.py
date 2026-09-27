@@ -14,7 +14,7 @@ Run from src/ with:
 import argparse
 import json
 import sys
-from live.components import accounts, notify
+from run.components import accounts, notify
 
 
 def check_balances():
