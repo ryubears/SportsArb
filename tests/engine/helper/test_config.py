@@ -18,8 +18,8 @@ def restore(monkeypatch):
 
 
 def test_override_reads_each_value_as_the_settings_own_type(restore):
-    config.override(["min_edge=0.03", "MAX_CAP=100", " game_hours = 3.5 "])
-    assert (config.MIN_EDGE, config.MAX_CAP, config.GAME_HOURS) == (0.03, 100, 3.5)
+    config.override(["min_edge=0.03", "MAX_CAP=100", " game_hours = 3.5 ", "feed_processes=False"])
+    assert (config.MIN_EDGE, config.MAX_CAP, config.GAME_HOURS, config.FEED_PROCESSES) == (0.03, 100, 3.5, False)
     assert isinstance(config.MAX_CAP, int)
     assert game.payout_hours() == 3.5 + config.SETTLE_HOURS          # What depends on a setting follows it.
 
@@ -30,6 +30,7 @@ def test_override_reads_each_value_as_the_settings_own_type(restore):
     ("override=1", "unknown setting"),
     ("max_cap=1.5", "MAX_CAP needs a whole number"),
     ("latency_ms=5", "not a single number"),
+    ("feed_processes=0", "FEED_PROCESSES needs true or false"),
 ])
 def test_override_refuses_what_it_cannot_set(restore, assignment, message):
     with pytest.raises(ValueError, match=message):

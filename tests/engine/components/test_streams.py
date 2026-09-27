@@ -15,7 +15,7 @@ def test_streams_change_subscriptions_in_place(tmp_path, fake_stream):
         s.start("kalshi", ["k1"])
         await asyncio.sleep(0)
         summary = s.update({"polymarket_us": ["a", "c"], "kalshi": ["k1"]})
-        (pm,) = s.streams["polymarket_us"]
+        (pm,) = s.feeds["polymarket_us"].streams
         pm.on_book("b", [[0.5, 1]], [[0.6, 1]])    # A late update for the removed contract.
         pm.on_book("a", [[0.5, 1]], [[0.6, 1]])
         await s.stop_all()
@@ -39,11 +39,11 @@ def test_streams_open_more_connections_when_a_venue_has_a_capacity(tmp_path, fak
         s.start("polymarket_us", ["a", "b", "c"])
         s.start("kalshi", ["k1", "k2", "k3"])
         await asyncio.sleep(0)
-        first = [sorted(x.wanted) for x in s.streams["polymarket_us"]]
+        first = [sorted(x.wanted) for x in s.feeds["polymarket_us"].streams]
         summary = s.update({"polymarket_us": ["b", "c", "d", "e", "f"], "kalshi": ["k1", "k2", "k3"]})
-        after = [sorted(x.wanted) for x in s.streams["polymarket_us"]]
+        after = [sorted(x.wanted) for x in s.feeds["polymarket_us"].streams]
         await s.stop_all()
-        return first, summary, after, len(s.streams["kalshi"])
+        return first, summary, after, len(s.feeds["kalshi"].streams)
     first, summary, after, kalshi_connections = asyncio.run(scenario())
     assert first == [["a", "b"], ["c"]]                  # Split at the capacity.
     assert summary == "polymarket_us +3 -1"
@@ -59,7 +59,7 @@ def test_a_drop_on_one_connection_leaves_the_books_of_the_others(tmp_path, fake_
         r = record.Recorder(database.connect(tmp_path / "test.sqlite"))
         s = streams.Streams(r, {"polymarket_us": SmallStream, "kalshi": fake_stream})
         s.start("polymarket_us", ["a", "b", "c"])
-        first, second = s.streams["polymarket_us"]
+        first, second = s.feeds["polymarket_us"].streams
         for stream, contract_id in ((first, "a"), (first, "b"), (second, "c")):
             stream.on_book(contract_id, [[0.5, 1]], [[0.6, 1]])
         second.on_gap("2026-09-27T17:00:00+00:00", "2026-09-27T17:00:05+00:00", sorted(second.wanted))

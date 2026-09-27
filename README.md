@@ -7,8 +7,9 @@ way to hold *yes* on one venue and the cheapest way to hold *no* on the
 other add up to less than a dollar after fees, buying both locks in the
 difference whatever the game does.
 
-The whole thing runs as one process on an EC2 instance in us-east-1: it
-records every order book change for about 4,900 contracts, prices about
+The whole thing runs on an EC2 instance in us-east-1, as one process with
+each venue's feed in a child process of its own: it follows every order
+book change for about 4,900 contracts, prices about
 2,450 cross-venue pairs on every change, sends orders when a pair shows an
 edge, settles the trades when the contracts resolve, and keeps the two
 venues funded. By default the orders are paper. With `--execute live` or
@@ -99,9 +100,15 @@ is in `engine/helper/`: the settings, game timing, pricing, and fees.
 **record.py** holds the newest book for every paired contract in memory,
 five levels a side, which the scanner prices and the executors trade
 against. Books are not stored, only the gaps when a venue's feed was down.
-**streams.py** owns the connections behind it, one per
-venue, or several when a venue caps how much one connection may carry,
-and moves contracts between them as the catalog changes.
+**feeds.py** holds a venue's connections, one, or several when the venue
+caps how much one connection may carry, and moves contracts between them
+as the catalog changes. Each venue's feed runs in a child process of its
+own, so receiving, parsing, and keeping the books use another core. The
+child passes each changed book's best levels over a pipe, only the newest
+of a contract when the main process falls behind, and a child that dies
+is started again, with the stretch stored as a gap. **streams.py** gives
+each venue its feed and passes the books to the recorder. With
+`--set feed_processes=false` every feed runs in the main process instead.
 
 **scan.py** prices every pair whose member's book just changed. Using
 **pricing.py** it walks the ladders to find the cheapest way to hold yes and
@@ -250,8 +257,9 @@ The live process runs on a t3.medium in us-east-1, the region Kalshi's
 matching engine runs in, where a signed round trip is about 35 ms to
 Kalshi and 30 ms to Polymarket US. A systemd service, `sportsarb-recorder`,
 starts `python3 -m engine.run --sport nfl` from `~/SportsArb/src` on boot
-and restarts it on any exit. That trades on paper only. Going live means
-adding `--execute both` to the service's command. The venue API keys
+and restarts it on any exit, and the process starts a child for each
+venue's feed, which stops with it. That trades on paper only. Going live
+means adding `--execute both` to the service's command. The venue API keys
 live in `data/`, which is gitignored, and are copied to the instance by
 `scp` only. Deploying is `git pull` on the instance, the tests, and a
 service restart only if they pass, which refreshes the catalog for about
@@ -266,7 +274,8 @@ operate the instance, with the instance's address, key, and ids written
 into them. It is gitignored, so it lives only on the machine that operates
 the instance.
 
-The process is light. It holds 4,900 books in about 190 MB of memory.
+The process is light. The main process holds 4,900 books in about
+190 MB of memory, and each feed process its own venue's books.
 Books are not stored, so the database grows only with the episodes,
 trades, and orders.
 
@@ -409,11 +418,12 @@ src/
   common/     paths, time and json helpers, the venue list, the logger
   db/         models, the SQLite schema and its migrations, reads and writes
   engine/     run, the process that wires the components together
-    components/  record, streams, scan, allocate, settle, notify
+    components/  record, feeds, streams, scan, allocate, settle, notify
       balance/   balances (what paper and live share), paper, live, bookkeep
       execute/   executor (what paper and live share), paper, live
     helper/      config (the settings a run is tuned by), game (which game a bet is on and when it is played), pricing, fees
   tools/      summary report, live_check
 tests/        mirrors src, run with pytest, configured in pyproject.toml
+  support/    helpers the tests share, and a stream a feed process can run
 commands.txt  operating the AWS instance, gitignored, kept locally
 ```
