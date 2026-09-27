@@ -17,6 +17,11 @@ venues funded. By default the orders are paper. With `--execute live` or
 
 ## How it works
 
+For a guided tour of the code, in the order data moves through it, with
+the words it uses and where to look for what, see
+[docs/overview.md](docs/overview.md). What follows goes component by
+component.
+
 Everything lives in `src/` and reads or writes one SQLite file,
 `data/sportsarb.sqlite`. The tables follow the pipeline in order:
 contracts, bets, pairs, gaps, opportunities, trades, settlements, orders,
@@ -424,6 +429,7 @@ src/
     helper/      config (the settings a run is tuned by), game (which game a bet is on and when it is played), pricing, fees
   tools/      summary report, live_check
 tests/        mirrors src, run with pytest, configured in pyproject.toml
+docs/         overview.md, a guided tour of the code
   support/    helpers the tests share, and a stream a feed process can run
 commands.txt  operating the AWS instance, gitignored, kept locally
 ```
