@@ -13,7 +13,7 @@ SQLite browser. The tables follow the pipeline in order.
     trades         every trade the executors made, paper or live, by execute/
     settlements    how each trade's legs paid out, by settle.py
     orders         every real order the live executor sent, by execute/live.py
-    ledger         every paper cash movement per venue, by balances.py
+    ledger         every paper cash movement per venue, by balance/paper.py
     alerts         everything the live process emailed a human, by notify.py
     transfers      paper rebalancing transfers between venues, by rebalance.py
 

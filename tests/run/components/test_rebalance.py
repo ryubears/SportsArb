@@ -4,12 +4,13 @@ Tests for rebalancing paper money between the venues.
 
 from db import database
 from db.models import Settlement, Trade
-from run.components import balances, rebalance
+from run.components import rebalance
+from run.components.balance.paper import PaperBalances
 
 
 def test_weekly_check_moves_the_excess_and_it_lands_after_four_business_days(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
-    cash = balances.Balances(conn)
+    cash = PaperBalances(conn)
     cash.amounts = {"kalshi": 3000.0, "polymarket_us": 7000.0}     # 2000 above a 5000 average, past the 25 percent drift.
     logs = []
     r = rebalance.Rebalancer(conn, cash, logs.append)
@@ -35,7 +36,7 @@ def test_weekly_check_moves_the_excess_and_it_lands_after_four_business_days(tmp
 
 def test_a_venue_under_the_floor_is_topped_up_on_any_day(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
-    cash = balances.Balances(conn)
+    cash = PaperBalances(conn)
     cash.amounts = {"kalshi": 400.0, "polymarket_us": 6000.0}
     r = rebalance.Rebalancer(conn, cash, lambda m: None)
     r.rebalance("2026-09-23T12:00:00+00:00")                        # A Wednesday.
@@ -45,7 +46,7 @@ def test_a_venue_under_the_floor_is_topped_up_on_any_day(tmp_path):
 
 def test_balanced_venues_need_no_transfer(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
-    cash = balances.Balances(conn)
+    cash = PaperBalances(conn)
     cash.amounts = {"kalshi": 4600.0, "polymarket_us": 5400.0}     # 8 percent apart.
     r = rebalance.Rebalancer(conn, cash, lambda m: None)
     r.rebalance("2026-09-22T12:00:00+00:00")
@@ -66,7 +67,7 @@ def open_trade(conn):
 
 def test_the_tuesday_check_waits_for_monday_nights_trades_to_settle(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
-    cash = balances.Balances(conn)
+    cash = PaperBalances(conn)
     cash.amounts = {"kalshi": 3000.0, "polymarket_us": 7000.0}
     r = rebalance.Rebalancer(conn, cash, lambda m: None)
     t = open_trade(conn)                                            # Monday night's game, still out after midnight UTC.
@@ -79,7 +80,7 @@ def test_the_tuesday_check_waits_for_monday_nights_trades_to_settle(tmp_path):
 
 def test_a_venue_under_the_floor_waits_until_no_trade_is_open(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
-    cash = balances.Balances(conn)
+    cash = PaperBalances(conn)
     cash.amounts = {"kalshi": 400.0, "polymarket_us": 6000.0}
     r = rebalance.Rebalancer(conn, cash, lambda m: None)
     t = open_trade(conn)
@@ -94,11 +95,12 @@ def test_a_venue_under_the_floor_waits_until_no_trade_is_open(tmp_path):
 
 import asyncio
 import pytest
-from run.components import accounts, notify
+from run.components import notify
+from run.components.balance.live import LiveBalances
 
 
 def live_money(kalshi, polymarket_us):
-    cash = accounts.Accounts(lambda m: None, {"kalshi": lambda: kalshi, "polymarket_us": lambda: polymarket_us})
+    cash = LiveBalances(lambda m: None, {"kalshi": lambda: kalshi, "polymarket_us": lambda: polymarket_us})
     asyncio.run(cash.refresh("2026-09-27T23:00:00+00:00"))
     return cash
 
@@ -134,7 +136,7 @@ def test_live_venues_close_enough_or_with_money_out_are_not_emailed(tmp_path, mo
     open_trade(conn)
     conn.execute("UPDATE trades SET mode = 'live'")
     alert_for(conn, live_money(300.0, 700.0), emails, tmp_path, monkeypatch).check("2026-09-28T00:00:00+00:00")     # Waits for the trade.
-    unread = accounts.Accounts(lambda m: None, {})
+    unread = LiveBalances(lambda m: None, {})
     conn.execute("DELETE FROM trades")
     alert_for(conn, unread, emails, tmp_path, monkeypatch).check("2026-09-28T00:00:00+00:00")                      # Nothing read yet.
     assert emails == []

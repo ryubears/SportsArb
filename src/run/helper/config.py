@@ -27,7 +27,7 @@ DOLLARS_PER_CAP = 20        # Dollars a game spends on each venue, over the whol
 MIN_CAP = 5                 # Contracts per trade, the least worth sending.
 MAX_CAP = 500               # Contracts per trade, the most one trade may hold.
 
-# MONEY, balances.py and rebalance.py
+# MONEY, balance/paper.py and rebalance.py
 
 START_BALANCE = 10000.0     # Paper dollars per venue at the start.
 REBALANCE_WEEKDAY = 1       # Tuesday in UTC, when balances are compared, once Monday night's trades have settled.
@@ -35,7 +35,7 @@ REBALANCE_DRIFT = 0.25      # A venue this far above the two venue average on th
 REBALANCE_FLOOR = 500.0     # A venue below this is topped up to the average on any day.
 TRANSFER_DAYS = 4           # Business days a transfer between venues takes.
 
-# LIVE, execute/live.py, accounts.py, and rebalance.py. Real money, so each limit is kept small until the live results earn more.
+# LIVE, execute/live.py, balance/live.py, and rebalance.py. Real money, so each limit is kept small until the live results earn more.
 
 LIVE_MIN_CAP = 1            # Contracts per live trade, the least worth sending.
 LIVE_MAX_CAP = 10           # Contracts per live trade, the most one trade may hold, whatever the allocator would give.

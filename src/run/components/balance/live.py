@@ -9,27 +9,27 @@ last reading, so a burst of trades does not spend the same dollars twice.
 A reading only replaces the movements made before it was asked for, since
 a later one may not show in it yet: an order filled while the balance was
 being read is counted in full until the next reading. Money for an order
-in flight is reserved in memory, as with the paper Balances, whose shape
-Accounts share so the executor, allocator, and settler take either.
-Before the first reading every venue holds nothing, so nothing is traded.
+in flight is reserved in memory. Before the first reading every venue
+holds nothing, so nothing is traded.
 """
 
 import asyncio
 from api import kalshi, polymarket_us
 from common.log import on_failure, with_traceback
 from common.venues import VENUES
+from run.components.balance.balances import Balances
 from run.helper import config
 
 READERS = {"kalshi": kalshi.balance, "polymarket_us": polymarket_us.balance}    # How each venue reports the dollars available to trade.
 
 
-class Accounts:
+class LiveBalances(Balances):
     """
     The real cash on each venue, as last read plus what our orders moved since.
     readers maps a venue to a function returning its balance in dollars.
     """
 
-    mode = "live"       # The trades this money pays for, so the settler, allocator, and alert read only those.
+    mode = "live"
 
     def __init__(self, log=print, readers=None):
         self.log = log
@@ -46,19 +46,10 @@ class Accounts:
     def amounts(self):
         return {venue: self.read[venue] + self.moved[venue] - self.reserved[venue] for venue in VENUES}
 
-    def __getitem__(self, venue):
-        return self.amounts[venue]
-
     def reserve(self, venue, dollars):
-        """
-        Hold dollars back for an order in flight.
-        """
         self.reserved[venue] += dollars
 
     def release(self, venue, dollars):
-        """
-        Give back a reservation, or the part of it that was not spent.
-        """
         self.reserved[venue] -= dollars
 
     def book(self, entry):
@@ -102,18 +93,3 @@ class Accounts:
             self.last_check = clock
             self.running = asyncio.create_task(self.refresh(now))
             self.running.add_done_callback(on_failure(self.log, "live balance reading"))
-
-    def largest(self):
-        return max(self.amounts, key=self.amounts.get)
-
-    def smallest(self):
-        return min(self.amounts, key=self.amounts.get)
-
-    def average(self):
-        return sum(self.amounts.values()) / len(self.amounts)
-
-    def summary(self):
-        """
-        The balances in one phrase, for log lines.
-        """
-        return ", ".join(f"{venue} {amount:,.0f}$" for venue, amount in self.amounts.items())

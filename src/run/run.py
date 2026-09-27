@@ -7,10 +7,10 @@ writes the books whose top changed. The scanner from scan.py prices pairs
 from the same in memory books as they change and stores every episode it
 finds in the opportunities table. Its signals go to one Desk per mode the
 run trades in. The paper desk's executor from execute/paper.py fills
-against the same books with paper money from balances.py, and its
+against the same books with paper money from balance/paper.py, and its
 rebalancer moves paper money between the venues. The live desk's executor
 from execute/live.py sends real orders with the money the venues report
-through accounts.py, and its alert emails a human, through notify.py,
+through balance/live.py, and its alert emails a human, through notify.py,
 when the venues drift apart or live trading halts. Each desk has its own
 allocator and settler, and its trades are stored with its mode, so paper
 and live never mix. Both can run at once on the same signals, which shows
@@ -45,7 +45,9 @@ from common.log import log, with_traceback
 from common.paths import ROOT
 from common.timeutil import now_iso
 from db import database
-from run.components import accounts, allocate, balances, notify, rebalance, scan, settle
+from run.components import allocate, notify, rebalance, scan, settle
+from run.components.balance.live import LiveBalances
+from run.components.balance.paper import PaperBalances
 from run.components.execute.live import LiveExecutor
 from run.components.execute.paper import PaperExecutor
 from run.components.record import Recorder, load_targets
@@ -113,12 +115,12 @@ class Desk:
     def __init__(self, mode, conn, books, notifier):
         self.mode = mode
         if mode == "paper":
-            self.cash = balances.Balances(conn)
+            self.cash = PaperBalances(conn)
             self.allocator = allocate.Allocator(conn, self.cash)
             self.executor = PaperExecutor(conn, self.cash, books, log, allocator=self.allocator)
             self.keeper = rebalance.Rebalancer(conn, self.cash, log)
         elif mode == "live":
-            self.cash = accounts.Accounts(log)
+            self.cash = LiveBalances(log)
             self.allocator = allocate.Allocator(conn, self.cash)
             self.executor = LiveExecutor(conn, self.cash, books, log, allocator=self.allocator,
                                          alert=lambda subject, body: notifier.send("halt", subject, body))

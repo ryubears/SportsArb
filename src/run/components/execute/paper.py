@@ -9,7 +9,7 @@ level that is gone does not fill. Only a share of the visible size is
 assumed to be ours, since other takers see the same thing, and a small
 share of orders is rejected outright. Everything else, the sizing, the
 flattening, and storing each trade, is the shared Executor's, and the money
-is the paper Balances from balances.py.
+is the PaperBalances from balance/paper.py.
 """
 
 import asyncio

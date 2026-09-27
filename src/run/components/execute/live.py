@@ -12,7 +12,7 @@ higher, than the deepest price the books said it would reach, so a book
 that moved leaves the rest exposed for the next tick rather than filling
 far from where it was priced. Every order is stored in the orders table
 before it is sent and updated with the venue's answer, and the money is
-the venues' own, through Accounts from accounts.py.
+the venues' own, through LiveBalances from balance/live.py.
 
 Real money calls for brakes. Live trading halts, sending no more orders of
 any kind, when an order's fate cannot be

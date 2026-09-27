@@ -7,7 +7,8 @@ import random
 import pytest
 from db import database
 from db.models import Quote
-from run.components import balances, scan, settle
+from run.components import scan, settle
+from run.components.balance.paper import PaperBalances
 from run.components.execute.paper import PaperExecutor
 from run.helper import config
 
@@ -37,7 +38,7 @@ def quick(monkeypatch):
 
 def executor(tmp_path, latest, log=lambda m: None, start=config.START_BALANCE, clock=lambda: NOW):
     conn = database.connect(tmp_path / "t.sqlite")
-    cash = balances.Balances(conn, start)
+    cash = PaperBalances(conn, start)
     return conn, cash, PaperExecutor(conn, cash, lambda: latest, log, random.Random(1), clock=clock)
 
 
@@ -283,7 +284,7 @@ def test_scanner_signals_once_per_episode(tmp_path):
 
 def test_a_paper_executor_refuses_money_of_another_mode(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
-    cash = balances.Balances(conn)
+    cash = PaperBalances(conn)
     cash.mode = "live"
     with pytest.raises(ValueError, match="a paper executor cannot trade live money"):
         PaperExecutor(conn, cash, lambda: {})

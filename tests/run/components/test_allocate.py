@@ -5,7 +5,9 @@ Tests for the capital allocator on a Sunday schedule.
 from db import database
 from db.models import Bet, Contract, Pair, Trade
 import asyncio
-from run.components import accounts, allocate, balances
+from run.components import allocate
+from run.components.balance.live import LiveBalances
+from run.components.balance.paper import PaperBalances
 from run.helper import config
 
 SUNDAY = "2026-09-27"
@@ -43,7 +45,7 @@ def pair_for(away, home, kickoff):
 
 def test_caps_follow_the_active_games(tmp_path):
     conn = schedule(tmp_path, EARLY + LATE + NIGHT)
-    allocator = allocate.Allocator(conn, balances.Balances(conn))
+    allocator = allocate.Allocator(conn, PaperBalances(conn))
     early, late, night = EARLY[0], LATE[0], NIGHT[0]
     # Nine early games share each venue's 10,000, and the cap holds through the game while the same nine are active.
     assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == int(10000 / 9 / 20)
@@ -65,7 +67,7 @@ def test_caps_follow_the_active_games(tmp_path):
 
 def test_money_a_game_holds_stays_in_the_pool_and_a_game_past_its_share_stops(tmp_path):
     conn = schedule(tmp_path, EARLY[:2])
-    cash = balances.Balances(conn)
+    cash = PaperBalances(conn)
     allocator = allocate.Allocator(conn, cash)
     (first, second), pairs = EARLY[:2], database.load_pairs(conn, "nfl")
     first_pair = next(p for p in pairs.values() if p["team_a"] == "E0")
@@ -89,7 +91,7 @@ def test_money_a_game_holds_stays_in_the_pool_and_a_game_past_its_share_stops(tm
 
 def test_live_caps_come_from_the_live_money_and_stay_under_the_live_bounds(tmp_path):
     conn = schedule(tmp_path, EARLY)
-    cash = accounts.Accounts(lambda m: None, {"kalshi": lambda: 5000.0, "polymarket_us": lambda: 4000.0})
+    cash = LiveBalances(lambda m: None, {"kalshi": lambda: 5000.0, "polymarket_us": lambda: 4000.0})
     asyncio.run(cash.refresh(f"{SUNDAY}T17:00:00+00:00"))
     allocator = allocate.Allocator(conn, cash)
     early = EARLY[0]

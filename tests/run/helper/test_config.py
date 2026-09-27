@@ -4,7 +4,7 @@ Tests for overriding settings for one run.
 
 import pytest
 from run import run
-from run.components import balances
+from run.components.balance.paper import PaperBalances
 from run.helper import config, game
 
 
@@ -39,7 +39,7 @@ def test_override_refuses_what_it_cannot_set(restore, assignment, message):
 def test_settings_are_read_when_used_not_when_imported(restore, tmp_path):
     from db import database
     config.override(["start_balance=2500"])
-    assert balances.Balances(database.connect(tmp_path / "t.sqlite")).amounts == {"kalshi": 2500.0, "polymarket_us": 2500.0}
+    assert PaperBalances(database.connect(tmp_path / "t.sqlite")).amounts == {"kalshi": 2500.0, "polymarket_us": 2500.0}
     assert "min edge 0.05$" in run.trading_settings() and "start balance 2,500$" in run.trading_settings()
 
 

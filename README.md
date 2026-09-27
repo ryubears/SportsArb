@@ -159,10 +159,11 @@ rate the first live game showed, between 5 and 500 contracts on paper and
 others settle and fewer games share the pool. Paper and live each size
 from their own money and trades.
 
-**balances.py**, **settle.py**, **rebalance.py** keep the paper books, and
-**accounts.py**, **settle.py**, **rebalance.py**, **notify.py** the live
-ones. Each paper venue starts with $10,000. Money for an order in flight
-is reserved before anything is awaited, so two signals in the same moment
+**balance/**, **settle.py**, **rebalance.py** keep the books: paper money
+in **balance/paper.py** and live money in **balance/live.py**, with what
+they share in **balances.py**, and **notify.py** for the live alerts.
+Each paper venue starts with $10,000. Money for an order in flight is
+reserved before anything is awaited, so two signals in the same moment
 cannot spend the same dollars. Every cash movement is a `Ledger` row that
 records the balance it left behind, starting with a `transfer_in` of each
 venue's opening balance, so the ledger accounts for every dollar and a
@@ -179,7 +180,7 @@ than 25% above the average, sends the excess to the other as a `Transfer`
 that takes four business days, during which the money is on neither venue.
 A venue under $500 is topped up on any day, also once no trade is open.
 
-Live money has no ledger of ours. `Accounts` reads each venue's balance
+Live money has no ledger of ours. `LiveBalances` reads each venue's balance
 every 30 seconds, and at once after a payout, and applies what our own
 fills move in between, so a burst of trades does not spend the same
 dollars twice. Nothing is traded before the first reading. The settler
@@ -369,7 +370,8 @@ src/
   common/     paths, time and json helpers, the venue list, the logger
   db/         models, the SQLite schema and its migrations, reads and writes
   run/        run, the process that wires the components together
-    components/  record, streams, scan, allocate, balances, accounts, settle, rebalance, notify
+    components/  record, streams, scan, allocate, settle, rebalance, notify
+      balance/   balances (what paper and live share), paper, live
       execute/   executor (what paper and live share), paper, live
     helper/      config (the settings a run is tuned by), game (which game a bet is on and when it is played), pricing, fees
   tools/      summary report, live_check

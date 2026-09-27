@@ -7,7 +7,8 @@ import pytest
 from api import orders
 from db import database
 from db.models import Quote
-from run.components import accounts, balances
+from run.components.balance.live import LiveBalances
+from run.components.balance.paper import PaperBalances
 from run.components.execute import live
 from run.components.execute.live import LiveExecutor
 from run.components.execute.paper import PaperExecutor
@@ -72,7 +73,7 @@ def halt_file(tmp_path, monkeypatch):
 
 def executor(tmp_path, venues, latest=None, alerts=None, logs=None, read=True):
     conn = database.connect(tmp_path / "t.sqlite")
-    cash = accounts.Accounts(lambda m: None, {"kalshi": lambda: 1000.0, "polymarket_us": lambda: 1000.0})
+    cash = LiveBalances(lambda m: None, {"kalshi": lambda: 1000.0, "polymarket_us": lambda: 1000.0})
     if read:
         asyncio.run(cash.refresh(NOW))
     latest = books() if latest is None else latest
@@ -197,9 +198,9 @@ def test_nothing_is_traded_before_the_first_balance_reading(tmp_path):
 def test_each_executor_trades_only_its_own_money(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
     with pytest.raises(ValueError, match="a live executor cannot trade paper money"):
-        LiveExecutor(conn, balances.Balances(conn), lambda: {})
+        LiveExecutor(conn, PaperBalances(conn), lambda: {})
     with pytest.raises(ValueError, match="a paper executor cannot trade live money"):
-        PaperExecutor(conn, accounts.Accounts(), lambda: {})
+        PaperExecutor(conn, LiveBalances(), lambda: {})
 
 
 def test_an_answer_that_cannot_be_read_counts_as_an_unknown_fate(tmp_path):

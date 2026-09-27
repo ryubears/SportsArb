@@ -6,7 +6,8 @@ import asyncio
 import pytest
 from db import database
 from db.models import Trade
-from run.components import balances, settle
+from run.components import settle
+from run.components.balance.paper import PaperBalances
 
 KICKOFF = "2026-09-20T17:00:00+00:00"
 PAYS_AT = "2026-09-20T21:00:00+00:00"
@@ -46,7 +47,7 @@ def settled(settler, now, results):
 
 def test_settlement_pays_the_winning_leg_only_and_records_each_leg(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
-    cash = balances.Balances(conn)
+    cash = PaperBalances(conn)
     logs = []
     s = settle.Settler(conn, cash, logs.append)
     trade = filled_trade(conn)
@@ -70,7 +71,7 @@ def test_settlement_pays_the_winning_leg_only_and_records_each_leg(tmp_path):
 def test_a_trade_is_checked_from_kickoff_when_its_contracts_have_a_start_time(tmp_path):
     from db.models import Contract
     conn = database.connect(tmp_path / "t.sqlite")
-    cash = balances.Balances(conn)
+    cash = PaperBalances(conn)
     s = settle.Settler(conn, cash, lambda m: None)
     database.upsert_contracts(conn, [Contract(venue=v, contract_id=c, market_id=c, event_id="e", series_id=None, sport="nfl", event_title=None,
                                               title="t", outcome="Yes", market_type=None, line=None, rules=None, start_time=KICKOFF,
@@ -87,7 +88,7 @@ def test_a_trade_is_checked_from_kickoff_when_its_contracts_have_a_start_time(tm
 
 def test_a_trade_waits_until_every_held_leg_has_a_result(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
-    s = settle.Settler(conn, balances.Balances(conn), lambda m: None)
+    s = settle.Settler(conn, PaperBalances(conn), lambda m: None)
     filled_trade(conn)
     settled(s, "2026-09-20T21:05:00+00:00", {("kalshi", "k"): ("no", "2026-09-20T20:09:00+00:00")})
     assert settled_at(conn) is None
@@ -115,7 +116,7 @@ class FakeExecutor:
 
 def test_a_trade_being_flattened_is_left_alone_and_the_executor_is_told_once_it_settles(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
-    cash = balances.Balances(conn)
+    cash = PaperBalances(conn)
     trade = filled_trade(conn)
     executor = FakeExecutor(flattening=[trade.id])
     s = settle.Settler(conn, cash, lambda m: None, executor=executor)
@@ -131,7 +132,7 @@ def test_a_trade_being_flattened_is_left_alone_and_the_executor_is_told_once_it_
 
 def test_payouts_follow_what_the_trade_holds_once_the_venues_answer(tmp_path, monkeypatch):
     conn = database.connect(tmp_path / "t.sqlite")
-    cash = balances.Balances(conn)
+    cash = PaperBalances(conn)
     trade = filled_trade(conn)
     s = settle.Settler(conn, cash, lambda m: None)
 
