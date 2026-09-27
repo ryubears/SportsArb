@@ -2,11 +2,11 @@
 Polymarket US API client.
 
 Three jobs. The query half reads the public events listing on the gateway
-host, filtered by sport tag, and turns every open market into a Contract,
-one per market, for the market's long side. The streaming half opens the
-signed markets websocket and keeps a live book per market slug, replacing
-the whole book on every message because the feed sends full snapshots.
-The trading half reads the account's balance and sends signed orders for
+host, filtered by sport tag, turns every open market into a Contract, one
+per market, for the market's long side, and reads the account's balance.
+The streaming half opens the signed markets websocket and keeps a live
+book per market slug, replacing the whole book on every message because
+the feed sends full snapshots. The trading half sends signed orders for
 the live executor. This is the only file that knows Polymarket US field
 names and message formats.
 
@@ -104,6 +104,16 @@ def results(event_slugs):
     return out
 
 
+def balance():
+    """
+    Dollars available for trading on the account: the buying power of its dollar balance.
+    """
+    for b in signed_request("GET", "/account/balances").get("balances", []):
+        if b.get("currency", "USD") == "USD":
+            return float(b.get("buyingPower", b.get("currentBalance", 0.0)))
+    return 0.0
+
+
 # SIGNING
 
 @functools.cache
@@ -124,6 +134,13 @@ def signed_headers(method, path):
     ts = str(int(time.time() * 1000))
     signature = base64.b64encode(key.sign(f"{ts}{method}{path}".encode())).decode()
     return {"X-PM-Access-Key": key_id, "X-PM-Timestamp": ts, "X-PM-Signature": signature}
+
+
+def signed_request(method, path, body=None):
+    """
+    A signed call to the API at a path under API, for example '/account/balances'.
+    """
+    return send_json(method, API + path, signed_headers(method, API_PATH + path), body)
 
 
 # STREAMING
@@ -205,13 +222,6 @@ NO_LIQUIDITY = "ORD_REJECT_REASON_NO_LIQUIDITY"     # A rejection for finding no
 MAX_BLOCK_SECONDS = 5   # How long an order call waits for its order to end, as long as the latency stopgap gives it.
 
 
-def signed_request(method, path, body=None):
-    """
-    A signed call to the API at a path under API, for example '/account/balances'.
-    """
-    return send_json(method, API + path, signed_headers(method, API_PATH + path), body)
-
-
 def amount(value):
     """
     An Amount from the API, {'value': '0.55', 'currency': 'USD'}, as a float, zero when missing.
@@ -224,16 +234,6 @@ def price_text(price):
     A price as the API takes it, a decimal string without trailing zeros.
     """
     return f"{price:.4f}".rstrip("0").rstrip(".")
-
-
-def balance():
-    """
-    Dollars available for trading on the account: the buying power of its dollar balance.
-    """
-    for b in signed_request("GET", "/account/balances").get("balances", []):
-        if b.get("currency", "USD") == "USD":
-            return float(b.get("buyingPower", b.get("currentBalance", 0.0)))
-    return 0.0
 
 
 def order_body(slug, action, outcome, quantity, price):

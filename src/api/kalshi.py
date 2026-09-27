@@ -2,13 +2,13 @@
 Kalshi API client.
 
 Three jobs. The query half walks sports series to events to markets on
-the public API and turns every open market into a Contract. The streaming
-half opens one websocket with a signed API key, subscribes to order book
-updates, and keeps a live book for each ticker restated from the Yes side
-so it matches Polymarket US's shape. Tickers can be added and removed
-while the connection runs. The trading half reads the account's balance
-and sends signed orders for the live executor. This is the only file that
-knows Kalshi's field names and message formats.
+the public API, turns every open market into a Contract, and reads the
+account's balance. The streaming half opens one websocket with a signed
+API key, subscribes to order book updates, and keeps a live book for each
+ticker restated from the Yes side so it matches Polymarket US's shape.
+Tickers can be added and removed while the connection runs. The trading
+half sends signed orders for the live executor. This is the only file
+that knows Kalshi's field names and message formats.
 """
 
 import asyncio
@@ -153,6 +153,14 @@ def results(tickers):
     return out
 
 
+def balance():
+    """
+    Dollars available for trading on the account.
+    """
+    answer = signed_request("GET", "/portfolio/balance")
+    return float_or_zero(answer["balance_dollars"]) if "balance_dollars" in answer else answer["balance"] / 100
+
+
 # SIGNING
 
 @functools.cache
@@ -182,6 +190,15 @@ def signed_headers(method, path):
         "KALSHI-ACCESS-TIMESTAMP": ts,
         "KALSHI-ACCESS-SIGNATURE": base64.b64encode(signature).decode(),
     }
+
+
+def signed_request(method, path, body=None, params=None):
+    """
+    A signed call to the API at a path under BASE, for example
+    '/portfolio/balance'. The signature covers the path without its query.
+    """
+    url = BASE + path + (f"?{urllib.parse.urlencode(params)}" if params else "")
+    return send_json(method, url, signed_headers(method, BASE_PATH + path), body)
 
 
 # STREAMING
@@ -271,23 +288,6 @@ class KalshiBookStream(BookStream):
 
 
 # TRADING
-
-def signed_request(method, path, body=None, params=None):
-    """
-    A signed call to the trading API at a path under BASE, for example
-    '/portfolio/balance'. The signature covers the path without its query.
-    """
-    url = BASE + path + (f"?{urllib.parse.urlencode(params)}" if params else "")
-    return send_json(method, url, signed_headers(method, BASE_PATH + path), body)
-
-
-def balance():
-    """
-    Dollars available for trading on the account.
-    """
-    answer = signed_request("GET", "/portfolio/balance")
-    return float_or_zero(answer["balance_dollars"]) if "balance_dollars" in answer else answer["balance"] / 100
-
 
 # The book side of an order for each action on each outcome. Orders are quoted on the yes side:
 # buying no is selling yes, and selling no back is buying yes.
