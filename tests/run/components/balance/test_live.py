@@ -66,6 +66,17 @@ def test_a_venue_that_cannot_be_read_keeps_its_last_reading():
     assert logs[-1] == "live balance of kalshi could not be read (TimeoutError('timed out')), keeping the last"
 
 
+def test_a_payout_counts_as_live_money_at_once_but_is_spent_only_once_a_reading_shows_it():
+    venue = {"kalshi": 500.0, "polymarket_us": 500.0}
+    cash = LiveBalances(lambda m: None, {v: (lambda v=v: venue[v]) for v in venue})
+    asyncio.run(cash.refresh(NOW))
+    cash.book(Ledger(NOW, "kalshi", 10.0, "payout", 1))
+    assert cash["kalshi"] == 500.0 and cash.total() == 1010.0
+    venue["kalshi"] = 510.0                                             # The venue has paid it.
+    asyncio.run(cash.refresh(NOW))
+    assert cash["kalshi"] == 510.0 and cash.total() == 1010.0 and cash.paid["kalshi"] == 0
+
+
 def test_readings_are_taken_on_a_timer_and_at_once_after_a_payout():
     reads = []
 

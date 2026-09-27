@@ -36,6 +36,7 @@ class LiveBalances(Balances):
         self.readers = readers or READERS
         self.read = {venue: 0.0 for venue in VENUES}         # What each venue said at its last reading.
         self.moved = {venue: 0.0 for venue in VENUES}        # What our orders moved since, which the reading may not show.
+        self.paid = {venue: 0.0 for venue in VENUES}         # Payouts since, which count as live money but are not spent until read.
         self.reserved = {venue: 0.0 for venue in VENUES}     # Held back for orders in flight.
         self.read_at = {venue: None for venue in VENUES}     # When each venue was last read, ISO 8601 UTC.
         self.running = None         # The reading while one runs.
@@ -48,9 +49,11 @@ class LiveBalances(Balances):
 
     def total(self):
         """
-        The cash on both venues, what is held back for orders in flight included.
+        The cash on both venues, what is held back for orders in flight and
+        payouts not yet read included, so the live money does not dip while
+        a batch of trades settles before the venues are read again.
         """
-        return sum(self.read[venue] + self.moved[venue] for venue in VENUES)
+        return sum(self.read[venue] + self.moved[venue] + self.paid[venue] for venue in VENUES)
 
     def reserve(self, venue, dollars):
         self.reserved[venue] += dollars
@@ -61,10 +64,12 @@ class LiveBalances(Balances):
     def book(self, entry):
         """
         Apply what one of our orders moved, a Ledger entry that is not stored,
-        since the venue keeps the books. A payout is left to the venue's next
-        reading, which is asked for at once, since the venue pays it on its own.
+        since the venue keeps the books. A payout is not spent until the
+        venue's next reading shows it, which is asked for at once, since the
+        venue pays it on its own and it may already be in the last one.
         """
         if entry.reason == "payout":
+            self.paid[entry.venue] += entry.amount
             self.last_check = None
         else:
             self.moved[entry.venue] += entry.amount
@@ -74,7 +79,7 @@ class LiveBalances(Balances):
         Read every venue's balance. A venue that fails keeps its last reading
         and is logged, with the traceback only when its error is new.
         """
-        before = dict(self.moved)
+        before, paid = dict(self.moved), dict(self.paid)
         first = not any(self.read_at.values())
         readings = await asyncio.gather(*(asyncio.to_thread(self.readers[venue]) for venue in VENUES), return_exceptions=True)
         for venue, reading in zip(VENUES, readings):
@@ -86,6 +91,7 @@ class LiveBalances(Balances):
             self.failing.pop(venue, None)
             self.read[venue] = float(reading)
             self.moved[venue] -= before[venue]
+            self.paid[venue] -= paid[venue]
             self.read_at[venue] = now
         if first and any(self.read_at.values()):
             self.log(f"live balances read: {self.summary()}")
