@@ -54,8 +54,10 @@ def glued_code(full_name):
     of the nickname, with digits dropped, so 'San Francisco 49ers' becomes
     'saners' and 'Kansas City Chiefs' becomes 'kanchi'.
     """
+    def letters(text):
+        return "".join(ch for ch in text if ch.isalpha()).lower()
+
     *city, nickname = full_name.split()
-    letters = lambda s: "".join(ch for ch in s if ch.isalpha()).lower()
     return letters("".join(city))[:3] + letters(nickname)[:3]
 
 

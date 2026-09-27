@@ -102,9 +102,14 @@ class Notifier:
         except RuntimeError:
             self.finish(alert, self.deliver(subject, body))
             return alert
+
+        def sent(task):
+            if not task.cancelled() and task.exception() is None:
+                self.finish(alert, task.result())
+
         task = asyncio.create_task(asyncio.to_thread(self.deliver, subject, body))
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
-        task.add_done_callback(lambda t: t.cancelled() or t.exception() or self.finish(alert, t.result()))
+        task.add_done_callback(sent)
         task.add_done_callback(on_failure(self.log, "alert email"))
         return alert
