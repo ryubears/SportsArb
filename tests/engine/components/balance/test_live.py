@@ -28,8 +28,8 @@ def test_reservations_and_our_own_fills_count_until_a_reading_shows_them():
     cash.reserve("kalshi", 10)
     assert cash["kalshi"] == 490
     cash.release("kalshi", 10)
-    cash.book(Ledger(NOW, "kalshi", -4.7, "buy", 1))
-    cash.book(Ledger(NOW, "polymarket_us", 2.2, "sell", 1))
+    cash.apply(Ledger(NOW, "kalshi", -4.7, "buy", 1))
+    cash.apply(Ledger(NOW, "polymarket_us", 2.2, "sell", 1))
     assert cash.amounts == pytest.approx({"kalshi": 495.3, "polymarket_us": 502.2})
     venue.update(kalshi=495.3, polymarket_us=502.2)          # The venues now show the fills, so the reading replaces them.
     asyncio.run(cash.refresh(NOW))
@@ -41,7 +41,7 @@ def test_a_fill_booked_while_a_reading_runs_stays_counted_after_it():
         cash = LiveBalances(lambda m: None, {"kalshi": lambda: 500.0, "polymarket_us": lambda: 500.0})
         reading = asyncio.create_task(cash.refresh(NOW))
         await asyncio.sleep(0)                                  # The reading has asked the venues.
-        cash.book(Ledger(NOW, "kalshi", -4.7, "buy", 1))        # A fill arrives before they answer, and may not be in their answer.
+        cash.apply(Ledger(NOW, "kalshi", -4.7, "buy", 1))        # A fill arrives before they answer, and may not be in their answer.
         await reading
         return cash
     assert asyncio.run(scenario())["kalshi"] == pytest.approx(495.3)
@@ -70,7 +70,7 @@ def test_a_payout_counts_as_live_money_at_once_but_is_spent_only_once_a_reading_
     venue = {"kalshi": 500.0, "polymarket_us": 500.0}
     cash = LiveBalances(lambda m: None, {v: (lambda v=v: venue[v]) for v in venue})
     asyncio.run(cash.refresh(NOW))
-    cash.book(Ledger(NOW, "kalshi", 10.0, "payout", 1))
+    cash.apply(Ledger(NOW, "kalshi", 10.0, "payout", 1))
     assert cash["kalshi"] == 500.0 and cash.total() == 1010.0
     venue["kalshi"] = 510.0                                             # The venue has paid it.
     asyncio.run(cash.refresh(NOW))
@@ -85,7 +85,7 @@ def test_readings_are_taken_on_a_timer_and_at_once_after_a_payout():
         cash.tick(NOW, 1000.0)                                  # The first reading is due at once.
         await cash.running
         cash.tick(NOW, 1010.0)                                  # Not due again yet.
-        cash.book(Ledger(NOW, "kalshi", 5.0, "payout", 1))      # The venue pays on its own, so it is read again at once.
+        cash.apply(Ledger(NOW, "kalshi", 5.0, "payout", 1))      # The venue pays on its own, so it is read again at once.
         assert cash["kalshi"] == 500.0
         cash.tick(NOW, 1011.0)
         await cash.running

@@ -57,7 +57,7 @@ class PaperBookKeeper:
             return
         transfer = Transfer(rich, poor, round(excess, 2), now, add_business_days(now, config.TRANSFER_DAYS), "drift")
         database.insert_transfer(self.conn, transfer)
-        self.cash.book(Ledger(now, rich, -transfer.amount, "transfer_out"))
+        self.cash.apply(Ledger(now, rich, -transfer.amount, "transfer_out"))
         self.log(f"transfer {transfer.id}: {transfer.amount:.2f}$ from {rich} to {poor} for drift, expected {transfer.expected_at[:16]}")
 
     def receive(self, now):
@@ -67,7 +67,7 @@ class PaperBookKeeper:
         for t in database.load_transfers(self.conn, pending_only=True):
             if t.expected_at <= now:
                 database.complete_transfer(self.conn, t.id, now)
-                self.cash.book(Ledger(now, t.to_venue, t.amount, "transfer_in"))
+                self.cash.apply(Ledger(now, t.to_venue, t.amount, "transfer_in"))
                 self.log(f"transfer {t.id}: {t.amount:.2f}$ arrived at {t.to_venue}")
 
     def tick(self, now):

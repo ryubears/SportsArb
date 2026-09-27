@@ -37,7 +37,7 @@ class Balances:
         """
         raise NotImplementedError
 
-    def book(self, entry):
+    def apply(self, entry):
         """
         Apply a cash movement, given as a Ledger entry: a buy, a sale, a payout, or a transfer.
         """

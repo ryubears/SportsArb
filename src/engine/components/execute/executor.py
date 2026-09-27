@@ -11,7 +11,7 @@ live.py sends it to the venue. Everything else is here.
 
 When the two legs fill unevenly the executor goes flat at once. It either
 sells the excess back on its own venue or buys the missing amount on the
-other venue, whichever the books say leaves more money, and books the
+other venue, whichever the books say leaves more money, and records the
 result with fees. What it cannot flatten stays on a list and is tried
 again on every tick, against the books as they are then, until it is
 flat, the bet pays out, or the settler says its contracts have resolved.
@@ -91,7 +91,7 @@ class Executor:
     Turns scanner signals into trades against the recorder's books. A
     subclass says how an order is filled, through fill() and sell_back().
     books is a function returning the newest Book of each contract, keyed by (venue, contract_id).
-    cash is the money on each venue, with reserve(), release(), and book().
+    cash is the money on each venue, with reserve(), release(), and apply().
     """
 
     mode = None     # 'paper' or 'live', set by each subclass. It starts every log line.
@@ -196,7 +196,7 @@ class Executor:
         if buy_value is None or (sell_value is not None and sell_value >= buy_value):
             fill = await self.sell_back(trade, long_leg, excess, reach(selling, excess, config.FILL_SHARE))
             if fill.filled:
-                self.cash.book(Ledger(fill.ts, long_leg.venue, fill.dollars, "sell", trade.id))
+                self.cash.apply(Ledger(fill.ts, long_leg.venue, fill.dollars, "sell", trade.id))
             long_leg.held -= fill.filled
             long_leg.cost -= fill.filled * average
             trade.hedge_pnl += fill.dollars - fill.filled * average
@@ -207,7 +207,7 @@ class Executor:
             fill = await self.fill(trade, dataclasses.replace(short_leg, quantity=buyable, limit=limit), "flatten")
             self.cash.release(short_leg.venue, buyable * limit)
             if fill.filled:
-                self.cash.book(Ledger(fill.ts, short_leg.venue, -fill.dollars, "buy", trade.id))
+                self.cash.apply(Ledger(fill.ts, short_leg.venue, -fill.dollars, "buy", trade.id))
             short_leg.held += fill.filled
             short_leg.cost += fill.dollars
             trade.hedge_pnl += fill.filled * (1 - average) - fill.dollars
@@ -226,7 +226,7 @@ class Executor:
             self.cash.release(leg.venue, leg.quantity * leg.limit)
             leg.held, leg.cost = fill.filled, fill.dollars
             if fill.filled:
-                self.cash.book(Ledger(fill.ts, leg.venue, -fill.dollars, "buy", trade.id))
+                self.cash.apply(Ledger(fill.ts, leg.venue, -fill.dollars, "buy", trade.id))
         yes_fill, no_fill = fills
         trade.yes_filled, trade.yes_cost, trade.yes_latency_ms, trade.yes_fill_ts = yes_fill.filled, yes_fill.dollars, yes_fill.ms, yes_fill.ts
         trade.no_filled, trade.no_cost, trade.no_latency_ms, trade.no_fill_ts = no_fill.filled, no_fill.dollars, no_fill.ms, no_fill.ts

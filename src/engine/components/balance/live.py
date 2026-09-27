@@ -64,7 +64,7 @@ class LiveBalances(Balances):
     def release(self, venue, dollars):
         self.reserved[venue] -= dollars
 
-    def book(self, entry):
+    def apply(self, entry):
         """
         Apply what one of our orders moved, a Ledger entry that is not stored,
         since the venue keeps the books. A payout is not spent until the

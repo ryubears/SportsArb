@@ -98,7 +98,7 @@ class Settler:
                 payout = float(leg.held) if won else 0.0
                 settlement.record(leg.side, result, payout, settled_at or now)
                 if won:
-                    self.cash.book(Ledger(settlement.settled_at, leg.venue, payout, "payout", t.id))
+                    self.cash.apply(Ledger(settlement.settled_at, leg.venue, payout, "payout", t.id))
                 paid.append((leg, result, payout))
             database.insert_settlement(self.conn, settlement)
             if self.executor:
