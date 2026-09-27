@@ -36,15 +36,19 @@ def fetch_contracts(venue, sport):
     return FETCHERS[venue](sport, **SPORTS[sport][venue])
 
 
-def fetch_and_store(sport, venues, conn):
+def fetch_and_store(sport, venues, conn, log=print):
     """
-    Fetch each venue's catalog and upsert it into the database.
+    Fetch each venue's catalog, upsert it into the database, and log how
+    many contracts came back and how long it took. Returns {venue: contracts}.
     """
+    counts = {}
     for venue in venues:
         t0 = time.time()
         contracts = fetch_contracts(venue, sport)
         database.upsert_contracts(conn, contracts, now_iso())
-        print(f"{venue:10s} {sport}: {len(contracts):6d} contracts fetched in {time.time() - t0:.0f}s")
+        counts[venue] = len(contracts)
+        log(f"fetched {len(contracts):,} {sport} contracts from {venue} in {time.time() - t0:.0f}s")
+    return counts
 
 
 # MAIN

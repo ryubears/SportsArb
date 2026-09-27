@@ -69,9 +69,9 @@ class Settler:
             return
         wanted = {}
         for t in due:
-            for side in ("yes", "no"):
-                if getattr(t, f"{side}_held"):
-                    wanted.setdefault(getattr(t, f"{side}_venue"), set()).add(getattr(t, f"{side}_contract"))
+            for leg in t.legs():
+                if leg.held:
+                    wanted.setdefault(leg.venue, set()).add(leg.contract)
         results = {}
         for venue, ids in wanted.items():
             lookup = list(database.event_ids(self.conn, venue, list(ids)).values()) if RESULTS_BY_EVENT[venue] else list(ids)
@@ -87,27 +87,26 @@ class Settler:
         for t in (current.get(t.id) for t in due):
             if t is None or t.id in flattening:
                 continue
-            keys = {side: (getattr(t, f"{side}_venue"), getattr(t, f"{side}_contract"))
-                    for side in ("yes", "no") if getattr(t, f"{side}_held")}
-            if any(key not in results for key in keys.values()):
+            held = [leg for leg in t.legs() if leg.held]
+            if any(leg.key not in results for leg in held):
                 continue
-            settlement = Settlement(t.id, mode=t.mode, settled_at=max(results[key][1] or now for key in keys.values()))
-            for side, key in keys.items():
-                result, settled_at = results[key]
-                won = leg_won(side, getattr(t, f"{side}_polarity"), result)
-                setattr(settlement, f"{side}_result", result)
-                setattr(settlement, f"{side}_payout", float(getattr(t, f"{side}_held")) if won else 0.0)
-                setattr(settlement, f"{side}_settled_at", settled_at or now)
+            settlement = Settlement(t.id, mode=t.mode, settled_at=max(results[leg.key][1] or now for leg in held))
+            paid = []
+            for leg in held:
+                result, settled_at = results[leg.key]
+                won = leg_won(leg.side, leg.polarity, result)
+                payout = float(leg.held) if won else 0.0
+                settlement.record(leg.side, result, payout, settled_at or now)
                 if won:
-                    self.cash.book(Ledger(settlement.settled_at, key[0], getattr(settlement, f"{side}_payout"), "payout", t.id))
+                    self.cash.book(Ledger(settlement.settled_at, leg.venue, payout, "payout", t.id))
+                paid.append((leg, result, payout))
             database.insert_settlement(self.conn, settlement)
             if self.executor:
                 self.executor.settled(t.id)
-            realized = sum(getattr(settlement, f"{side}_payout") - getattr(t, f"{side}_cost") for side in keys)
+            realized = sum(payout - leg.cost for leg, _, payout in paid)
             self.settled.append((t, realized))
             self.log(f"{self.mode} settled {t.label}: " + ", ".join(
-                f"{key[0]} {side} {getattr(settlement, f'{side}_result')} pays {getattr(settlement, f'{side}_payout'):.0f}$"
-                for side, key in keys.items()) + f", realized {realized:+.2f}$")
+                f"{leg.venue} {leg.side} {result} pays {payout:.0f}$" for leg, result, payout in paid) + f", realized {realized:+.2f}$")
 
     def tick(self, now, clock):
         """

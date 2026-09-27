@@ -24,18 +24,12 @@ def refresh(sport, log=print, db_path=None):
     Returns a one line summary. Safe to call from a worker thread.
     """
     with database.connect(db_path) as conn:
-        parts = []
-        for venue in VENUES:
-            contracts = fetch.fetch_contracts(venue, sport)
-            database.upsert_contracts(conn, contracts, now_iso())
-            parts.append(f"{venue} {len(contracts)} contracts")
-            log(f"fetched {parts[-1]}")
+        counts = fetch.fetch_and_store(sport, VENUES, conn, log)
         bets, _ = classify.classify_all(database.load_contracts(conn, sport=sport))
         database.replace_bets(conn, sport, bets)
         pairs, _ = match.match(database.load_bets(conn, sport))
         database.replace_pairs(conn, sport, pairs, now_iso())
-        parts.append(f"{len(bets)} bets, {len(pairs)} pairs")
-    return ", ".join(parts)
+    return ", ".join([f"{venue} {n} contracts" for venue, n in counts.items()] + [f"{len(bets)} bets, {len(pairs)} pairs"])
 
 
 # MAIN

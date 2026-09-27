@@ -1,16 +1,18 @@
 """
-The venue connections that feed the recorder.
+The venue feeds that feed the recorder.
 
 Each venue has a BookStream class in api/ that keeps one websocket
-connection for a set of contracts. Streams holds those connections for
-every venue, opens as many as a venue's capacity needs, and applies
-changes to the wanted contracts on the live connections in place, so a
-catalog refresh never reconnects. Book updates and gaps go to the recorder.
+connection for a set of contracts, and a VenueFeed from feeds.py that holds
+as many of them as the venue's contracts need. Streams gives each venue its
+feed, in a process of its own when config.FEED_PROCESSES is set, applies
+catalog changes to the running feeds, and passes their books and gaps to
+the recorder.
 """
 
-import asyncio
+import math
 from api import kalshi, polymarket_us
 from common.log import log
+from engine.components.feeds import FeedProcess, VenueFeed
 from engine.helper import config
 
 STREAMS = {"kalshi": kalshi.KalshiBookStream, "polymarket_us": polymarket_us.PolymarketUSBookStream}
@@ -18,93 +20,73 @@ STREAMS = {"kalshi": kalshi.KalshiBookStream, "polymarket_us": polymarket_us.Pol
 
 class Streams:
     """
-    The BookStreams for every venue, each on its own long lived connection.
-    A venue whose stream class sets a capacity gets as many connections as
-    its contracts need, filled in order. Changes to the wanted contracts are
-    applied to the live connections in place.
+    The feed of every venue. With processes, config.FEED_PROCESSES unless
+    given, each venue's feed runs in a child process, and otherwise in this
+    one. Either way the books and gaps go to the recorder, less the books of
+    contracts removed since, which a feed may still have been sending.
     """
 
-    def __init__(self, recorder, stream_classes=STREAMS):
+    def __init__(self, recorder, stream_classes=STREAMS, processes=None):
         self.recorder = recorder
         self.stream_classes = stream_classes
-        self.streams = {venue: [] for venue in stream_classes}
-        self.tasks = []
+        self.processes = config.FEED_PROCESSES if processes is None else processes
+        self.feeds = {}                                             # Venue maps to its VenueFeed, or the FeedProcess running it.
+        self.wanted = {venue: set() for venue in stream_classes}   # The contracts each venue records.
 
-    def on_book(self, venue, contract_id, bids, asks):
+    def on_book(self, venue, contract_id, bids, asks, ts, books=1):
         """
-        Pass a book update to the recorder, unless the contract was removed and the feed has not caught up.
+        Pass a book to the recorder, unless its contract was removed and the feed had not caught up.
         """
-        if any(contract_id in stream.wanted for stream in self.streams[venue]):
-            self.recorder.on_book(venue, contract_id, bids, asks)
+        if contract_id in self.wanted[venue]:
+            self.recorder.on_book(venue, contract_id, bids, asks, ts, books)
 
-    def capacity(self, venue):
-        return getattr(self.stream_classes[venue], "capacity", None)
-
-    def open(self, venue, contract_ids):
+    def connections(self, venue):
         """
-        Open one more connection for a venue, carrying these contracts.
+        How many connections the venue's contracts take.
         """
-        stream = self.stream_classes[venue](list(contract_ids), lambda cid, b, a: self.on_book(venue, cid, b, a),
-                                            lambda start_ts, end_ts, contract_ids: self.recorder.on_gap(venue, start_ts, end_ts, contract_ids),
-                                            log)
-        stream.depth = config.BOOK_LEVELS
-        self.streams[venue].append(stream)
-        self.tasks.append(asyncio.create_task(stream.run()))
-        return stream
+        capacity = getattr(self.stream_classes[venue], "capacity", None)
+        return max(1, math.ceil(len(self.wanted[venue]) / capacity)) if capacity else 1
 
     def start(self, venue, contract_ids):
         """
-        Open a venue's connections for these contracts, one per capacity when it has one.
+        Start a venue's feed for these contracts.
         """
-        ids = sorted(contract_ids)
-        size = self.capacity(venue) or max(len(ids), 1)
-        for i in range(0, max(len(ids), 1), size):
-            self.open(venue, ids[i:i + size])
+        self.wanted[venue] = set(contract_ids)
 
-    def add(self, venue, contract_ids):
-        """
-        Add contracts to the venue's connections with room, opening new ones when they are full.
-        """
-        ids = sorted(contract_ids)
-        capacity = self.capacity(venue)
-        for stream in self.streams[venue]:
-            room = len(ids) if capacity is None else max(capacity - len(stream.wanted), 0)
-            if room:
-                stream.add(ids[:room])
-                ids = ids[room:]
-            if not ids:
-                return
-        while ids:
-            size = capacity or len(ids)
-            self.open(venue, ids[:size])
-            ids = ids[size:]
+        def on_book(contract_id, bids, asks, ts, books=1):
+            self.on_book(venue, contract_id, bids, asks, ts, books)
+
+        def on_gap(start_ts, end_ts, gap_ids):
+            self.recorder.on_gap(venue, start_ts, end_ts, gap_ids)
+
+        if self.processes:
+            self.feeds[venue] = FeedProcess(venue, self.stream_classes[venue], contract_ids, config.BOOK_LEVELS, on_book, on_gap,
+                                            lambda lost_ids: self.recorder.forget(venue, lost_ids), log)
+        else:
+            feed = self.feeds[venue] = VenueFeed(self.stream_classes[venue], on_book, on_gap, log, config.BOOK_LEVELS)
+            feed.start(contract_ids)
 
     def update(self, targets):
         """
         Add contracts that are new and remove the ones that left the target
-        list, on the live connections. Returns a summary of the changes.
+        list, on the running feeds. Returns a summary of the changes.
         """
         changes = []
         for venue, contract_ids in targets.items():
-            wanted = set().union(*(stream.wanted for stream in self.streams[venue]))
-            new, gone = set(contract_ids) - wanted, wanted - set(contract_ids)
-            for stream in self.streams[venue]:
-                stream.remove(gone & stream.wanted)
+            new, gone = set(contract_ids) - self.wanted[venue], self.wanted[venue] - set(contract_ids)
+            if not new and not gone:
+                continue
+            self.wanted[venue] = set(contract_ids)
+            feed = self.feeds[venue]
+            feed.remove(gone)
             self.recorder.forget(venue, gone)
-            self.add(venue, new)
-            if new or gone:
-                changes.append(f"{venue} +{len(new)} -{len(gone)}")
+            feed.add(new)
+            changes.append(f"{venue} +{len(new)} -{len(gone)}")
         return ", ".join(changes) or "no changes"
 
     async def stop_all(self):
         """
-        Cancel every connection and wait for them to finish.
+        Stop every venue's feed and wait for it.
         """
-        for task in self.tasks:
-            task.cancel()
-        for task in self.tasks:
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        self.tasks = []
+        for feed in self.feeds.values():
+            await feed.stop()

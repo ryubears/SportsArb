@@ -57,15 +57,17 @@ class Recorder:
         self.last_update = {venue: None for venue in VENUES}       # Wall clock seconds of the newest update per venue.
         self.gaps = {venue: 0 for venue in VENUES}
 
-    def on_book(self, venue, contract_id, bids, asks):
+    def on_book(self, venue, contract_id, bids, asks, ts=None, books=1):
         """
-        Remember the newest book for a contract. Called by the venue streams.
+        Remember the newest book for a contract, which arrived at ts, now
+        unless given. books is how many the feed received for it since the
+        last, when a feed in a process of its own sent only the newest.
         """
-        self.updates[venue] += 1
+        self.updates[venue] += books
         self.last_update[venue] = time.time()
         key = (venue, contract_id)
         before = self.latest.get(key)
-        quote = self.latest[key] = Quote(venue, contract_id, now_iso(), bids[:config.BOOK_LEVELS], asks[:config.BOOK_LEVELS])
+        quote = self.latest[key] = Quote(venue, contract_id, ts or now_iso(), bids[:config.BOOK_LEVELS], asks[:config.BOOK_LEVELS])
         if self.scanner and (before is None or top(before) != top(quote)):
             self.scanner.on_book(venue, contract_id, self.latest, quote.ts)
 

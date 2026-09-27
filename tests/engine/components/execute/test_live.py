@@ -13,23 +13,7 @@ from engine.components.execute import brakes
 from engine.components.execute.live import LiveExecutor
 from engine.components.execute.paper import PaperExecutor
 from engine.helper import config
-
-NO_PM_FEES = {"feeCoefficient": 0}
-NO_K_FEES = {"fee_type": "quadratic", "fee_multiplier": 0}
-KICKOFF = "2026-09-27T17:00:00+00:00"
-NOW = "2026-09-27T17:30:00+00:00"
-PAIR = {"id": 1, "label": "game_winner 2026-09-27 CAR@ATL CAR", "kind": "game_winner"}
-YES = {"venue": "polymarket_us", "contract_id": "pm", "polarity": "yes", "start_time": KICKOFF, "close_time": "2026-09-27T21:00:00+00:00"}
-NO = {"venue": "kalshi", "contract_id": "k", "polarity": "yes", "start_time": KICKOFF, "close_time": "2026-09-27T21:00:00+00:00"}
-FEES = {("polymarket_us", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES}
-
-
-def books():
-    """
-    Yes is cheapest on Polymarket US at the 0.45 ask and no on Kalshi at 0.47 through the 0.53 bid, 100 deep on every level.
-    """
-    return {("polymarket_us", "pm"): Quote("polymarket_us", "pm", NOW, [[0.44, 100]], [[0.45, 100]]),
-            ("kalshi", "k"): Quote("kalshi", "k", NOW, [[0.53, 100]], [[0.54, 100]])}
+from trade_setup import FEES, NO, NOW, PAIR, YES, books, stored
 
 
 def fills(n=None):
@@ -108,10 +92,6 @@ def trade(ex, times=1):
     return asyncio.run(scenario())
 
 
-def stored(conn, table):
-    return [dict(r) for r in conn.execute(f"SELECT * FROM {table} ORDER BY id")]
-
-
 def test_both_legs_are_sent_as_real_orders_and_every_order_is_stored(tmp_path):
     venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
     conn, cash, ex = executor(tmp_path, venues)
@@ -139,7 +119,7 @@ def test_a_leg_that_filled_short_is_flattened_no_higher_than_the_books_said(tmp_
     assert venues.orders[-1] == ("kalshi", "buy", "no", 6, 0.47)
     assert (t["yes_held"], t["no_held"], t["matched"], t["status"], t["hedge"]) == (10, 10, 10, "filled", "bought 6 of 6 on kalshi")
     assert [(o["purpose"], o["quantity"], o["limit_price"]) for o in stored(conn, "orders")][-1] == ("flatten", 6, 0.47)
-    assert logs[-1].startswith("live filled: game_winner 2026-09-27 CAR@ATL CAR")
+    assert logs[-1].startswith("live filled: game_winner 2026-09-20 CAR@ATL CAR")
 
 
 def bids_gone(latest):
@@ -224,7 +204,7 @@ def test_after_a_loss_halt_flattening_goes_on_until_its_orders_fail(tmp_path):
     ex.brakes.halt("the live trades decided in the last 6 hours lost too much")
     assert trade(ex) == [False] and len(venues.orders) == 3             # No new trades.
     assert "; HALTED, still flattening: the live trades decided" in ex.summary()
-    ex.clock = ex.brakes.clock = lambda: "2026-09-27T17:30:01+00:00"    # A second on.
+    ex.clock = ex.brakes.clock = lambda: "2026-09-20T17:30:01+00:00"    # A second on.
     asyncio.run(ex.retry(ex.clock()))
     assert venues.orders[-1] == ("polymarket_us", "sell", "yes", 10, 0.44) and stored(conn, "trades")[0]["yes_held"] == 6
     for _ in range(3):
@@ -270,7 +250,7 @@ def test_a_halt_outlasts_a_restart_until_a_human_removes_the_file_and_then_start
     venues = Venues(polymarket_us=[fills()] * 3, kalshi=[REFUSED] * 3)
     conn, cash, ex = executor(tmp_path, venues, notifier=notifier)
     trade(ex, 3)
-    assert halt_file.read_text().startswith("2026-09-27T17:30:00 UTC every order stopped: kalshi refused 3 orders in a row")
+    assert halt_file.read_text().startswith("2026-09-20T17:30:00 UTC every order stopped: kalshi refused 3 orders in a row")
     logs = []
     venues = Venues(polymarket_us=[fills(), fills()], kalshi=[REFUSED, fills()])
     conn, cash, again = executor(tmp_path, venues, logs=logs)           # A crash or a deploy restarts the process.

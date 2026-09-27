@@ -4,6 +4,7 @@ A stand in for the venue streams, shared by the live tests as a fixture.
 
 import asyncio
 import pytest
+from engine.helper import config
 
 
 class FakeStream:
@@ -32,9 +33,11 @@ class FakeStream:
 
 
 @pytest.fixture
-def fake_stream():
+def fake_stream(monkeypatch):
     """
-    The FakeStream class with its instance list cleared.
+    The FakeStream class with its instance list cleared. Feeds run in the
+    main process with it, since a child process could not import it.
     """
+    monkeypatch.setattr(config, "FEED_PROCESSES", False)
     FakeStream.instances.clear()
     return FakeStream

@@ -60,6 +60,7 @@ RECORD_HOURS = 5            # Kickoff to when a game's contracts stop being reco
 # RECORDING, record.py
 
 BOOK_LEVELS = 5             # Price levels kept per side.
+FEED_PROCESSES = True       # Run each venue's feed in a process of its own, see feeds.py. False runs every feed in the main process.
 GAME_WINDOW_DAYS = 7        # Games further out than this are not recorded.
 
 # SCANNING, scan.py
@@ -80,8 +81,9 @@ def override(assignments):
     """
     Apply NAME=VALUE assignments for this run, with names in any case. The
     value is read as the setting's own type, so a setting that is a whole
-    number stays one. Raises ValueError for an unknown setting, a value of
-    the wrong type, or a setting that is not a single number.
+    number stays one, and one that is true or false takes true or false.
+    Raises ValueError for an unknown setting, a value of the wrong type, or
+    a setting that is not a single number or true or false.
     """
     for assignment in assignments:
         name, sep, text = assignment.partition("=")
@@ -89,11 +91,16 @@ def override(assignments):
         if not sep or not name.isidentifier() or name not in globals() or not name.isupper():
             raise ValueError(f"unknown setting in {assignment!r}")
         current = globals()[name]
-        if isinstance(current, bool) or not isinstance(current, (int, float)):
+        if isinstance(current, bool):
+            value = {"true": True, "false": False}.get(text.strip().lower())
+            if value is None:
+                raise ValueError(f"{name} needs true or false, not {text.strip()!r}")
+        elif not isinstance(current, (int, float)):
             raise ValueError(f"{name} is not a single number and cannot be set from the command line")
-        try:
-            value = type(current)(text.strip())
-        except ValueError:
-            kind = "a whole number" if isinstance(current, int) else "a number"
-            raise ValueError(f"{name} needs {kind}, not {text.strip()!r}") from None
+        else:
+            try:
+                value = type(current)(text.strip())
+            except ValueError:
+                kind = "a whole number" if isinstance(current, int) else "a number"
+                raise ValueError(f"{name} needs {kind}, not {text.strip()!r}") from None
         globals()[name] = value

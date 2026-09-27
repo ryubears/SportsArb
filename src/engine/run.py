@@ -187,8 +187,8 @@ class Session:
             log("nothing to record, run pipeline.py first")
         for venue, contract_ids in targets.items():
             self.streams.start(venue, contract_ids)
-            if len(self.streams.streams[venue]) > 1:
-                log(f"{venue} needs {len(self.streams.streams[venue])} connections for {len(contract_ids)} contracts")
+            if self.streams.connections(venue) > 1:
+                log(f"{venue} needs {self.streams.connections(venue)} connections for {len(contract_ids)} contracts")
 
     def summaries(self):
         """

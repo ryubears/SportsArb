@@ -2,5 +2,5 @@
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]                      # Tests import modules the same way the scripts do from src/.
+pythonpath = ["src", "tests/support"]     # Tests import modules the same way the scripts do from src/, and share helpers from tests/support/.
 addopts = "-q --import-mode=importlib"    # By path, so test files with the same name in different folders do not collide.
