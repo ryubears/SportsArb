@@ -64,7 +64,7 @@ def print_storage(conn):
     print(f"database {DB_PATH}")
     print(f"size {size / 1e6:,.0f} MB")
     # Listed in pipeline order rather than alphabetically.
-    tables = ["contracts", "bets", "pairs", "quotes", "gaps", "opportunities", "trades", "settlements", "orders", "ledger", "alerts", "transfers"]
+    tables = ["contracts", "bets", "pairs", "gaps", "opportunities", "trades", "settlements", "orders", "ledger", "alerts", "transfers"]
     print_table("tables", ("table", "rows"), [(t, f"{first_value(conn, f'SELECT COUNT(*) FROM {t}'):,}") for t in tables])
 
 
@@ -85,38 +85,15 @@ def print_pairs(conn):
           f"last matched {short_time(first_value(conn, 'SELECT MAX(matched_at) FROM pairs'))}")
 
 
-def print_quotes(conn, since, hours):
-    total, first, last = conn.execute("SELECT COUNT(*), MIN(ts), MAX(ts) FROM quotes").fetchone()
-    print(f"\nquotes {total:,} rows from {short_time(first)} to {short_time(last)} UTC")
-    if not total:
-        return
-    body = query_rows(conn, """
-        SELECT venue, COUNT(*), COUNT(DISTINCT contract_id), MAX(ts)
-        FROM quotes WHERE ts >= ? GROUP BY venue ORDER BY venue""", (since,))
-    print_table(f"last {hours} hours", ("venue", "rows", "contracts", "latest"),
-                [(v, f"{n:,}", f"{c:,}", short_time(t)) for v, n, c, t in body])
-    per_hour = query_rows(conn, """
-        SELECT substr(ts, 1, 13), COUNT(*) FROM quotes WHERE ts >= ?
-        GROUP BY substr(ts, 1, 13) ORDER BY 1""", (since,))
-    if per_hour:
-        counts = [n for _, n in per_hour]
-        print(f"  rows per hour: min {min(counts):,}, median {sorted(counts)[len(counts) // 2]:,}, max {max(counts):,} "
-              f"over {len(counts)} hours")
-        quiet = [h for h, n in per_hour if n < max(counts) / 20]
-        if quiet:
-            print(f"  quiet hours (under a twentieth of the busiest): {', '.join(h.replace('T', ' ') + ':00' for h in quiet)}")
+def print_gaps(conn, since, hours):
+    """
+    How often each venue's feed dropped in the window, and for how long.
+    """
     gaps = query_rows(conn, """
         SELECT venue, COUNT(*), COALESCE(SUM((julianday(end_ts) - julianday(start_ts)) * 86400), 0), SUM(end_ts IS NULL)
         FROM gaps WHERE start_ts >= ? GROUP BY venue ORDER BY venue""", (since,))
-    if gaps:
-        print("  feed drops in the window: " + ", ".join(
-            f"{v} {n} ({secs:.0f}s down{f', {open_} without an end' if open_ else ''})" for v, n, secs, open_ in gaps))
-    busiest = query_rows(conn, """
-        SELECT q.venue, COALESCE(c.title || ' / ' || c.outcome, q.contract_id), COUNT(*) FROM quotes q
-        LEFT JOIN contracts c ON c.venue = q.venue AND c.contract_id = q.contract_id
-        WHERE q.ts >= ? GROUP BY q.venue, q.contract_id ORDER BY COUNT(*) DESC LIMIT 5""", (since,))
-    print_table("busiest contracts in the window", ("venue", "contract", "rows"),
-                [(v, c[:60], f"{n:,}") for v, c, n in busiest])
+    print(f"\nfeed drops, last {hours} hours: " + (", ".join(
+        f"{v} {n} ({secs:.0f}s down{f', {open_} without an end' if open_ else ''})" for v, n, secs, open_ in gaps) if gaps else "none"))
 
 
 def print_opportunities(conn, since, hours):
@@ -237,7 +214,7 @@ def print_trades(conn, since, hours):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Summarize the SportsArb database.")
-    ap.add_argument("--hours", type=int, default=24, help="size of the recent window for quotes, opportunities, and trades")
+    ap.add_argument("--hours", type=int, default=24, help="size of the recent window for feed drops, opportunities, and trades")
     args = ap.parse_args()
     now = datetime.now(timezone.utc).isoformat()
     since = (datetime.fromisoformat(now) - timedelta(hours=args.hours)).isoformat()
@@ -245,6 +222,6 @@ if __name__ == "__main__":
     print_storage(conn)
     print_contracts(conn, now)
     print_pairs(conn)
-    print_quotes(conn, since, args.hours)
+    print_gaps(conn, since, args.hours)
     print_opportunities(conn, since, args.hours)
     print_trades(conn, since, args.hours)

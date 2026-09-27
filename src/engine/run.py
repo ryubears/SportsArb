@@ -2,8 +2,8 @@
 Run the live process: record, scan, trade on paper or with real money, settle, and rebalance.
 
 The recorder from record.py holds the newest book for every paired
-contract, fed by the venue connections from streams.py, and once a second
-writes the books whose top changed. The scanner from scan.py prices pairs
+contract in memory, fed by the venue connections from streams.py. Books
+are not stored. The scanner from scan.py prices pairs
 from the same in memory books as they change and stores every episode it
 finds in the opportunities table. Its signals go to one Desk per mode the
 run trades in. The paper desk's executor from execute/paper.py fills
@@ -202,11 +202,10 @@ class Session:
 
     def tick(self):
         """
-        One pass of the timer: write the changed books, price them, settle
-        and rebalance, and log the status and summaries when they are due.
+        One pass of the timer: price the open episodes again, let each desk
+        retry, settle, and rebalance, and log the status and summaries when they are due.
         """
         now = now_iso()
-        self.recorder.flush()
         if self.scanner:
             self.scanner.tick(self.recorder.latest, now)
         for desk in self.desks:
@@ -231,11 +230,10 @@ class Session:
 
     async def close(self):
         """
-        Stop the connections, write what is left, finish the trades in flight
-        and the emails being sent, and log the final summaries.
+        Stop the connections, end the open episodes, finish the trades in
+        flight and the emails being sent, and log the final summaries.
         """
         await self.streams.stop_all()
-        self.recorder.flush()
         if self.scanner:
             self.scanner.tick({}, now_iso())
         pending = [task for desk in self.desks for task in desk.executor.tasks] + list(self.notifier.tasks)
@@ -247,7 +245,7 @@ class Session:
 
 async def run(conn, options):
     """
-    Refresh the catalog, start a Session, tick it every config.FLUSH_SECONDS,
+    Refresh the catalog, start a Session, tick it every config.TICK_SECONDS,
     and keep the catalog fresh on a timer, as the RunOptions say. A refresh
     that fails is logged and tried again at the next interval, so a bad
     fetch never stops the recording.
@@ -266,7 +264,7 @@ async def run(conn, options):
     refresh = None      # The background catalog refresh while one is running.
     try:
         while not seconds or time.time() - started < seconds:
-            await asyncio.sleep(config.FLUSH_SECONDS)
+            await asyncio.sleep(config.TICK_SECONDS)
             session.tick()
             if catalog_seconds and refresh is None and time.time() - last_catalog >= catalog_seconds:
                 refresh = asyncio.create_task(asyncio.to_thread(pipeline.refresh, sport, log))

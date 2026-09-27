@@ -18,8 +18,8 @@ venues funded. By default the orders are paper. With `--execute live` or
 
 Everything lives in `src/` and reads or writes one SQLite file,
 `data/sportsarb.sqlite`. The tables follow the pipeline in order:
-contracts, bets, pairs, quotes, gaps, opportunities, trades, settlements,
-orders, ledger, alerts, transfers. Trades and settlements carry a `mode`,
+contracts, bets, pairs, gaps, opportunities, trades, settlements, orders,
+ledger, alerts, transfers. Trades and settlements carry a `mode`,
 `paper` or `live`, so the two books never mix. Every table has a model in
 `db/models.py` and its schema in `db/schema.sql`. Changes to a table for
 databases that already exist are numbered steps in `db/migrations.py`, and
@@ -95,10 +95,10 @@ background thread and applies the result to the live connections. The
 pieces it wires together are in `engine/components/`, and what they share
 is in `engine/helper/`: the settings, game timing, pricing, and fees.
 
-**record.py** holds the newest book for every paired contract in memory
-and, on each tick, writes a row with five levels a side for each contract
-whose top of book changed. Quiet contracts write nothing, busy ones at most
-one row a second. **streams.py** owns the connections behind it, one per
+**record.py** holds the newest book for every paired contract in memory,
+five levels a side, which the scanner prices and the executors trade
+against. Books are not stored, only the gaps when a venue's feed was down.
+**streams.py** owns the connections behind it, one per
 venue, or several when a venue caps how much one connection may carry,
 and moves contracts between them as the catalog changes.
 
@@ -233,7 +233,7 @@ table and emails it in a background thread through the SMTP server in
 ### Tools
 
 `src/tools/summary.py` prints a report from the database: row counts,
-pairs by kind, recording health, opportunities by kind with the largest
+pairs by kind, feed drops, opportunities by kind with the largest
 that beat a 10% annual return, and for paper and live apart the trades by
 outcome and kind and the settled legs by venue, then the paper balances
 with any transfer in transit, and the real orders sent by venue and what
@@ -265,8 +265,9 @@ operate the instance, with the instance's address, key, and ids written
 into them. It is gitignored, so it lives only on the machine that operates
 the instance.
 
-The process is light. It holds 4,900 books in about 190 MB of memory,
-and the database grows by roughly 500 MB a day.
+The process is light. It holds 4,900 books in about 190 MB of memory.
+Books are not stored, so the database grows only with the episodes,
+trades, and orders.
 
 ## Results so far
 

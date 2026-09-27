@@ -151,8 +151,20 @@ def step_4_modes(conn):
             conn.execute(f"ALTER TABLE {table} ADD COLUMN mode TEXT NOT NULL DEFAULT 'paper'")
 
 
+def step_5_drop_quotes(conn):
+    """
+    Order books are no longer stored, since everything prices from the
+    books in memory, so the quotes table goes. It held nearly all of the
+    file, so the file is rebuilt without it, which gives the space back.
+    """
+    conn.execute("DROP TABLE IF EXISTS quotes")
+    conn.commit()
+    conn.execute("VACUUM")
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")     # So the file shrinks now, not at the next checkpoint.
+
+
 # Step n brings a database from user_version n - 1 to n. Only ever add to the end.
-STEPS = [step_1_catch_up, step_2_settlements, step_3_opening_balances, step_4_modes]
+STEPS = [step_1_catch_up, step_2_settlements, step_3_opening_balances, step_4_modes, step_5_drop_quotes]
 
 
 def migrate(conn, fresh):

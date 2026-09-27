@@ -58,15 +58,6 @@ CREATE TABLE IF NOT EXISTS pairs (
     matched_at   TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS quotes (
-    venue        TEXT NOT NULL,
-    contract_id  TEXT NOT NULL,
-    ts           TEXT NOT NULL,   -- Our clock, ISO 8601 UTC, when the book changed.
-    bids         TEXT NOT NULL,   -- JSON list of [price, size] for the Yes side, best first.
-    asks         TEXT NOT NULL,   -- JSON list of [price, size] for the Yes side, best first.
-    PRIMARY KEY (venue, contract_id, ts)
-);
-
 CREATE TABLE IF NOT EXISTS gaps (
     venue        TEXT NOT NULL,
     start_ts     TEXT NOT NULL,   -- When the connection was lost, ISO 8601 UTC.

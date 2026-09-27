@@ -70,7 +70,7 @@ LOG_PROFIT_DOLLARS = 10     # Live episodes worth at least this at the peak are 
 
 # TIMERS, run.py and settle.py
 
-FLUSH_SECONDS = 1.0         # How often changed books are written.
+TICK_SECONDS = 1.0          # How often the session ticks, pricing open episodes again and running each desk.
 STATUS_SECONDS = 60         # How often a status line is logged.
 SUMMARY_SECONDS = 600       # How often each component logs its summary.
 SETTLE_CHECK_SECONDS = 30   # Between passes over the open trades whose game has started.
