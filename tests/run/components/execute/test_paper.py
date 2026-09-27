@@ -235,13 +235,30 @@ def test_signal_is_refused_for_thin_edges_and_games_not_in_play(tmp_path, quick)
 
 def test_two_signals_at_once_share_the_balance_instead_of_both_spending_it(tmp_path, quick):
     latest = books()
-    conn, cash, ex = executor(tmp_path, latest, start=30.0)      # Room for 50 contracts at 0.45 once, not twice.
+    conn, cash, ex = executor(tmp_path, latest, start=530.0)     # 30 over the 500 floor: room for 50 contracts at 0.45 once, not twice.
     assert run(ex, signals=2) == [True, True]
     first, second = stored(conn)
     # The second saw what the first had reserved on both venues: 7.5 left on Polymarket US and 6.5 on Kalshi, so 13 at 0.47.
     assert (first["quantity"], second["quantity"]) == (50, 13)
-    assert cash.amounts == pytest.approx({"polymarket_us": 30 - 63 * 0.45, "kalshi": 30 - 63 * 0.47})
-    assert min(cash.amounts.values()) >= 0
+    assert cash.amounts == pytest.approx({"polymarket_us": 530 - 63 * 0.45, "kalshi": 530 - 63 * 0.47})
+    assert min(cash.amounts.values()) >= 500
+
+
+def test_new_paper_trades_leave_500_dollars_on_each_venue(tmp_path, quick):
+    latest = books()
+    logs = []
+    conn, cash, ex = executor(tmp_path, latest, logs.append, start=510.0)
+    assert run(ex) == [True] and stored(conn)[0]["quantity"] == 21      # 10 to spend: 22 at 0.45 but 21 at 0.47.
+    assert cash.amounts == pytest.approx({"polymarket_us": 510 - 21 * 0.45, "kalshi": 510 - 21 * 0.47})
+    ex.tick(NOW)
+    assert not any("floor" in line for line in logs)                    # Both still at 500 or more.
+    cash.amounts["kalshi"] = 499.0
+    ex.tick(NOW)
+    assert logs[-1] == "paper kalshi has 499.00$, under its 500.00$ floor, so new trades wait until more arrives"
+    assert run(ex) == [False]
+    cash.amounts["kalshi"] = 600.0
+    ex.tick(NOW)
+    assert logs[-1] == "paper kalshi has 600.00$, back over its 500.00$ floor"
 
 
 def test_a_trade_is_stored_as_sent_before_it_fills(tmp_path, quick):

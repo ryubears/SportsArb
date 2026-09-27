@@ -107,8 +107,7 @@ def test_the_brakes_start_over_after_a_halt(tmp_path):
     assert again.halted is None                                         # One refusal since the halt, not three in a row.
 
 
-def test_the_floor_is_a_share_of_the_average_venues_money_open_trades_included(tmp_path):
+def test_the_live_money_is_the_cash_and_what_open_trades_hold_at_cost(tmp_path):
     conn, b = setup(tmp_path)                                           # 100 dollars of cash.
     live_trade(conn, 10, 0, [("buy", 4.5, "2026-09-27T19:00:00+00:00", "filled")], yes_cost=4.5)
     assert b.capital() == pytest.approx(104.5)
-    assert b.floor() == pytest.approx(0.05 * 104.5 / 2)

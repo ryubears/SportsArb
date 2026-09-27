@@ -252,25 +252,32 @@ def test_orders_the_latency_stopgap_turned_away_do_not_count_as_refusals(tmp_pat
     assert "yes leg unfilled: latency stopgap" in stored(conn, "trades")[0]["hedge"]
 
 
-def test_new_trades_leave_a_floor_on_each_venue_that_flattening_may_use(tmp_path):
+def test_new_trades_leave_five_dollars_on_each_venue_that_flattening_may_use(tmp_path):
     latest = books()
-    venues = Venues(polymarket_us=[fills()], kalshi=[fills(3), fills()])
     logs = []
-    conn, cash, ex = executor(tmp_path, venues, latest, logs=logs, balance=10.0)
-    # 5% of the average venue's 10 dollars is 0.50 left untouched, so 9.50 is free on each venue: 21 contracts at 0.45 or 20 at
-    # 0.47. The cap of 10 is less. Kalshi fills 3, and the 7 missing are bought there with the floor if need be.
-    assert ex.brakes.floor() == pytest.approx(0.5)
-    assert trade(ex) == [True]
-    assert venues.orders[-1] == ("kalshi", "buy", "no", 7, 0.47)
-    # The venues now read 0.20 each, and the open trade holds 9.20 at cost, so the live money is 9.60 and the floor 0.24.
-    cash.read.update(kalshi=0.2, polymarket_us=0.2)
-    cash.moved.update(kalshi=0.0, polymarket_us=0.0)
+    venues = Venues(polymarket_us=[fills()], kalshi=[])
+    conn, cash, ex = executor(tmp_path, venues, latest, logs=logs, balance=8.0)
+    venues.scripts["kalshi"] = [nothing_and_the_money_gone(cash), fills()]
+    # 8 dollars less the 5 left untouched is 3 to spend on each venue: 6 contracts at 0.45 or at 0.47.
+    assert ex.spendable("kalshi") == pytest.approx(3.0)
+    assert trade(ex) == [True] and stored(conn, "trades")[0]["quantity"] == 6
+    # Kalshi filled nothing and its cash fell to 5.10 meanwhile, under the floor, yet the 6 missing are still bought there.
+    assert venues.orders[-1] == ("kalshi", "buy", "no", 6, 0.47)
+    assert cash["kalshi"] == pytest.approx(5.10 - 6 * 0.47)
     ex.tick(NOW)
-    assert ex.brakes.floor() == pytest.approx(0.24)
     assert trade(ex) == [False] and len(venues.orders) == 3             # Under the floor, so no new trades.
-    assert logs[-2:] == ["live kalshi has 0.20$, under its 0.24$ floor, so new trades wait until more arrives",
-                         "live polymarket_us has 0.20$, under its 0.24$ floor, so new trades wait until more arrives"]
-    assert "new trades wait on kalshi, polymarket_us, under the floor" in ex.summary()
-    cash.read.update(kalshi=5.0)                                        # A payout arrives.
+    assert logs[-1] == "live kalshi has 2.28$, under its 5.00$ floor, so new trades wait until more arrives"
+    assert "new trades wait on kalshi, under the floor" in ex.summary()
+    cash.read["kalshi"] = 20.0                                          # A payout arrives.
     ex.tick(NOW)
-    assert logs[-1] == "live kalshi has 5.00$, back over its 0.36$ floor"          # 5.20 cash and 9.20 held: 14.40.
+    assert logs[-1] == "live kalshi has 17.18$, back over its 5.00$ floor"         # 20 read, less the 2.82 bought since.
+
+
+def nothing_and_the_money_gone(cash):
+    """
+    A scripted Kalshi answer that fills nothing while the venue's cash falls to 5.10, as a reading would show.
+    """
+    def answer(quantity, price):
+        cash.read["kalshi"] = 5.10
+        return fills(0)(quantity, price)
+    return answer

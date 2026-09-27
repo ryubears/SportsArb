@@ -19,6 +19,12 @@ class Balances:
     def __getitem__(self, venue):
         return self.amounts[venue]
 
+    def known(self, venue):
+        """
+        Whether the venue's cash is known yet.
+        """
+        return True
+
     def reserve(self, venue, dollars):
         """
         Hold dollars back for an order in flight.

@@ -1,5 +1,5 @@
 """
-When live trading halts, and how much of its money it leaves alone.
+When live trading halts.
 
 Real money calls for brakes, sized for a test with about 100 dollars on
 each venue. Each rule reads the orders and trades tables, so a restart does
@@ -34,16 +34,12 @@ paid, plus what it sold, less what it bought, fees included, from the
 orders table. A trade with an order of unknown outcome is left out, since
 its records may be wrong.
 
-The live money is the cash on both venues plus what open live trades hold,
-at what it cost. New trades leave config.LIVE_CASH_FLOOR of the average
-venue's share of it untouched on each venue, so a balance lower than it
-looks between readings still covers fees and the orders that flatten,
-which may use it.
+The live money a loss is measured against is the cash on both venues
+plus what open live trades hold, at what it cost.
 """
 
 from common.paths import DATA_DIR
 from common.timeutil import now_iso, shift
-from common.venues import VENUES
 from db import database
 from run.helper import config
 
@@ -132,12 +128,6 @@ class Brakes:
         The live money in all: the cash on both venues, what is held back for orders in flight included, and what open live trades hold, at cost.
         """
         return self.cash.total() + database.load_open_cost(self.conn, self.cash.mode)
-
-    def floor(self):
-        """
-        Dollars new trades leave untouched on each venue.
-        """
-        return config.LIVE_CASH_FLOOR * self.capital() / len(VENUES)
 
     # HALTING
 

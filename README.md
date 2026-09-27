@@ -139,8 +139,11 @@ flattening only trade against a book that has changed within the last
 minute, since a market that has closed may stop changing rather than empty
 its book, and its last book cannot be traded. Signals need a net edge of
 at least five cents per contract, and only games being played are traded,
-so the money comes back the same day. Every trade is stored as soon as it
-is sent and updated when it is done.
+so the money comes back the same day. New trades leave a floor of cash
+untouched on each venue, $500 on paper and $5 live, so the money is never
+run down to nothing and flattening, which may use it, still can; a venue
+under its floor makes new trades wait until more arrives. Every trade is
+stored as soon as it is sent and updated when it is done.
 
 Live trading has brakes, in **brakes.py**, sized for a test with about
 $100 on each venue. An order whose outcome cannot be known (a timeout, a
@@ -168,10 +171,7 @@ rule reads the orders and trades tables, so a restart does not reset it,
 and starts over after a halt. A halt is logged and emailed, and what is
 held is still settled. It is also written to `data/live_halted.txt`, and
 live trading stays halted across restarts, a crash or a deploy, until a
-human has checked the venues and removed that file. New trades leave 5% of
-the average venue's live money, cash and open trades at cost, untouched on
-each venue, $5 of $100, so a balance lower than it looks between readings
-still covers fees and flattening, which may use it. Live trades hold 1 to
+human has checked the venues and removed that file. Live trades hold 1 to
 10 contracts until the live results earn more.
 
 **allocate.py** sets how many contracts one trade may hold, so the money

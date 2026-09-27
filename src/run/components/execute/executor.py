@@ -28,6 +28,7 @@ import dataclasses
 from dataclasses import dataclass
 from common.log import on_failure
 from common.timeutil import now_iso, seconds_between
+from common.venues import VENUES
 from db import database
 from db.models import Ledger, Trade
 from run.components.allocate import cap_range
@@ -107,6 +108,7 @@ class Executor:
         self.exposed = {}           # Trade id maps to (Trade, [yes Leg, no Leg]) for trades holding more on one side than the other.
         self.flattening = set()     # Ids of exposed trades with an order in flight to flatten them, which the settler leaves alone.
         self.set_aside = {}         # Trade id maps to why no more orders are sent for it, which only live trading does.
+        self.low = set()            # Venues whose free cash is under the floor, so new trades wait.
         self.retrying = None        # The task flattening exposed trades while one runs.
         self.totals = {"trades": 0, "profit": 0.0, "hedge": 0.0}
 
@@ -156,18 +158,33 @@ class Executor:
         task.add_done_callback(on_failure(self.log, f"{self.mode} trade task"))
         return task
 
+    def floor(self):
+        """
+        Dollars new trades leave untouched on each venue, so the money is
+        never run down to nothing and flattening, which may use it, still can.
+        """
+        return config.CASH_FLOOR
+
     def spendable(self, venue):
         """
-        Dollars a new trade may spend on a venue: all its free cash.
+        Dollars a new trade may spend on a venue: its free cash less the floor.
         """
-        return self.cash[venue]
+        return max(0.0, self.cash[venue] - self.floor())
 
     def tick(self, now):
         """
-        Once a second from the session. Tries again to flatten what is still exposed.
+        Once a second from the session. Tries again to flatten what is still
+        exposed, and logs when a venue goes under the floor or back over it.
         """
         if self.exposed and (self.retrying is None or self.retrying.done()):
             self.retrying = self.spawn(self.retry(now))
+        floor = self.floor()
+        for venue in VENUES:
+            low = self.cash.known(venue) and self.cash[venue] < floor
+            if low != (venue in self.low):
+                (self.low.add if low else self.low.discard)(venue)
+                self.log(f"{self.mode} {venue} has {self.cash[venue]:,.2f}$, " +
+                         (f"under its {floor:,.2f}$ floor, so new trades wait until more arrives" if low else f"back over its {floor:,.2f}$ floor"))
 
     # ORDERS, which each subclass fills its own way.
 
@@ -350,6 +367,7 @@ class Executor:
         recent = self.done
         self.done = []
         counts = {s: sum(1 for t in recent if t.status == s) for s in ("filled", "partial", "failed")}
+        waiting = f"; new trades wait on {', '.join(sorted(self.low))}, under the floor" if self.low else ""
         return (f"{self.mode}: {len(recent)} trades ({counts['filled']} filled, {counts['partial']} partial, {counts['failed']} failed), "
                 f"locked in {sum(t.profit for t in recent):.2f}$, hedges {sum(t.hedge_pnl for t in recent):+.2f}$; "
-                f"total {self.totals['trades']} trades, {self.totals['profit'] + self.totals['hedge']:.2f}$; balances {self.cash.summary()}")
+                f"total {self.totals['trades']} trades, {self.totals['profit'] + self.totals['hedge']:.2f}$; balances {self.cash.summary()}{waiting}")

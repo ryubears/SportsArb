@@ -90,7 +90,7 @@ def trading_settings():
     latency = ", ".join(f"{venue} {median}ms" for venue, (median, _) in c.LATENCY_MS.items())
     return (f"settings: min edge {c.MIN_EDGE:.2f}$, fill share {c.FILL_SHARE}, rejects {c.REJECT_PROBABILITY:.0%}, "
             f"latency {latency}, cap {c.MIN_CAP} to {c.MAX_CAP} at {c.DOLLARS_PER_CAP}$ a contract, "
-            f"game {c.GAME_HOURS}h + settle {c.SETTLE_HOURS}h, start balance {c.START_BALANCE:,.0f}$, "
+            f"game {c.GAME_HOURS}h + settle {c.SETTLE_HOURS}h, start balance {c.START_BALANCE:,.0f}$, floor {c.CASH_FLOOR:,.0f}$, "
             f"rebalance weekly over {c.REBALANCE_DRIFT:.0%}")
 
 
@@ -100,7 +100,7 @@ def live_settings():
     """
     c = config
     return (f"LIVE TRADING with real money: cap {c.LIVE_MIN_CAP} to {c.LIVE_MAX_CAP} contracts, balances read every "
-            f"{c.LIVE_BALANCE_SECONDS}s, {c.LIVE_CASH_FLOOR:.0%} of each venue's share left untouched; halt at {c.LIVE_UNKNOWN_LIMIT} "
+            f"{c.LIVE_BALANCE_SECONDS}s, floor {c.LIVE_CASH_FLOOR:,.2f}$; halt at {c.LIVE_UNKNOWN_LIMIT} "
             f"unknown outcomes in {c.LIVE_ORDER_WINDOW} orders, {c.LIVE_REJECT_LIMIT} refusals in a row, or over {c.LIVE_RESULT_HOURS}h "
             f"a loss over {c.LIVE_MAX_LOSS_SHARE:.0%} or {c.LIVE_MAX_LOSING_SHARE:.0%} losing of {c.LIVE_MIN_RESULTS}+ trades; "
             f"email to rebalance over {c.REBALANCE_DRIFT:.0%} every {c.LIVE_ALERT_HOURS}h")

@@ -18,9 +18,8 @@ An order whose outcome cannot be known, because no answer came, the venue
 failed on its side, or its answer cannot be read, leaves what its trade
 holds unknown. That trade is set aside: no more orders are sent for it,
 and a human is told which order to look up on the venue. The rest of live
-trading goes on. When live trading halts altogether, when it pauses new
-trades on a venue running low, and what counts as a refusal, is in
-brakes.py.
+trading goes on. When live trading halts altogether, and what counts as
+a refusal, is in brakes.py.
 """
 
 import asyncio
@@ -30,7 +29,6 @@ from concurrent.futures import ThreadPoolExecutor
 from api import kalshi, orders, polymarket_us
 from common import jsonutil
 from common.timeutil import now_iso
-from common.venues import VENUES
 from db import database
 from db.models import Order
 from run.components.execute.brakes import Brakes
@@ -56,7 +54,6 @@ class LiveExecutor(Executor):
         self.alert = alert
         self.threads = ThreadPoolExecutor(ORDER_THREADS, thread_name_prefix="orders")
         self.brakes = Brakes(conn, cash, log, alert, clock)
-        self.low = set()            # Venues whose cash is under the floor new trades leave untouched.
 
     @property
     def halted(self):
@@ -70,24 +67,11 @@ class LiveExecutor(Executor):
             return False
         return super().signal(pair, yes, no, edge, size, fee_infos, now)
 
-    def spendable(self, venue):
+    def floor(self):
         """
-        A venue's free cash less the floor new trades leave untouched.
+        Dollars new live trades leave untouched on each venue.
         """
-        return max(0.0, self.cash[venue] - self.brakes.floor())
-
-    def tick(self, now):
-        """
-        Retry what is exposed, and log when a venue goes under the floor or comes back over it.
-        """
-        super().tick(now)
-        floor = self.brakes.floor()
-        for venue in VENUES:
-            low = self.cash.read_at[venue] is not None and self.cash[venue] < floor
-            if low != (venue in self.low):
-                (self.low.add if low else self.low.discard)(venue)
-                self.log(f"live {venue} has {self.cash[venue]:,.2f}$, " +
-                         (f"under its {floor:,.2f}$ floor, so new trades wait until more arrives" if low else f"back over its {floor:,.2f}$ floor"))
+        return config.LIVE_CASH_FLOOR
 
     # ORDERS
 
@@ -168,7 +152,4 @@ class LiveExecutor(Executor):
         self.brakes.check_results()
 
     def summary(self):
-        line = super().summary()
-        if self.low:
-            line += f"; new trades wait on {', '.join(sorted(self.low))}, under the floor"
-        return line + (f"; HALTED: {self.halted}" if self.halted else "")
+        return super().summary() + (f"; HALTED: {self.halted}" if self.halted else "")
