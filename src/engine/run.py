@@ -1,25 +1,31 @@
 """
-Run the live process: record, scan, trade on paper or with real money, settle, and rebalance.
+Run the live process: follow the books, scan them, trade on paper or with real money, settle, and rebalance.
 
-The recorder from record.py holds the newest book for every paired
-contract in memory, fed by the venue connections from streams.py. Books
-are not stored. The scanner from scan.py prices pairs
-from the same in memory books as they change and stores every episode it
-finds in the opportunities table. Its signals go to one Desk per mode the
-run trades in. The paper desk's executor from execute/paper.py fills
-against the same books with paper money from balance/paper.py, and its
-PaperBookKeeper from balance/bookkeep.py moves paper money between the
-venues. The live desk's executor from execute/live.py sends real orders
-with the money the venues report through balance/live.py, and its
-LiveBookKeeper emails a human, through notify.py, when the venues drift
-apart, as the executor does when live trading halts. Each desk has its own
-allocator and settler, and its trades are stored with its mode, so paper
-and live never mix. Both can run at once on the same signals, which shows
-how far the paper fills are from real ones.
+What runs, and where it lives:
 
-Every CATALOG_MINUTES the catalog is refreshed in a background thread,
-fetch then classify then match, and the new pairs' contracts are added to
-the live connections and the closed ones removed, without reconnecting.
+- The feeds, from streams.py and feeds.py. Each venue's connections and
+  books run in a child process, which passes every changed book on.
+- The recorder, from record.py, holds the newest book of every paired
+  contract in memory. Books are not stored.
+- The scanner, from scan.py, prices each pair a changed book belongs to,
+  stores every episode of positive edge in the opportunities table, and
+  offers each episode to the desks.
+- A Desk for each mode the run trades in, with its own money, allocator,
+  executor, settler, and book keeper, and its trades stored with its mode,
+  so paper and live never mix. Both can run at once on the same signals,
+  which shows how far the paper fills are from real ones.
+  - Paper: execute/paper.py fills against the same books with the paper
+    money of balance/paper.py, and a PaperBookKeeper moves paper money
+    between the venues.
+  - Live: execute/live.py sends real orders with the money the venues
+    report through balance/live.py, and a LiveBookKeeper emails a human,
+    through notify.py, when the venues drift apart, as the executor does
+    when live trading halts.
+
+The Session ties them together and ticks once a second. Every
+CATALOG_MINUTES the catalog is refreshed in a background thread, fetch
+then classify then match, and the new pairs' contracts are added to the
+running feeds and the closed ones removed, without reconnecting.
 
 Run with:
     python3 -m engine.run --sport nfl

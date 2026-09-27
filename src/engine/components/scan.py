@@ -6,7 +6,7 @@ hold yes and the cheapest way to hold no across the pair's members, on
 any venues, and prices buying both. An episode is a stretch where that
 net edge stays above zero after fees. Each episode becomes an Opportunity
 with its two legs, its duration, its peak edge, how many contracts could
-have been filled at the peak by walking the recorded depth, and the return
+have been filled at the peak by walking the books' depth, and the return
 on the capital tied up, annualized as if held until the bet pays out.
 
 The recorder drives the Scanner with the books it holds in memory and
@@ -73,7 +73,7 @@ class Scanner:
     books, keyed by (venue, contract_id). Only the pairs a contract belongs
     to are priced when its book changes. A member is left out while its book
     is older than config.MAX_BOOK_AGE or missing from the map, which is how the
-    recorder says a venue's books went unseen. Groups and fee schedules come
+    recorder says a venue's books went unseen. Pairs and fee schedules come
     from the database and are reloaded after each catalog refresh. Every
     finished episode is stored at once, and the big ones are logged. Each
     of on_signals, one per executor, is offered every moment of an episode

@@ -186,7 +186,7 @@ def price_pair(yes, no, books, fee_infos):
 
 def best_trade(members, books, fee_infos):
     """
-    The cheapest yes leg and the cheapest no leg across a group's members,
+    The cheapest yes leg and the cheapest no leg across a pair's members,
     priced together. The two legs are never the same contract, since buying
     both sides of one book is not a trade between venues and a crossed book
     would look like free money. Returns a Priced, or None when a side has

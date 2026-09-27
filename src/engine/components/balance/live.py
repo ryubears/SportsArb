@@ -2,15 +2,24 @@
 Live cash per venue, read from the venues' own accounts.
 
 The live executor spends real money, so its balances come from each
-venue's balance call rather than a ledger of our own. They are read every
-config.LIVE_BALANCE_SECONDS in a background thread, and sooner after a
-payout. Between readings the money our own orders move is applied to the
-last reading, so a burst of trades does not spend the same dollars twice.
-A reading only replaces the movements made before it was asked for, since
-a later one may not show in it yet: an order filled while the balance was
-being read is counted in full until the next reading. Money for an order
-in flight is reserved in memory. Before the first reading every venue
-holds nothing, so nothing is traded.
+venue's own balance call rather than a ledger of ours. Each venue's cash
+is kept as four numbers:
+
+- read: what the venue said at its last reading. Readings come every
+  config.LIVE_BALANCE_SECONDS, in a background thread, and at once after
+  a payout.
+- moved: what our own orders moved since. The venue's number lags our
+  trades, so they are added to it, and a burst of trades cannot spend
+  the same dollars twice.
+- paid: payouts since, which count as live money but are not spent until
+  a reading shows them.
+- reserved: what is held back for orders in flight.
+
+The cash free to trade is read plus moved less reserved. A new reading
+replaces only the moves made before it was asked for: an order that
+filled while the balance was being read may not show in it yet, so it
+stays counted until the next reading. Before the first reading every
+venue holds nothing, so nothing is traded.
 """
 
 import asyncio

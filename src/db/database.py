@@ -155,12 +155,12 @@ def event_ids(conn, venue, contract_ids):
 
 def load_recording_targets(conn, sport, now, horizon, venues, game_started_after):
     """
-    Return {venue: [contract_id, ...]} for every contract in a pair that
-    is still open and is either a future or a game starting before the
-    horizon. A game contract also counts as open
-    while its game may still be in play, meaning it started after
-    game_started_after, in case a venue's close time is the kickoff even
-    though its markets trade through the game.
+    The contracts to record right now, as {venue: [contract_id, ...]}: every
+    contract in a pair that is still open and is either a future or a game
+    on or before the horizon's date. A game's contract also counts as open
+    while its game may still be in play, meaning it kicked off after
+    game_started_after, since some venues close a game's contracts at
+    kickoff yet trade them through the game.
     """
     targets = {}
     for venue in venues:
