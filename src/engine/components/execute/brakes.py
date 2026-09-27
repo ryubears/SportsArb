@@ -49,14 +49,14 @@ HALT_FILE = DATA_DIR / "live_halted.txt"    # Why live trading halted, kept unti
 class Brakes:
     """
     Decides when live trading halts, from the orders and trades stored.
-    alert is called with a kind, a subject, a body, and the time, to tell a human, for example by email.
+    notifier is the Notifier from notify.py that tells a human when live trading halts.
     """
 
-    def __init__(self, conn, cash, log=print, alert=None, clock=now_iso):
+    def __init__(self, conn, cash, log=print, notifier=None, clock=now_iso):
         self.conn = conn
         self.cash = cash
         self.log = log
-        self.alert = alert
+        self.notifier = notifier
         self.clock = clock
         self.halted = None                                      # Why live trading stopped, once it has.
         self.since = database.last_alert_ts(conn, "halt")       # When live trading last halted. The rules count only what came after.
@@ -142,8 +142,8 @@ class Brakes:
         HALT_FILE.parent.mkdir(parents=True, exist_ok=True)
         HALT_FILE.write_text(f"{now[:19]} UTC {reason}\n")
         self.log(f"live trading halted: {reason}")
-        if self.alert:
-            self.alert("halt", "SportsArb live trading halted",
-                       f"Live trading stopped at {now[:19]} UTC and sends no more orders.\n\n{reason}\n\n"
-                       f"What is held is still settled. Balances: {self.cash.summary()}.\n\n"
-                       f"Once the venues are checked, remove {HALT_FILE} and restart the process to resume.", now)
+        if self.notifier:
+            self.notifier.send("halt", "SportsArb live trading halted",
+                               f"Live trading stopped at {now[:19]} UTC and sends no more orders.\n\n{reason}\n\n"
+                               f"What is held is still settled. Balances: {self.cash.summary()}.\n\n"
+                               f"Once the venues are checked, remove {HALT_FILE} and restart the process to resume.", now)

@@ -126,7 +126,7 @@ class Desk:
         elif mode == "live":
             self.cash = LiveBalances(log)
             self.allocator = allocate.Allocator(conn, self.cash)
-            self.executor = LiveExecutor(conn, self.cash, books, log, allocator=self.allocator, alert=notifier.send)
+            self.executor = LiveExecutor(conn, self.cash, books, log, allocator=self.allocator, notifier=notifier)
             self.keeper = LiveBookKeeper(conn, self.cash, notifier, log)
         else:
             raise ValueError(f"unknown mode {mode!r}")

@@ -71,15 +71,26 @@ def halt_file(tmp_path, monkeypatch):
     return brakes.HALT_FILE
 
 
-def executor(tmp_path, venues, latest=None, alerts=None, logs=None, read=True, balance=1000.0):
+class FakeNotifier:
+    """
+    Stands in for the Notifier, keeping what it was asked to send as (kind, subject, body).
+    """
+
+    def __init__(self):
+        self.sent = []
+
+    def send(self, kind, subject, body, now=None):
+        self.sent.append((kind, subject, body))
+
+
+def executor(tmp_path, venues, latest=None, notifier=None, logs=None, read=True, balance=1000.0):
     conn = database.connect(tmp_path / "t.sqlite")
     cash = LiveBalances(lambda m: None, {"kalshi": lambda: balance, "polymarket_us": lambda: balance})
     if read:
         asyncio.run(cash.refresh(NOW))
     latest = books() if latest is None else latest
-    alert = (lambda kind, subject, body, now: alerts.append((kind, subject, body))) if alerts is not None else None
     ex = LiveExecutor(conn, cash, lambda: latest, (logs.append if logs is not None else lambda m: None), clock=lambda: NOW,
-                      place=venues.place(), alert=alert)
+                      place=venues.place(), notifier=notifier)
     return conn, cash, ex
 
 
@@ -154,8 +165,8 @@ def test_a_sale_back_is_sent_no_lower_than_the_books_said(tmp_path):
 
 def test_an_order_of_unknown_outcome_sets_its_trade_aside_and_trading_goes_on(tmp_path):
     venues = Venues(polymarket_us=[fills(), fills()], kalshi=[UNKNOWN, fills()])
-    alerts, logs = [], []
-    conn, cash, ex = executor(tmp_path, venues, alerts=alerts, logs=logs)
+    notifier, logs = FakeNotifier(), []
+    conn, cash, ex = executor(tmp_path, venues, notifier=notifier, logs=logs)
     trade(ex)
     assert len(venues.orders) == 2                                      # Nothing is sent to flatten, since what the trade holds is unknown.
     t = stored(conn, "trades")[0]
@@ -163,7 +174,7 @@ def test_an_order_of_unknown_outcome_sets_its_trade_aside_and_trading_goes_on(tm
     assert (kalshi_order["status"], kalshi_order["filled"]) == ("error", 0)
     assert (t["yes_held"], t["no_held"]) == (10, 0) and ex.exposed == {}
     assert t["hedge"] == f"10 exposed, set aside, order {kalshi_order['id']} has an unknown outcome, no leg error: TimeoutError('timed out')"
-    ((kind, subject, body),) = alerts
+    ((kind, subject, body),) = notifier.sent
     assert (kind, subject) == ("set_aside", f"SportsArb live trade {t['id']} set aside")
     assert kalshi_order["client_id"] in body and "buy 10 no of kalshi k" in body
     assert any(line.startswith(f"live trade {t['id']} set aside") for line in logs)
@@ -173,13 +184,13 @@ def test_an_order_of_unknown_outcome_sets_its_trade_aside_and_trading_goes_on(tm
 
 def test_live_trading_halts_at_three_unknown_outcomes_in_twenty_orders(tmp_path):
     venues = Venues(polymarket_us=[UNKNOWN, fills(), fills(), fills(), UNKNOWN] + [fills()] * 5, kalshi=[fills(), fills(), UNKNOWN] + [fills()] * 7)
-    alerts = []
-    conn, cash, ex = executor(tmp_path, venues, alerts=alerts)
+    notifier = FakeNotifier()
+    conn, cash, ex = executor(tmp_path, venues, notifier=notifier)
     assert trade(ex, 2) == [True, True] and ex.halted is None           # One unknown in four orders.
     assert trade(ex, 2) == [True, True] and ex.halted is None           # Two in eight, not in a row.
     assert trade(ex, 1) == [True] and ex.halted.startswith("3 of the last ")      # The third, in the tenth order, halts.
     assert "orders had an unknown outcome, the last order " in ex.halted and trade(ex) == [False]
-    assert [kind for kind, _, _ in alerts] == ["set_aside", "set_aside", "set_aside", "halt"]
+    assert [kind for kind, _, _ in notifier.sent] == ["set_aside", "set_aside", "set_aside", "halt"]
 
 
 def test_a_venue_refusing_orders_in_a_row_halts_live_trading(tmp_path):
@@ -227,10 +238,9 @@ def test_an_answer_that_cannot_be_read_counts_as_an_unknown_outcome(tmp_path):
 def test_a_halt_outlasts_a_restart_until_a_human_removes_the_file_and_then_starts_over(tmp_path, halt_file):
     from engine.components import notify
     conn = database.connect(tmp_path / "t.sqlite")
-    notifier = notify.Notifier(conn, lambda m: None, sender=lambda *args: None)
+    notifier = notify.Notifier(conn, lambda m: None, sender=lambda *args: None)     # Halts are stored as alerts, as the session wires them.
     venues = Venues(polymarket_us=[fills()] * 3, kalshi=[REFUSED] * 3)
-    conn, cash, ex = executor(tmp_path, venues)
-    ex.brakes.alert = ex.alert = notifier.send                         # Halts are stored as alerts, as the session wires them.
+    conn, cash, ex = executor(tmp_path, venues, notifier=notifier)
     trade(ex, 3)
     assert halt_file.read_text().startswith("2026-09-27T17:30:00 UTC kalshi refused 3 orders in a row")
     logs = []

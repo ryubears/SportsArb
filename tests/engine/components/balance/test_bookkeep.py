@@ -94,7 +94,7 @@ def live_money(kalshi, polymarket_us):
     return cash
 
 
-def alert_for(conn, cash, emails, tmp_path, monkeypatch):
+def keeper_for(conn, cash, emails, tmp_path, monkeypatch):
     monkeypatch.setattr(notify, "EMAIL_FILE", tmp_path / "email.json")
     (tmp_path / "email.json").write_text('{"host": "smtp.example.com", "from": "bot@example.com", "to": ["me@example.com"]}')
     notifier = notify.Notifier(conn, lambda m: None, sender=lambda settings, subject, body: emails.append((settings["to"], subject, body)))
@@ -105,15 +105,15 @@ def test_live_venues_apart_are_emailed_once_a_day_and_nothing_is_moved(tmp_path,
     conn = database.connect(tmp_path / "t.sqlite")
     cash = live_money(300.0, 700.0)                     # 200 above a 500 average, past the 25 percent drift.
     emails = []
-    alert = alert_for(conn, cash, emails, tmp_path, monkeypatch)
-    alert.check("2026-09-28T00:00:00+00:00")             # A Monday, any day will do.
+    keeper = keeper_for(conn, cash, emails, tmp_path, monkeypatch)
+    keeper.check("2026-09-28T00:00:00+00:00")             # A Monday, any day will do.
     ((to, subject, body),) = emails
     assert (to, subject) == (["me@example.com"], "SportsArb: move 200$ from polymarket_us to kalshi")
     assert "Move 200.00$ from polymarket_us to kalshi" in body and "kalshi 300$, polymarket_us 700$" in body
     (stored,) = [dict(r) for r in conn.execute("SELECT * FROM alerts")]
     assert (stored["kind"], stored["error"]) == ("rebalance", None) and stored["sent_at"]
-    alert.check("2026-09-28T12:00:00+00:00")             # Still apart, but asked for lately.
-    alert.check("2026-09-29T00:00:00+00:00")             # A day on, asked again.
+    keeper.check("2026-09-28T12:00:00+00:00")             # Still apart, but asked for lately.
+    keeper.check("2026-09-29T00:00:00+00:00")             # A day on, asked again.
     assert len(emails) == 2
     assert database.load_transfers(conn) == [] and cash.amounts == {"kalshi": 300.0, "polymarket_us": 700.0}
 
@@ -121,13 +121,13 @@ def test_live_venues_apart_are_emailed_once_a_day_and_nothing_is_moved(tmp_path,
 def test_live_venues_close_enough_or_with_money_out_are_not_emailed(tmp_path, monkeypatch):
     conn = database.connect(tmp_path / "t.sqlite")
     emails = []
-    alert_for(conn, live_money(460.0, 540.0), emails, tmp_path, monkeypatch).check("2026-09-28T00:00:00+00:00")     # 8 percent apart.
+    keeper_for(conn, live_money(460.0, 540.0), emails, tmp_path, monkeypatch).check("2026-09-28T00:00:00+00:00")     # 8 percent apart.
     open_trade(conn)
     conn.execute("UPDATE trades SET mode = 'live'")
-    alert_for(conn, live_money(300.0, 700.0), emails, tmp_path, monkeypatch).check("2026-09-28T00:00:00+00:00")     # Waits for the trade.
+    keeper_for(conn, live_money(300.0, 700.0), emails, tmp_path, monkeypatch).check("2026-09-28T00:00:00+00:00")     # Waits for the trade.
     unread = LiveBalances(lambda m: None, {})
     conn.execute("DELETE FROM trades")
-    alert_for(conn, unread, emails, tmp_path, monkeypatch).check("2026-09-28T00:00:00+00:00")                      # Nothing read yet.
+    keeper_for(conn, unread, emails, tmp_path, monkeypatch).check("2026-09-28T00:00:00+00:00")                      # Nothing read yet.
     assert emails == []
 
 

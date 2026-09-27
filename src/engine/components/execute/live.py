@@ -42,18 +42,19 @@ ORDER_THREADS = 8       # Orders in flight at once. Two per trade, so a burst of
 class LiveExecutor(Executor):
     """
     Sends real orders for the trades the shared Executor decides on.
-    place maps a venue to its place_order function. alert is called with a
-    kind, a subject, a body, and the time, to tell a human, for example by email.
+    place maps a venue to its place_order function. notifier is the Notifier
+    from notify.py that tells a human when a trade is set aside or live
+    trading halts.
     """
 
     mode = "live"
 
-    def __init__(self, conn, cash, books, log=print, allocator=None, clock=now_iso, place=None, alert=None):
+    def __init__(self, conn, cash, books, log=print, allocator=None, clock=now_iso, place=None, notifier=None):
         super().__init__(conn, cash, books, log, allocator, clock)
         self.place = place or PLACE
-        self.alert = alert
+        self.notifier = notifier
         self.threads = ThreadPoolExecutor(ORDER_THREADS, thread_name_prefix="orders")
-        self.brakes = Brakes(conn, cash, log, alert, clock)
+        self.brakes = Brakes(conn, cash, log, notifier, clock)
 
     @property
     def halted(self):
@@ -126,16 +127,16 @@ class LiveExecutor(Executor):
         self.set_aside[trade.id] = f"set aside, order {order.id} has an unknown outcome"
         self.log(f"live trade {trade.id} set aside: order {order.id}, {order.action} {order.quantity} {order.outcome} of {order.venue} "
                  f"{order.contract_id}, has an unknown outcome: {order.note}")
-        if self.alert:
+        if self.notifier:
             venue_id = f", venue order id {order.venue_order_id}" if order.venue_order_id else ""
-            self.alert("set_aside", f"SportsArb live trade {trade.id} set aside",
-                       f"Order {order.id} of live trade {trade.id} got no answer that says what happened: {order.note}.\n\n"
-                       f"It was an order to {order.action} {order.quantity} {order.outcome} of {order.venue} {order.contract_id} "
-                       f"at {order.limit_price:.4f}, sent at {order.sent_at[:19]} UTC, client id {order.client_id}{venue_id}.\n\n"
-                       f"No more orders are sent for the trade, since what it holds is unknown. Look the order up on the venue, "
-                       f"and flatten what the trade holds by hand if it traded.\n\n"
-                       f"Live trading goes on, and halts if {config.LIVE_UNKNOWN_LIMIT} of the last {config.LIVE_ORDER_WINDOW} "
-                       f"orders have an unknown outcome.", self.clock())
+            self.notifier.send("set_aside", f"SportsArb live trade {trade.id} set aside",
+                               f"Order {order.id} of live trade {trade.id} got no answer that says what happened: {order.note}.\n\n"
+                               f"It was an order to {order.action} {order.quantity} {order.outcome} of {order.venue} {order.contract_id} "
+                               f"at {order.limit_price:.4f}, sent at {order.sent_at[:19]} UTC, client id {order.client_id}{venue_id}.\n\n"
+                               f"No more orders are sent for the trade, since what it holds is unknown. Look the order up on the venue, "
+                               f"and flatten what the trade holds by hand if it traded.\n\n"
+                               f"Live trading goes on, and halts if {config.LIVE_UNKNOWN_LIMIT} of the last {config.LIVE_ORDER_WINDOW} "
+                               f"orders have an unknown outcome.", self.clock())
 
     # RESULTS, which the brakes check whenever a trade may have been decided.
 
