@@ -37,6 +37,46 @@ PRIVATE_KEY_FILE = DATA_DIR / "kalshi_private_key.pem"
 RESULTS_BATCH = 50   # Tickers per markets call when looking up results.
 
 
+# SIGNING
+
+@functools.cache
+def credentials():
+    """
+    The account's key id and RSA private key, read from the data folder once.
+    """
+    return KEY_ID_FILE.read_text().strip(), serialization.load_pem_private_key(PRIVATE_KEY_FILE.read_bytes(), password=None)
+
+
+def signed_headers(method, path):
+    """
+    The three headers that authenticate a request. Kalshi wants the timestamp,
+    the method, and the path signed with the account's RSA key. The websocket
+    handshake and the trading endpoints use the same scheme.
+    """
+    key_id, key = credentials()
+    ts = str(int(time.time() * 1000))
+    message = (ts + method + path).encode()
+    signature = key.sign(
+        message,
+        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.DIGEST_LENGTH),
+        hashes.SHA256(),
+    )
+    return {
+        "KALSHI-ACCESS-KEY": key_id,
+        "KALSHI-ACCESS-TIMESTAMP": ts,
+        "KALSHI-ACCESS-SIGNATURE": base64.b64encode(signature).decode(),
+    }
+
+
+def signed_request(method, path, body=None, params=None):
+    """
+    A signed call to the API at a path under BASE, for example
+    '/portfolio/balance'. The signature covers the path without its query.
+    """
+    url = BASE + path + (f"?{urllib.parse.urlencode(params)}" if params else "")
+    return send_json(method, url, signed_headers(method, BASE_PATH + path), body)
+
+
 # QUERY
 
 def paged(path, params, key):
@@ -159,46 +199,6 @@ def balance():
     """
     answer = signed_request("GET", "/portfolio/balance")
     return float_or_zero(answer["balance_dollars"]) if "balance_dollars" in answer else answer["balance"] / 100
-
-
-# SIGNING
-
-@functools.cache
-def credentials():
-    """
-    The account's key id and RSA private key, read from the data folder once.
-    """
-    return KEY_ID_FILE.read_text().strip(), serialization.load_pem_private_key(PRIVATE_KEY_FILE.read_bytes(), password=None)
-
-
-def signed_headers(method, path):
-    """
-    The three headers that authenticate a request. Kalshi wants the timestamp,
-    the method, and the path signed with the account's RSA key. The websocket
-    handshake and the trading endpoints use the same scheme.
-    """
-    key_id, key = credentials()
-    ts = str(int(time.time() * 1000))
-    message = (ts + method + path).encode()
-    signature = key.sign(
-        message,
-        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.DIGEST_LENGTH),
-        hashes.SHA256(),
-    )
-    return {
-        "KALSHI-ACCESS-KEY": key_id,
-        "KALSHI-ACCESS-TIMESTAMP": ts,
-        "KALSHI-ACCESS-SIGNATURE": base64.b64encode(signature).decode(),
-    }
-
-
-def signed_request(method, path, body=None, params=None):
-    """
-    A signed call to the API at a path under BASE, for example
-    '/portfolio/balance'. The signature covers the path without its query.
-    """
-    url = BASE + path + (f"?{urllib.parse.urlencode(params)}" if params else "")
-    return send_json(method, url, signed_headers(method, BASE_PATH + path), body)
 
 
 # STREAMING

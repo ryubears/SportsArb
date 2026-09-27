@@ -39,6 +39,35 @@ KEY_ID_FILE = DATA_DIR / "polymarket_us_key_id.txt"
 SECRET_KEY_FILE = DATA_DIR / "polymarket_us_secret_key.txt"
 
 
+# SIGNING
+
+@functools.cache
+def credentials():
+    """
+    The account's key id and Ed25519 private key, read from the data folder once.
+    """
+    secret = base64.b64decode(SECRET_KEY_FILE.read_text().strip())
+    return KEY_ID_FILE.read_text().strip(), Ed25519PrivateKey.from_private_bytes(secret[:32])
+
+
+def signed_headers(method, path):
+    """
+    The three headers that authenticate a request. The signature is the
+    account's Ed25519 key over the timestamp, method, and path.
+    """
+    key_id, key = credentials()
+    ts = str(int(time.time() * 1000))
+    signature = base64.b64encode(key.sign(f"{ts}{method}{path}".encode())).decode()
+    return {"X-PM-Access-Key": key_id, "X-PM-Timestamp": ts, "X-PM-Signature": signature}
+
+
+def signed_request(method, path, body=None):
+    """
+    A signed call to the API at a path under API, for example '/account/balances'.
+    """
+    return send_json(method, API + path, signed_headers(method, API_PATH + path), body)
+
+
 # QUERY
 
 def fetch_events(tag_slug, page_size=500):
@@ -112,35 +141,6 @@ def balance():
         if b.get("currency", "USD") == "USD":
             return float(b.get("buyingPower", b.get("currentBalance", 0.0)))
     return 0.0
-
-
-# SIGNING
-
-@functools.cache
-def credentials():
-    """
-    The account's key id and Ed25519 private key, read from the data folder once.
-    """
-    secret = base64.b64decode(SECRET_KEY_FILE.read_text().strip())
-    return KEY_ID_FILE.read_text().strip(), Ed25519PrivateKey.from_private_bytes(secret[:32])
-
-
-def signed_headers(method, path):
-    """
-    The three headers that authenticate a request. The signature is the
-    account's Ed25519 key over the timestamp, method, and path.
-    """
-    key_id, key = credentials()
-    ts = str(int(time.time() * 1000))
-    signature = base64.b64encode(key.sign(f"{ts}{method}{path}".encode())).decode()
-    return {"X-PM-Access-Key": key_id, "X-PM-Timestamp": ts, "X-PM-Signature": signature}
-
-
-def signed_request(method, path, body=None):
-    """
-    A signed call to the API at a path under API, for example '/account/balances'.
-    """
-    return send_json(method, API + path, signed_headers(method, API_PATH + path), body)
 
 
 # STREAMING
