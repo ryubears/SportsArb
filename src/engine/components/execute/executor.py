@@ -263,12 +263,10 @@ class Executor:
         trade past its payout time is left to settle as it stands, and one
         with an order of unknown outcome is left to a human.
         """
-        for trade, yes_fee_info, no_fee_info in database.load_exposed_trades(self.conn, self.mode, self.clock()):
-            yes = Leg("yes", {"venue": trade.yes_venue, "contract_id": trade.yes_contract, "polarity": trade.yes_polarity},
-                      yes_fee_info, trade.yes_limit, trade.quantity, trade.yes_held, trade.yes_cost)
-            no = Leg("no", {"venue": trade.no_venue, "contract_id": trade.no_contract, "polarity": trade.no_polarity},
-                     no_fee_info, trade.no_limit, trade.quantity, trade.no_held, trade.no_cost)
-            self.exposed[trade.id] = (trade, [yes, no])
+        for trade, *fee_infos in database.load_exposed_trades(self.conn, self.mode, self.clock()):
+            self.exposed[trade.id] = (trade, [Leg(leg.side, {"venue": leg.venue, "contract_id": leg.contract, "polarity": leg.polarity},
+                                                  fee_info, leg.limit, trade.quantity, leg.held, leg.cost)
+                                              for leg, fee_info in zip(trade.legs(), fee_infos)])
         if self.exposed:
             self.log(f"{self.mode} trades left exposed before this start, flattening again: {', '.join(map(str, self.exposed))}")
 

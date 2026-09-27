@@ -7,6 +7,7 @@ the row is stored rather than when the model is made.
 """
 
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
 
 def row_id():
@@ -130,6 +131,23 @@ class Gap:
     end_ts: str | None      # When a new connection was subscribed. None while still down.
 
 
+class TradeLeg(NamedTuple):
+    """
+    One leg of a Trade as stored, from Trade.leg().
+    """
+    side: str               # 'yes' or 'no', the side of the bet the leg holds.
+    venue: str
+    contract: str
+    polarity: str           # The side the contract pays on.
+    limit: float
+    held: int               # Contracts still held after any flattening.
+    cost: float             # Dollars paid for what is held, including fees.
+
+    @property
+    def key(self):
+        return (self.venue, self.contract)
+
+
 @dataclass
 class Trade:
     """
@@ -172,6 +190,18 @@ class Trade:
     label: str | None = None    # The pair's label for log lines, read from the pairs table rather than stored here.
     starts_at: str | None = None    # Kickoff of the game behind the trade, read from the contracts table, for the settler.
 
+    def leg(self, side):
+        """
+        The stored fields of one leg, 'yes' or 'no', as a TradeLeg.
+        """
+        return TradeLeg(side, *(getattr(self, f"{side}_{name}") for name in ("venue", "contract", "polarity", "limit", "held", "cost")))
+
+    def legs(self):
+        """
+        Both legs, yes first.
+        """
+        return [self.leg("yes"), self.leg("no")]
+
 
 @dataclass
 class Settlement:
@@ -188,6 +218,14 @@ class Settlement:
     no_result: str | None = None
     no_payout: float | None = None
     no_settled_at: str | None = None
+
+    def record(self, side, result, payout, settled_at):
+        """
+        Set how one leg, 'yes' or 'no', resolved, what it paid, and when the venue settled it.
+        """
+        setattr(self, f"{side}_result", result)
+        setattr(self, f"{side}_payout", payout)
+        setattr(self, f"{side}_settled_at", settled_at)
 
 
 @dataclass
