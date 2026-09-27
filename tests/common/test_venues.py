@@ -6,10 +6,10 @@ import pytest
 from catalog import fetch
 from catalog.classify import classify
 from common.venues import SHORT_NAMES, VENUES
-from run.components import settle, streams
-from run.components.balance import live as balance_live
-from run.components.execute import live as execute_live
-from run.helper import config, fees
+from engine.components import settle, streams
+from engine.components.balance import live as balance_live
+from engine.components.execute import live as execute_live
+from engine.helper import config, fees
 
 
 @pytest.mark.parametrize("name, table", [

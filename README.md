@@ -80,7 +80,7 @@ TLS connection costs round trips a race cannot spare, and are never
 retried, since an order sent twice trades twice. The field names come from
 the venues' published Python SDKs.
 
-### Run loop (`src/run`)
+### Engine (`src/engine`)
 
 **run.py** is the process that runs. Its `Session` wires the recorder, the
 venue connections, the scanner, and a `Desk` for each mode it trades in
@@ -92,8 +92,8 @@ picks the desks: `paper`, the default, `live`, or `both`, which trades the
 same signals on paper and for real and so measures how far the paper fills
 are from real ones. The same loop starts the hourly catalog refresh in a
 background thread and applies the result to the live connections. The
-pieces it wires together are in `run/components/`, and what they share is
-in `run/helper/`: the settings, game timing, pricing, and fees.
+pieces it wires together are in `engine/components/`, and what they share
+is in `engine/helper/`: the settings, game timing, pricing, and fees.
 
 **record.py** holds the newest book for every paired contract in memory
 and, on each tick, writes a row with five levels a side for each contract
@@ -239,7 +239,7 @@ before the first live run.
 The recorder runs on a t3.medium in us-east-1, the region Kalshi's
 matching engine runs in, where a signed round trip is about 35 ms to
 Kalshi and 30 ms to Polymarket US. A systemd service, `sportsarb-recorder`,
-starts `python3 -m run.run --sport nfl` from `~/SportsArb/src` on boot
+starts `python3 -m engine.run --sport nfl` from `~/SportsArb/src` on boot
 and restarts it on any exit. That trades on paper only. Going live means
 adding `--execute both` to the service's command. The venue API keys
 live in `data/`, which is gitignored, and are copied to the instance by
@@ -356,15 +356,15 @@ Build the catalog and run the recorder locally, from `src/`:
 ```bash
 cd src
 python3 -m catalog.pipeline --sport nfl
-python3 -m run.run --sport nfl
+python3 -m engine.run --sport nfl
 ```
 
 `--no-trade` scans without trading, `--no-scan` only records, and
 `--seconds 120` runs a short test. `--execute live` trades with real money
 and `--execute both` trades the same signals on paper and for real. The
 settings a run is tuned by, such as the minimum edge, the trade caps, and
-the starting balance, are in `src/run/helper/config.py`, and `--set
-NAME=VALUE` overrides one for a run, for example `python3 -m run.run
+the starting balance, are in `src/engine/helper/config.py`, and `--set
+NAME=VALUE` overrides one for a run, for example `python3 -m engine.run
 --sport nfl --set min_edge=0.03`. The run logs every setting when it
 starts. The streams need venue keys in `data/`: `kalshi_key_id.txt` and
 `kalshi_private_key.pem` for Kalshi, `polymarket_us_key_id.txt` and
@@ -397,7 +397,7 @@ src/
   catalog/    fetch, classify (one parser per venue), match, pipeline
   common/     paths, time and json helpers, the venue list, the logger
   db/         models, the SQLite schema and its migrations, reads and writes
-  run/        run, the process that wires the components together
+  engine/     run, the process that wires the components together
     components/  record, streams, scan, allocate, settle, notify
       balance/   balances (what paper and live share), paper, live, bookkeep
       execute/   executor (what paper and live share), paper, live
