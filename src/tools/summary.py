@@ -121,7 +121,7 @@ def print_opportunities(conn, since, hours):
         FROM opportunities o JOIN pairs p ON p.id = o.pair_id WHERE start_ts >= ? AND annual_pct >= 10 ORDER BY peak_profit DESC LIMIT 8""", (since,))
     print_table(f"largest that beat the target, last {hours} hours",
                 ("bet", "trade", "edge c", "size", "capital $", "profit $", "return %", "annual %", "days held", "seconds", "live"),
-                [(l[:40], t, e, f"{s:,.0f}", f"{cap:,.0f}", p, r, f"{a:,.0f}", d, f"{sec:,.0f}", "yes" if lv else "")
+                [(l[:40], t, e, f"{s:,.0f}", f"{cap:,.0f}", p, r, f"{a:,.0f}", d, f"{sec:,.0f}", "yes" if lv else "no")
                  for l, t, e, s, cap, p, r, a, d, sec, lv in best])
 
 
