@@ -16,45 +16,55 @@ pricing itself lives in pricing.py.
 """
 
 from collections import defaultdict
+from dataclasses import dataclass, field
 from common.timeutil import now_iso, seconds_between
 from db import database
 from db.models import Opportunity
 from engine.helper import config
 from engine.helper.game import pays_at as payout_time
-from engine.helper.pricing import best_trade, trade_words
+from engine.helper.pricing import Priced, best_trade, trade_words
 
 
-# EPISODES
-
-def finish(pair, peak, start_ts, end_ts):
+@dataclass
+class Episode:
     """
-    Turn an in progress episode into an Opportunity. peak holds the best moment seen so far.
+    One pair's stretch of positive net edge, while the scanner follows it.
     """
-    start_time = next((m["start_time"] for m in pair["members"] if m["start_time"]), None)
-    live = 1 if start_time and peak["ts"] >= start_time else 0
-    # Capital is locked until the slower of the two legs pays, so the later resolution counts.
-    pays_at = payout_time((peak["yes"], peak["no"]))
-    days_held = max(seconds_between(peak["ts"], pays_at) / 86400, 1 / 24) if pays_at else None
-    return_pct = 100 * peak["edge"] / (1 - peak["edge"])
-    return Opportunity(
-        pair_id=pair["id"],
-        trade=trade_words(peak["yes"], peak["no"]),
-        yes_venue=peak["yes"]["venue"],
-        yes_contract=peak["yes"]["contract_id"],
-        no_venue=peak["no"]["venue"],
-        no_contract=peak["no"]["contract_id"],
-        start_ts=start_ts,
-        end_ts=end_ts,
-        seconds=seconds_between(start_ts, end_ts),
-        peak_ts=peak["ts"],
-        peak_edge=peak["edge"],
-        peak_size=peak["size"],
-        peak_profit=peak["profit"],
-        live=live,
-        days_held=days_held,
-        return_pct=return_pct,
-        annual_pct=return_pct * 365 / days_held if days_held else None,
-    )
+    pair: dict              # The pair, as the scanner loaded it.
+    start_ts: str           # When the edge went positive.
+    peak: Priced            # The best moment so far.
+    peak_ts: str            # When the best moment was.
+    taken: set = field(default_factory=set)     # Which of the scanner's on_signals took a trade on it, by position.
+
+    def opportunity(self, end_ts):
+        """
+        The episode as an Opportunity, ended at end_ts.
+        """
+        start_time = next((m["start_time"] for m in self.pair["members"] if m["start_time"]), None)
+        live = 1 if start_time and self.peak_ts >= start_time else 0
+        # Capital is locked until the slower of the two legs pays, so the later resolution counts.
+        pays_at = payout_time((self.peak.yes, self.peak.no))
+        days_held = max(seconds_between(self.peak_ts, pays_at) / 86400, 1 / 24) if pays_at else None
+        return_pct = 100 * self.peak.edge / (1 - self.peak.edge)
+        return Opportunity(
+            pair_id=self.pair["id"],
+            trade=trade_words(self.peak.yes, self.peak.no),
+            yes_venue=self.peak.yes["venue"],
+            yes_contract=self.peak.yes["contract_id"],
+            no_venue=self.peak.no["venue"],
+            no_contract=self.peak.no["contract_id"],
+            start_ts=self.start_ts,
+            end_ts=end_ts,
+            seconds=seconds_between(self.start_ts, end_ts),
+            peak_ts=self.peak_ts,
+            peak_edge=self.peak.edge,
+            peak_size=self.peak.size,
+            peak_profit=self.peak.profit,
+            live=live,
+            days_held=days_held,
+            return_pct=return_pct,
+            annual_pct=return_pct * 365 / days_held if days_held else None,
+        )
 
 
 class Scanner:
@@ -75,7 +85,7 @@ class Scanner:
         self.sport = sport
         self.log = log
         self.on_signals = list(on_signals)  # Each is called with the trade to make until it takes one in the episode.
-        self.episodes = {}                  # pair id maps to {"start_ts", "peak", "pair"} while an edge is open.
+        self.episodes = {}                  # Pair id maps to its open Episode.
         self.finished = []                  # (kind, Opportunity) for episodes ended since the last summary.
         self.reload()
 
@@ -84,11 +94,11 @@ class Scanner:
         End an episode, store it, and log it when it was worth something.
         """
         episode = self.episodes.pop(pair_id)
-        o = finish(episode["pair"], episode["peak"], episode["start_ts"], now)
+        o = episode.opportunity(now)
         database.insert_opportunities(self.conn, [o])
-        self.finished.append((episode["pair"]["kind"], o))
+        self.finished.append((episode.pair["kind"], o))
         if o.peak_profit >= config.LOG_PROFIT_DOLLARS:
-            self.log(f"episode {episode['pair']['label']}: {o.trade}, {100 * o.peak_edge:.1f}c x {o.peak_size:.0f} = {o.peak_profit:.2f}$, lasted {o.seconds:.1f}s")
+            self.log(f"episode {episode.pair['label']}: {o.trade}, {100 * o.peak_edge:.1f}c x {o.peak_size:.0f} = {o.peak_profit:.2f}$, lasted {o.seconds:.1f}s")
 
     def reload(self):
         """
@@ -124,12 +134,12 @@ class Scanner:
         episode = self.episodes.get(pair_id)
         if priced is not None and priced.edge > 0:
             if episode is None:
-                episode = self.episodes[pair_id] = {"start_ts": now, "peak": None, "pair": pair, "taken": set()}
-            if episode["peak"] is None or priced.edge > episode["peak"]["edge"]:
-                episode["peak"] = dict(priced._asdict(), ts=now)
+                episode = self.episodes[pair_id] = Episode(pair, now, priced, now)
+            elif priced.edge > episode.peak.edge:
+                episode.peak, episode.peak_ts = priced, now
             for i, on_signal in enumerate(self.on_signals):
-                if i not in episode["taken"] and on_signal(pair, priced.yes, priced.no, priced.edge, priced.size, self.fee_infos, now):
-                    episode["taken"].add(i)
+                if i not in episode.taken and on_signal(pair, priced.yes, priced.no, priced.edge, priced.size, self.fee_infos, now):
+                    episode.taken.add(i)
         elif episode is not None:
             self.close(pair_id, now)
 
