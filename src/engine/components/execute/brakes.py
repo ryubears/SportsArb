@@ -12,7 +12,8 @@ Whether flattening goes on depends on the rule. The rules on orders say
 the orders themselves are failing, so they stop every order, flattening
 included, and do so even after a rule on results has halted. After a halt
 by a rule on results, flattening goes on, so what is exposed can still be
-closed. A restart while HALT_FILE is there sends nothing at all.
+closed. A restart while HALT_FILE is there keeps the halt as it was,
+flattening or not, since exposed trades are taken back at every start.
 
 Live trading halts, with every order stopped, when:
 
@@ -53,6 +54,7 @@ from db import database
 from engine.helper import config
 
 HALT_FILE = DATA_DIR / "live_halt.txt"      # Why live trading halted, kept until a human removes it.
+STOPPED = "every order stopped"             # How a line of HALT_FILE says flattening stopped too.
 
 
 class Brakes:
@@ -71,8 +73,9 @@ class Brakes:
         self.stopped = None                                     # Why every live order stopped, flattening included, once one has.
         self.since = database.last_alert_ts(conn, "halt")       # When live trading last halted. The rules count only what came after.
         if HALT_FILE.exists():
-            reasons = "; ".join(HALT_FILE.read_text().strip().splitlines())
-            self.halted = self.stopped = f"halted before this start, remove {HALT_FILE} to resume: {reasons}"
+            lines = HALT_FILE.read_text().strip().splitlines()
+            self.halted = f"halted before this start, remove {HALT_FILE} to resume: {'; '.join(lines)}"
+            self.stopped = self.halted if any(f" UTC {STOPPED}: " in line for line in lines) else None
             self.log(f"live trading {self.halted}")
 
     # HALTING
@@ -92,7 +95,7 @@ class Brakes:
         self.since = now
         HALT_FILE.parent.mkdir(parents=True, exist_ok=True)
         with HALT_FILE.open("a") as f:
-            f.write(f"{now[:19]} UTC {reason}\n")
+            f.write(f"{now[:19]} UTC {STOPPED if self.stopped else 'new trades halted'}: {reason}\n")
         self.log(f"{title}: {reason}")
         if self.notifier:
             going_on = "No more orders are sent, flattening included." if self.stopped else "Exposed trades are still flattened."

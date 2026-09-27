@@ -132,9 +132,11 @@ venue's answer. Either way a leg that filled short is flattened at once,
 by selling the excess back or buying the missing side on the other venue,
 whichever the books say leaves more money, and whatever stays exposed is
 tried again on every tick until it is flat, the bet pays out, or the
-settler settles it. A live order that flattens is limited to the deepest
-price the books said it would reach, so a book that moved leaves the rest
-for the next tick rather than filling far from its price. Orders and
+settler settles it. A restart takes back from the trades table whatever
+is still exposed, so a crash or a deploy does not leave it unhedged. A
+live order that flattens is limited to the deepest price the books said
+it would reach, so a book that moved leaves the rest for the next tick
+rather than filling far from its price. Orders and
 flattening only trade against a book that has changed within the last
 minute, since a market that has closed may stop changing rather than empty
 its book, and its last book cannot be traded. Signals need a net edge of
@@ -167,7 +169,7 @@ results go wrong:
 
 - the live trades decided in the last 6 hours lost more than 10% of the
   live money, net;
-- at least 10 trades were decided in those 6 hours with a profit or a
+- at least 50 trades were decided in those 6 hours with a profit or a
   loss, and 90% or more of them lost.
 
 If the orders then fail as above, flattening stops as well.

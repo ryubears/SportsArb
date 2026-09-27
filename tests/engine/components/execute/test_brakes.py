@@ -76,19 +76,19 @@ def test_losing_more_than_a_tenth_of_the_live_money_in_the_window_halts(tmp_path
 def test_mostly_losing_trades_halt_only_once_enough_are_decided(tmp_path):
     conn, b = setup(tmp_path, cash_each=1000.0)
     at = "2026-09-27T19:00:00+00:00"
-    for _ in range(9):
+    for _ in range(49):
         live_trade(conn, 0, 0, [("buy", 4.5, at, "filled"), ("sell", 4.4, at, "filled")])               # Losses of 0.10.
     b.check_results()
-    assert b.halted is None                                             # All 9 lost, but 9 is too few to judge.
+    assert b.halted is None                                             # All 49 lost, but 49 is too few to judge.
     live_trade(conn, 0, 0, [("buy", 0, at, "unfilled"), ("buy", 0, at, "unfilled")])        # Nothing filled, so neither.
-    for _ in range(2):
+    for _ in range(6):
         live_trade(conn, 10, 10, [("buy", 9.2, at, "filled")])                                          # Wins of 0.80.
     b.check_results()
-    assert b.halted is None                                             # 9 of 11 lost, under 90%.
-    for _ in range(9):
+    assert b.halted is None                                             # 49 of 55 lost, under 90%.
+    for _ in range(5):
         live_trade(conn, 0, 0, [("buy", 4.5, at, "filled"), ("sell", 4.4, at, "filled")])
     b.check_results()
-    assert b.halted == "18 of the 20 live trades decided in the last 6 hours lost money, at or over the 90% limit"
+    assert b.halted == "54 of the 60 live trades decided in the last 6 hours lost money, at or over the 90% limit"
     assert b.stopped is None
 
 
@@ -110,19 +110,22 @@ def test_the_brakes_start_over_after_a_halt(tmp_path):
     assert again.halted is None                                         # One refusal since the halt, not three in a row.
 
 
-def test_a_halt_on_results_keeps_flattening_until_one_on_orders_stops_it(tmp_path, halt_file):
+def test_a_halt_on_results_keeps_flattening_until_one_on_orders_stops_it_across_restarts(tmp_path, halt_file):
     conn, b = setup(tmp_path)
     b.halt("lost too much")
     assert (b.halted, b.stopped) == ("lost too much", None)
     b.halt("lost even more")                                            # Only the first reason on results counts.
+    restarted = brakes.Brakes(conn, b.cash, lambda m: None, clock=lambda: NOW)
+    assert restarted.halted and restarted.stopped is None               # Still flattening after a restart.
     b.halt("kalshi refused 3 orders in a row", flatten=False)
     assert (b.halted, b.stopped) == ("lost too much", "kalshi refused 3 orders in a row")
     b.halt("polymarket_us refused 3 orders in a row", flatten=False)    # Nothing is left to stop.
-    assert halt_file.read_text().splitlines() == ["2026-09-27T20:00:00 UTC lost too much",
-                                                  "2026-09-27T20:00:00 UTC kalshi refused 3 orders in a row"]
+    assert halt_file.read_text().splitlines() == ["2026-09-27T20:00:00 UTC new trades halted: lost too much",
+                                                  "2026-09-27T20:00:00 UTC every order stopped: kalshi refused 3 orders in a row"]
     again = brakes.Brakes(conn, b.cash, lambda m: None, clock=lambda: NOW)      # Restarted before a human cleared it.
     assert again.halted == again.stopped == (f"halted before this start, remove {halt_file} to resume: 2026-09-27T20:00:00 UTC "
-                                             "lost too much; 2026-09-27T20:00:00 UTC kalshi refused 3 orders in a row")
+                                             "new trades halted: lost too much; "
+                                             "2026-09-27T20:00:00 UTC every order stopped: kalshi refused 3 orders in a row")
 
 
 def test_the_live_money_is_the_cash_and_what_open_trades_hold_at_cost(tmp_path):

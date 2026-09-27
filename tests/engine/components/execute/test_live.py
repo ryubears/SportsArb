@@ -180,6 +180,7 @@ def test_an_order_of_unknown_outcome_sets_its_trade_aside_and_trading_goes_on(tm
     assert any(line.startswith(f"live trade {t['id']} set aside") for line in logs)
     assert ex.halted is None and trade(ex) == [True]                    # The next trade goes ahead.
     assert stored(conn, "trades")[1]["status"] == "filled"
+    assert executor(tmp_path, Venues())[2].exposed == {}                # A restart leaves it to a human too.
 
 
 def test_live_trading_halts_at_three_unknown_outcomes_in_twenty_orders(tmp_path):
@@ -269,16 +270,33 @@ def test_a_halt_outlasts_a_restart_until_a_human_removes_the_file_and_then_start
     venues = Venues(polymarket_us=[fills()] * 3, kalshi=[REFUSED] * 3)
     conn, cash, ex = executor(tmp_path, venues, notifier=notifier)
     trade(ex, 3)
-    assert halt_file.read_text().startswith("2026-09-27T17:30:00 UTC kalshi refused 3 orders in a row")
+    assert halt_file.read_text().startswith("2026-09-27T17:30:00 UTC every order stopped: kalshi refused 3 orders in a row")
     logs = []
     venues = Venues(polymarket_us=[fills(), fills()], kalshi=[REFUSED, fills()])
     conn, cash, again = executor(tmp_path, venues, logs=logs)           # A crash or a deploy restarts the process.
     assert again.halted.startswith(f"halted before this start, remove {halt_file} to resume: ")
-    assert logs[0].startswith("live trading halted before this start") and trade(again) == [False] and venues.orders == []
+    assert logs[0] == "live trades left exposed before this start, flattening again: 1, 2"
+    assert logs[1].startswith("live trading halted before this start") and trade(again) == [False] and venues.orders == []
     halt_file.unlink()                                                  # Checked and cleared by a human.
     conn, cash, resumed = executor(tmp_path, venues)
     assert resumed.halted is None and trade(resumed) == [True]
     assert resumed.halted is None                                       # Its refusal is the first since the halt, not the fourth in a row.
+
+
+def test_a_restart_takes_back_what_was_left_exposed_and_flattens_it_again(tmp_path):
+    latest = books()
+    venues = Venues(polymarket_us=[fills(), fills(0)], kalshi=[bids_gone(latest)])
+    conn, cash, ex = executor(tmp_path, venues, latest)
+    trade(ex)                                                           # Kalshi filled nothing, and the sale back found nothing.
+    ex.brakes.halt("the live trades decided in the last 6 hours lost too much")
+    logs = []
+    venues = Venues(polymarket_us=[fills()])
+    conn, cash, again = executor(tmp_path, venues, latest, logs=logs)   # A crash or a deploy restarts the process.
+    assert list(again.exposed) == [1] and "live trades left exposed before this start, flattening again: 1" in logs
+    assert again.halted and again.brakes.stopped is None                # Still halted on results, so still flattening.
+    asyncio.run(again.retry(NOW))
+    assert venues.orders == [("polymarket_us", "sell", "yes", 10, 0.44)]
+    assert again.exposed == {} and stored(conn, "trades")[0]["yes_held"] == 0
 
 
 def test_orders_the_latency_stopgap_turned_away_do_not_count_as_refusals(tmp_path):

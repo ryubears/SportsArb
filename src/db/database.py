@@ -356,6 +356,31 @@ def load_open_trades(conn, mode):
           AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id) ORDER BY t.id""", (mode,))]
 
 
+def load_exposed_trades(conn, mode, now):
+    """
+    Trades of one mode that are done, hold more on one side than the other,
+    have not settled, and pay out after now, with their pair's label, as
+    (Trade, yes fee_info, no fee_info) with the fee schedule of each leg's
+    contract. A trade with an order of unknown outcome is left out, since
+    what it holds is unknown.
+    """
+    out = []
+    for r in conn.execute("""
+        SELECT t.*, p.label, yc.fee_info AS yes_fee_info, nc.fee_info AS no_fee_info
+        FROM trades t
+        LEFT JOIN pairs p ON p.id = t.pair_id
+        LEFT JOIN contracts yc ON yc.venue = t.yes_venue AND yc.contract_id = t.yes_contract
+        LEFT JOIN contracts nc ON nc.venue = t.no_venue AND nc.contract_id = t.no_contract
+        WHERE t.mode = ? AND t.status != 'sent' AND t.yes_held != t.no_held AND t.pays_at > ?
+          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)
+          AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.trade_id = t.id AND o.status = 'error')
+        ORDER BY t.id""", (mode, now)):
+        row = dict(r)
+        yes_fee_info, no_fee_info = jsonutil.parse(row.pop("yes_fee_info"), {}), jsonutil.parse(row.pop("no_fee_info"), {})
+        out.append((Trade(**row), yes_fee_info, no_fee_info))
+    return out
+
+
 def has_open_trades(conn, mode):
     """
     Whether any trade of one mode is still in flight or holds contracts that have not settled.
