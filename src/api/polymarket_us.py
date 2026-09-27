@@ -132,6 +132,9 @@ def signed_headers(method, path):
 INTENTS = {("buy", "yes"): "ORDER_INTENT_BUY_LONG", ("sell", "yes"): "ORDER_INTENT_SELL_LONG",
            ("buy", "no"): "ORDER_INTENT_BUY_SHORT", ("sell", "no"): "ORDER_INTENT_SELL_SHORT"}
 FILL_TYPES = ("EXECUTION_TYPE_FILL", "EXECUTION_TYPE_PARTIAL_FILL")
+# The message of an order rejected by the latency stopgap: one not processed within 5 seconds, when the exchange
+# is slow, to spare a fill at a stale price. It reads like a rate limit but is not one, so it counts as unfilled.
+STOPGAP = "Global Rate Limit Exceeded"
 
 
 def signed_request(method, path, body=None):
@@ -185,12 +188,16 @@ def place_order(slug, action, outcome, quantity, price, client_id):
     orders.Answer, from the executions the synchronous answer lists. action
     is 'buy' or 'sell', outcome 'yes' or 'no', and price the worst price per
     contract accepted for that outcome. Execution prices are the long side's,
-    so a short side fill at p cost 1 - p. The API takes no id of ours, so
-    client_id is only kept in our own orders table.
+    since the market's one instrument is its yes side, so a short side fill
+    at p cost 1 - p. An order the latency stopgap turned away is unfilled,
+    not refused. The API takes no id of ours, so client_id is only kept in
+    our own orders table.
     """
     try:
         answer = signed_request("POST", "/orders", order_body(slug, action, outcome, quantity, price))
     except RequestFailed as e:
+        if STOPGAP in e.body:
+            return orders.Answer(None, "unfilled", 0, 0.0, 0.0, f"latency stopgap: {e.body[:300]}", {"error": e.body, "status": e.status})
         return orders.refused(e) if e.status < 500 else orders.unknown(e)
     except Exception as e:
         return orders.unknown(e)
@@ -205,7 +212,10 @@ def place_order(slug, action, outcome, quantity, price, client_id):
         fees += amount(e.get("commissionNotionalCollected"))
     rejected = next((e for e in executions if e.get("type") == "EXECUTION_TYPE_REJECTED"), None)
     if rejected and not filled:
-        return orders.Answer(answer.get("id"), "rejected", 0, 0.0, 0.0, rejected.get("orderRejectReason") or rejected.get("text"), answer)
+        reason = rejected.get("orderRejectReason") or rejected.get("text")
+        if STOPGAP in f"{rejected.get('text')} {rejected.get('orderRejectReason')}":
+            return orders.Answer(answer.get("id"), "unfilled", 0, 0.0, 0.0, f"latency stopgap: {reason}", answer)
+        return orders.Answer(answer.get("id"), "rejected", 0, 0.0, 0.0, reason, answer)
     paid = traded + fees if action == "buy" else traded - fees
     return orders.Answer(answer.get("id"), orders.status(filled, quantity), filled, paid, fees, None, answer)
 

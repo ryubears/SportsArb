@@ -111,7 +111,7 @@ class LiveExecutor(Executor):
         order.response = jsonutil.dump(answer.response)
         database.update_order(self.conn, order)
         self.watch(trade, order)
-        note = f"{answer.status}: {answer.note}" if answer.status in ("rejected", "error") else ""
+        note = f"{answer.status}: {answer.note}" if answer.note else ""
         return Fill(answer.filled, answer.dollars, order.latency_ms, order.answered_at, note)
 
     # BRAKES

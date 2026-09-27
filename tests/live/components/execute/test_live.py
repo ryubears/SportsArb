@@ -224,3 +224,11 @@ def test_a_halt_outlasts_a_restart_until_a_human_removes_the_file(tmp_path, halt
     halt_file.unlink()                                                  # Checked and cleared by a human.
     conn, cash, resumed = executor(tmp_path, venues)
     assert resumed.halted is None and trade(resumed) == [True]
+
+
+def test_orders_the_latency_stopgap_turned_away_do_not_count_as_refusals(tmp_path):
+    stopgap = orders.Answer(None, "unfilled", 0, 0.0, 0.0, "latency stopgap: Global Rate Limit Exceeded", {})
+    venues = Venues(polymarket_us=[stopgap] * 4, kalshi=[fills(0)] * 4)
+    conn, cash, ex = executor(tmp_path, venues)
+    assert trade(ex, 4) == [True] * 4 and ex.halted is None
+    assert "yes leg unfilled: latency stopgap" in stored(conn, "trades")[0]["hedge"]

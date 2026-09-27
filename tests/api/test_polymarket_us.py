@@ -103,3 +103,12 @@ def test_a_rejected_order_says_why(monkeypatch):
 def test_a_refused_order_is_told_apart_from_one_whose_fate_is_unknown(monkeypatch, error, status):
     fake_api(monkeypatch, {("POST", "/orders"): error})
     assert polymarket_us.place_order("slug", "buy", "yes", 3, 0.44, "c4").status == status
+
+
+def test_the_latency_stopgap_leaves_an_order_unfilled_rather_than_refused(monkeypatch):
+    executions = [{"type": "EXECUTION_TYPE_REJECTED", "text": "Global Rate Limit Exceeded"}]
+    fake_api(monkeypatch, {("POST", "/orders"): {"id": "p5", "executions": executions}})
+    answer = polymarket_us.place_order("slug", "buy", "yes", 3, 0.44, "c5")
+    assert (answer.status, answer.filled, answer.note) == ("unfilled", 0, "latency stopgap: Global Rate Limit Exceeded")
+    fake_api(monkeypatch, {("POST", "/orders"): RequestFailed(429, '{"status": 429, "message": "Global Rate Limit Exceeded"}')})
+    assert polymarket_us.place_order("slug", "buy", "yes", 3, 0.44, "c6").status == "unfilled"
