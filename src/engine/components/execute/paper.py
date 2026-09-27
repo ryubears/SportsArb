@@ -51,10 +51,10 @@ class PaperExecutor(Executor):
         ms, ts = await self.arrive(leg.venue)
         if self.rng.random() < config.REJECT_PROBABILITY:
             return Fill(ms=ms, ts=ts, note="rejected")
-        quote = self.book(leg.key)
-        if quote is None:
+        book = self.fresh_book(leg.key)
+        if book is None:
             return Fill(ms=ms, ts=ts, note="no book")
-        filled, dollars = sweep(ladder(quote, leg.polarity, leg.side), leg.quantity, leg.venue, leg.fee_info, config.FILL_SHARE, limit=leg.limit)
+        filled, dollars = sweep(ladder(book, leg.polarity, leg.side), leg.quantity, leg.venue, leg.fee_info, config.FILL_SHARE, limit=leg.limit)
         return Fill(filled, dollars, ms, ts)
 
     async def sell_back(self, trade, leg, quantity, floor):
@@ -62,10 +62,10 @@ class PaperExecutor(Executor):
         Sell back contracts held through a leg at whatever the book offers when the order arrives, whatever the floor.
         """
         ms, ts = await self.arrive(leg.venue)
-        quote = self.book(leg.key)
-        if quote is None:
+        book = self.fresh_book(leg.key)
+        if book is None:
             return Fill(ms=ms, ts=ts)
-        filled, dollars = sweep(sell_ladder(quote, leg.polarity, leg.side), quantity, leg.venue, leg.fee_info, config.FILL_SHARE, selling=True)
+        filled, dollars = sweep(sell_ladder(book, leg.polarity, leg.side), quantity, leg.venue, leg.fee_info, config.FILL_SHARE, selling=True)
         return Fill(filled, dollars, ms, ts)
 
     def flatten_limit(self, reached):

@@ -84,7 +84,7 @@ class Pair:
 
 
 @dataclass
-class Quote:
+class Book:
     """
     One contract's order book at one moment, seen from the Yes side.
     """
@@ -109,7 +109,7 @@ class Opportunity:
     no_venue: str           # Where the no exposure was cheapest at the peak.
     no_contract: str
     start_ts: str           # When the net edge first went positive.
-    end_ts: str             # When it went back to zero, or the last quote seen.
+    end_ts: str             # When it went back to zero, or the last book seen.
     seconds: float
     peak_ts: str
     peak_edge: float        # Net dollars per contract at the top of book, at the peak.

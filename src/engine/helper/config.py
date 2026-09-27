@@ -65,7 +65,7 @@ GAME_WINDOW_DAYS = 7        # Games further out than this are not recorded.
 
 # SCANNING, scan.py
 
-MAX_QUOTE_AGE = 60          # Seconds. A member whose newest book is older than this is left out, it may be stale.
+MAX_BOOK_AGE = 60           # Seconds. A member whose newest book is older than this is left out, it may be stale.
 TARGET_ANNUAL_PCT = 10      # The return an opportunity must beat to be worth the risk.
 LOG_PROFIT_DOLLARS = 10     # Live episodes worth at least this at the peak are logged as they end.
 

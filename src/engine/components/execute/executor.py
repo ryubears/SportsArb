@@ -90,7 +90,7 @@ class Executor:
     """
     Turns scanner signals into trades against the recorder's books. A
     subclass says how an order is filled, through fill() and sell_back().
-    books is a function returning the newest quotes keyed by (venue, contract_id).
+    books is a function returning the newest Book of each contract, keyed by (venue, contract_id).
     cash is the money on each venue, with reserve(), release(), and book().
     """
 
@@ -117,19 +117,19 @@ class Executor:
 
     # ORDERS, which each subclass fills its own way.
 
-    def book(self, key):
+    def fresh_book(self, key):
         """
         The newest book for a contract, or None when there is none or it has
-        not changed for more than config.MAX_QUOTE_AGE seconds, the same rule
+        not changed for more than config.MAX_BOOK_AGE seconds, the same rule
         the scanner prices by. A market that has closed may stop changing
         rather than empty its book, and its last book cannot be traded, so
         an order or a flatten treats a stale book as no book. A quiet market
         that is still open waits for its next change.
         """
-        quote = self.books().get(key)
-        if quote is None or seconds_between(quote.ts, self.clock()) > config.MAX_QUOTE_AGE:
+        book = self.books().get(key)
+        if book is None or seconds_between(book.ts, self.clock()) > config.MAX_BOOK_AGE:
             return None
-        return quote
+        return book
 
     async def fill(self, trade, leg, purpose):
         """
@@ -177,7 +177,7 @@ class Executor:
         long_leg, short_leg = sorted(legs, key=lambda l: l.held, reverse=True)
         excess = long_leg.held - short_leg.held
         average = long_leg.cost / long_leg.held
-        long_book, short_book = self.book(long_leg.key), self.book(short_leg.key)
+        long_book, short_book = self.fresh_book(long_leg.key), self.fresh_book(short_leg.key)
         sell_value = buy_value = None
         selling = buying = []
         buyable = 0

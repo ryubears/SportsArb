@@ -120,9 +120,9 @@ recorded depth would have filled at the peak, and the return on the capital
 tied up, annualized as if held until the bet pays out. While an episode
 is open the scanner offers it to each executor on every update until that
 executor takes a trade, and then not again: paper orders take nothing out
-of the recorded books, so a second trade on the same quotes would count
-the same contracts twice. The live executor is offered it first. The edge
-coming back after it has gone is a new episode.
+of the books they fill against, so a second trade on the same books would
+count the same contracts twice. The live executor is offered it first. The
+edge coming back after it has gone is a new episode.
 
 **execute/** trades the signal. **executor.py** holds what paper and live
 share, which is everything but how an order is filled. One limit order is

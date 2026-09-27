@@ -69,7 +69,7 @@ def test_a_feed_in_its_own_process_follows_the_catalog_and_comes_back_with_a_gap
     monkeypatch.setattr(streams, "log", logs.append)
 
     def held():
-        return {contract_id for venue, contract_id in r.latest if venue == "polymarket_us"}
+        return {contract_id for venue, contract_id in r.books if venue == "polymarket_us"}
 
     async def scenario():
         s = streams.Streams(r, {"polymarket_us": scripted_feed.ScriptedStream, "kalshi": scripted_feed.ScriptedStream}, processes=True)

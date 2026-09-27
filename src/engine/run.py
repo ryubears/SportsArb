@@ -165,7 +165,7 @@ class Session:
         self.sport = sport
         self.notifier = notify.Notifier(conn, log)
         # The executors trade against the recorder's books, which exist once the recorder does, below.
-        self.desks = [Desk(mode, conn, lambda: self.recorder.latest, self.notifier) for mode in executors] if with_scanner else []
+        self.desks = [Desk(mode, conn, lambda: self.recorder.books, self.notifier) for mode in executors] if with_scanner else []
         self.scanner = scan.Scanner(conn, sport, log, [d.executor.signal for d in self.desks]) if with_scanner else None
         self.recorder = Recorder(conn, self.scanner)
         self.streams = Streams(self.recorder)
@@ -207,7 +207,7 @@ class Session:
         """
         now = now_iso()
         if self.scanner:
-            self.scanner.tick(self.recorder.latest, now)
+            self.scanner.tick(self.recorder.books, now)
         for desk in self.desks:
             desk.tick(now, time.time())
         if self.scanner and time.time() - self.last_summary >= config.SUMMARY_SECONDS:

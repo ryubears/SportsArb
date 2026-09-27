@@ -62,7 +62,7 @@ class Scanner:
     Tracks episodes for the pairs of a sport from a map of the newest
     books, keyed by (venue, contract_id). Only the pairs a contract belongs
     to are priced when its book changes. A member is left out while its book
-    is older than config.MAX_QUOTE_AGE or missing from the map, which is how the
+    is older than config.MAX_BOOK_AGE or missing from the map, which is how the
     recorder says a venue's books went unseen. Groups and fee schedules come
     from the database and are reloaded after each catalog refresh. Every
     finished episode is stored at once, and the big ones are logged. Each
@@ -104,23 +104,23 @@ class Scanner:
         for pair_id in [pair_id for pair_id in self.episodes if pair_id not in self.pairs]:
             self.close(pair_id, now_iso())
 
-    def price(self, pair, latest, now):
+    def price(self, pair, books, now):
         """
         The best trade across the pair's members whose books are fresh, as a Priced, or None.
         """
         members = [m for m in pair["members"]
-                   if (m["venue"], m["contract_id"]) in latest
-                   and seconds_between(latest[(m["venue"], m["contract_id"])].ts, now) <= config.MAX_QUOTE_AGE]
+                   if (m["venue"], m["contract_id"]) in books
+                   and seconds_between(books[(m["venue"], m["contract_id"])].ts, now) <= config.MAX_BOOK_AGE]
         if len(members) < 2:
             return None
-        return best_trade(members, latest, self.fee_infos)
+        return best_trade(members, books, self.fee_infos)
 
-    def update(self, pair_id, latest, now):
+    def update(self, pair_id, books, now):
         """
         Open, extend, or end the episode for one pair from the current books.
         """
         pair = self.pairs[pair_id]
-        priced = self.price(pair, latest, now)
+        priced = self.price(pair, books, now)
         episode = self.episodes.get(pair_id)
         if priced is not None and priced.edge > 0:
             if episode is None:
@@ -133,19 +133,19 @@ class Scanner:
         elif episode is not None:
             self.close(pair_id, now)
 
-    def on_book(self, venue, contract_id, latest, now):
+    def on_book(self, venue, contract_id, books, now):
         """
         Price every pair this contract belongs to.
         """
         for pair_id in self.by_contract.get((venue, contract_id), ()):
-            self.update(pair_id, latest, now)
+            self.update(pair_id, books, now)
 
-    def tick(self, latest, now):
+    def tick(self, books, now):
         """
         Price every open episode again, so ones whose books went stale or unseen end.
         """
         for pair_id in list(self.episodes):
-            self.update(pair_id, latest, now)
+            self.update(pair_id, books, now)
 
     def summary(self):
         """

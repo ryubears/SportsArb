@@ -6,7 +6,7 @@ side of the Kalshi contract, on a game half an hour past kickoff at NOW.
 Neither venue charges a fee, so the tests' arithmetic comes out exact.
 """
 
-from db.models import Quote
+from db.models import Book
 
 NO_PM_FEES = {"feeCoefficient": 0}                              # Polymarket US without its taker fee.
 NO_K_FEES = {"fee_type": "quadratic", "fee_multiplier": 0}      # Kalshi without its taker fee.
@@ -23,8 +23,8 @@ def books(pm_bid=0.44, pm_ask=0.45, k_bid=0.53, k_ask=0.54, size=100):
     """
     Books where yes is cheapest on Polymarket US at the ask and no is cheapest on Kalshi through the bid.
     """
-    return {("polymarket_us", "pm"): Quote("polymarket_us", "pm", NOW, [[pm_bid, size]], [[pm_ask, size]]),
-            ("kalshi", "k"): Quote("kalshi", "k", NOW, [[k_bid, size]], [[k_ask, size]])}
+    return {("polymarket_us", "pm"): Book("polymarket_us", "pm", NOW, [[pm_bid, size]], [[pm_ask, size]]),
+            ("kalshi", "k"): Book("kalshi", "k", NOW, [[k_bid, size]], [[k_ask, size]])}
 
 
 def stored(conn, table="trades"):
