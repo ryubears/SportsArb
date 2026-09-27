@@ -86,6 +86,15 @@ class Allocator:
         held = self.deployed()
         return active, {venue: (self.cash[venue] + sum(held.get(key, {}).get(venue, 0.0) for key in active)) / len(active) for venue in VENUES}
 
+    def bounded(self, cap):
+        """
+        A cap within the mode's range. Under the least, paper sends nothing and live sends the least.
+        """
+        least, most = cap_range(self.mode)
+        if cap < least:
+            return least if self.mode == "live" else 0
+        return min(cap, most)
+
     def cap(self, pair, now):
         """
         Contracts one trade on this pair may hold right now. Zero when the
@@ -99,15 +108,6 @@ class Allocator:
         if any(shares[venue] - held.get(venue, 0.0) <= 0 for venue in VENUES):
             return 0
         return self.bounded(int(min(shares.values()) / config.DOLLARS_PER_CAP))
-
-    def bounded(self, cap):
-        """
-        A cap within the mode's range. Under the least, paper sends nothing and live sends the least.
-        """
-        least, most = cap_range(self.mode)
-        if cap < least:
-            return least if self.mode == "live" else 0
-        return min(cap, most)
 
     def summary(self, now):
         """

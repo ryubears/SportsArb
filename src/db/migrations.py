@@ -16,19 +16,52 @@ schema is already there.
 from db import schema
 
 LEDGER_START_BALANCE = 10000.0      # What each venue started with when ledgers only held movements.
+# How a trade settled, in the columns trades carried before settlements had a table of their own.
+SETTLEMENT_COLUMNS = ["yes_result", "yes_payout", "yes_settled_at", "no_result", "no_payout", "no_settled_at", "settled_at"]
 
 
-def migrate(conn, fresh):
+def copy_settlements(conn, table):
     """
-    Run the steps this database has not had, recording each. A fresh database only records the last step.
+    Copy the settlement columns of a trades table in the older shape into the settlements table.
     """
-    version = len(STEPS) if fresh else conn.execute("PRAGMA user_version").fetchone()[0]
-    for number, step in enumerate(STEPS[version:], start=version + 1):
-        step(conn)
-        conn.execute(f"PRAGMA user_version = {number}")
-    if fresh:
-        conn.execute(f"PRAGMA user_version = {len(STEPS)}")
-    conn.commit()
+    conn.execute(f"""INSERT OR IGNORE INTO settlements (trade_id, settled_at, yes_result, yes_payout, yes_settled_at,
+                                                        no_result, no_payout, no_settled_at)
+                     SELECT id, settled_at, yes_result, yes_payout, yes_settled_at, no_result, no_payout, no_settled_at
+                     FROM {table} WHERE settled_at IS NOT NULL""")
+
+
+def migrate_pair_ids(conn):
+    """
+    Pairs used to be keyed by their label, copied onto bets, opportunities,
+    and trades. Give them an id and point the other tables at it. Episodes
+    and trades of pairs that had already left the catalog get a bare pair
+    row, so their id resolves.
+    """
+    if "id" not in [r[1] for r in conn.execute("PRAGMA table_info(pairs)")]:
+        conn.execute("ALTER TABLE pairs RENAME TO pairs_old")
+        schema.create(conn)
+        conn.execute("""INSERT INTO pairs (label, kind, season, game_date, team_a, team_b, subject, line, venues, contracts, flags, matched_at)
+                        SELECT label, kind, season, game_date, team_a, team_b, subject, line, venues, contracts, flags, matched_at FROM pairs_old""")
+        conn.execute("DROP TABLE pairs_old")
+    if "pair_label" in [r[1] for r in conn.execute("PRAGMA table_info(bets)")]:
+        conn.execute("ALTER TABLE bets ADD COLUMN pair_id INTEGER")
+        conn.execute("UPDATE bets SET pair_id = (SELECT id FROM pairs WHERE label = bets.pair_label)")
+        conn.execute("ALTER TABLE bets DROP COLUMN pair_label")
+    for table, first_ts in (("opportunities", "start_ts"), ("trades", "signal_ts")):
+        old_columns = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+        if "label" not in old_columns:
+            continue
+        conn.execute(f"""INSERT OR IGNORE INTO pairs (label, kind, venues, contracts, flags, matched_at)
+                         SELECT label, kind, '', 0, '[]', MIN({first_ts}) FROM {table} GROUP BY label""")
+        conn.execute(f"ALTER TABLE {table} RENAME TO {table}_old")
+        schema.create(conn)
+        shared = [c for c, in conn.execute(f"SELECT name FROM pragma_table_info('{table}')") if c in old_columns]
+        conn.execute(f"""INSERT INTO {table} ({', '.join(shared)}, pair_id)
+                         SELECT {', '.join('o.' + c for c in shared)}, p.id FROM {table}_old o JOIN pairs p ON p.label = o.label""")
+        if table == "trades" and "settled_at" in old_columns:
+            # The table was rebuilt from today's schema, where settlements have a table of their own.
+            copy_settlements(conn, "trades_old")
+        conn.execute(f"DROP TABLE {table}_old")
 
 
 def step_1_catch_up(conn):
@@ -76,40 +109,6 @@ def step_1_catch_up(conn):
     schema.create(conn)
 
 
-def migrate_pair_ids(conn):
-    """
-    Pairs used to be keyed by their label, copied onto bets, opportunities,
-    and trades. Give them an id and point the other tables at it. Episodes
-    and trades of pairs that had already left the catalog get a bare pair
-    row, so their id resolves.
-    """
-    if "id" not in [r[1] for r in conn.execute("PRAGMA table_info(pairs)")]:
-        conn.execute("ALTER TABLE pairs RENAME TO pairs_old")
-        schema.create(conn)
-        conn.execute("""INSERT INTO pairs (label, kind, season, game_date, team_a, team_b, subject, line, venues, contracts, flags, matched_at)
-                        SELECT label, kind, season, game_date, team_a, team_b, subject, line, venues, contracts, flags, matched_at FROM pairs_old""")
-        conn.execute("DROP TABLE pairs_old")
-    if "pair_label" in [r[1] for r in conn.execute("PRAGMA table_info(bets)")]:
-        conn.execute("ALTER TABLE bets ADD COLUMN pair_id INTEGER")
-        conn.execute("UPDATE bets SET pair_id = (SELECT id FROM pairs WHERE label = bets.pair_label)")
-        conn.execute("ALTER TABLE bets DROP COLUMN pair_label")
-    for table, first_ts in (("opportunities", "start_ts"), ("trades", "signal_ts")):
-        old_columns = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
-        if "label" not in old_columns:
-            continue
-        conn.execute(f"""INSERT OR IGNORE INTO pairs (label, kind, venues, contracts, flags, matched_at)
-                         SELECT label, kind, '', 0, '[]', MIN({first_ts}) FROM {table} GROUP BY label""")
-        conn.execute(f"ALTER TABLE {table} RENAME TO {table}_old")
-        schema.create(conn)
-        shared = [c for c, in conn.execute(f"SELECT name FROM pragma_table_info('{table}')") if c in old_columns]
-        conn.execute(f"""INSERT INTO {table} ({', '.join(shared)}, pair_id)
-                         SELECT {', '.join('o.' + c for c in shared)}, p.id FROM {table}_old o JOIN pairs p ON p.label = o.label""")
-        if table == "trades" and "settled_at" in old_columns:
-            # The table was rebuilt from today's schema, where settlements have a table of their own.
-            copy_settlements(conn, "trades_old")
-        conn.execute(f"DROP TABLE {table}_old")
-
-
 def step_2_settlements(conn):
     """
     Trades used to carry how they settled in seven columns. Move those to
@@ -152,17 +151,18 @@ def step_4_modes(conn):
             conn.execute(f"ALTER TABLE {table} ADD COLUMN mode TEXT NOT NULL DEFAULT 'paper'")
 
 
-SETTLEMENT_COLUMNS = ["yes_result", "yes_payout", "yes_settled_at", "no_result", "no_payout", "no_settled_at", "settled_at"]
-
-
-def copy_settlements(conn, table):
-    """
-    Copy the settlement columns of a trades table in the older shape into the settlements table.
-    """
-    conn.execute(f"""INSERT OR IGNORE INTO settlements (trade_id, settled_at, yes_result, yes_payout, yes_settled_at,
-                                                        no_result, no_payout, no_settled_at)
-                     SELECT id, settled_at, yes_result, yes_payout, yes_settled_at, no_result, no_payout, no_settled_at
-                     FROM {table} WHERE settled_at IS NOT NULL""")
-
 # Step n brings a database from user_version n - 1 to n. Only ever add to the end.
 STEPS = [step_1_catch_up, step_2_settlements, step_3_opening_balances, step_4_modes]
+
+
+def migrate(conn, fresh):
+    """
+    Run the steps this database has not had, recording each. A fresh database only records the last step.
+    """
+    version = len(STEPS) if fresh else conn.execute("PRAGMA user_version").fetchone()[0]
+    for number, step in enumerate(STEPS[version:], start=version + 1):
+        step(conn)
+        conn.execute(f"PRAGMA user_version = {number}")
+    if fresh:
+        conn.execute(f"PRAGMA user_version = {len(STEPS)}")
+    conn.commit()

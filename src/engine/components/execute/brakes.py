@@ -64,6 +64,25 @@ class Brakes:
             self.halted = f"halted before this start, remove {HALT_FILE} to resume: {HALT_FILE.read_text().strip()}"
             self.log(f"live trading {self.halted}")
 
+    # HALTING
+
+    def halt(self, reason):
+        """
+        Stop sending orders, keep the reason in HALT_FILE, log it, and tell a human. Only the first reason counts.
+        """
+        if self.halted:
+            return
+        now = self.clock()
+        self.halted, self.since = reason, now
+        HALT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        HALT_FILE.write_text(f"{now[:19]} UTC {reason}\n")
+        self.log(f"live trading halted: {reason}")
+        if self.notifier:
+            self.notifier.send("halt", "SportsArb live trading halted",
+                               f"Live trading stopped at {now[:19]} UTC and sends no more orders.\n\n{reason}\n\n"
+                               f"What is held is still settled. Balances: {self.cash.summary()}.\n\n"
+                               f"Once the venues are checked, remove {HALT_FILE} and restart the process to resume.", now)
+
     # ORDERS
 
     def watch(self, order):
@@ -80,6 +99,14 @@ class Brakes:
             statuses = database.recent_order_statuses(self.conn, config.LIVE_REJECT_LIMIT, venue=order.venue, since=self.since)
             if len(statuses) >= config.LIVE_REJECT_LIMIT and set(statuses) == {"rejected"}:
                 self.halt(f"{order.venue} refused {len(statuses)} orders in a row, the last with: {order.note}")
+
+    # MONEY
+
+    def capital(self):
+        """
+        The live money in all: the cash on both venues, what is held back for orders in flight included, and what open live trades hold, at cost.
+        """
+        return self.cash.total() + database.load_open_cost(self.conn, self.cash.mode)
 
     # RESULTS
 
@@ -120,30 +147,3 @@ class Brakes:
         if len(decided) >= config.LIVE_MIN_RESULTS and losing / len(decided) >= config.LIVE_MAX_LOSING_SHARE:
             self.halt(f"{losing} of the {len(decided)} live trades decided in the last {config.LIVE_RESULT_HOURS} hours lost money, "
                       f"at or over the {config.LIVE_MAX_LOSING_SHARE:.0%} limit")
-
-    # MONEY
-
-    def capital(self):
-        """
-        The live money in all: the cash on both venues, what is held back for orders in flight included, and what open live trades hold, at cost.
-        """
-        return self.cash.total() + database.load_open_cost(self.conn, self.cash.mode)
-
-    # HALTING
-
-    def halt(self, reason):
-        """
-        Stop sending orders, keep the reason in HALT_FILE, log it, and tell a human. Only the first reason counts.
-        """
-        if self.halted:
-            return
-        now = self.clock()
-        self.halted, self.since = reason, now
-        HALT_FILE.parent.mkdir(parents=True, exist_ok=True)
-        HALT_FILE.write_text(f"{now[:19]} UTC {reason}\n")
-        self.log(f"live trading halted: {reason}")
-        if self.notifier:
-            self.notifier.send("halt", "SportsArb live trading halted",
-                               f"Live trading stopped at {now[:19]} UTC and sends no more orders.\n\n{reason}\n\n"
-                               f"What is held is still settled. Balances: {self.cash.summary()}.\n\n"
-                               f"Once the venues are checked, remove {HALT_FILE} and restart the process to resume.", now)

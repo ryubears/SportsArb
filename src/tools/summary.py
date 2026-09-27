@@ -148,16 +148,30 @@ def print_opportunities(conn, since, hours):
                  for l, t, e, s, cap, p, r, a, d, sec, lv in best])
 
 
-def print_trades(conn, since, hours):
+def print_paper_money(conn):
     """
-    The trades of each mode apart, paper first, since paper and live money never mix.
+    The paper balances from the ledger and the paper transfers. Live money is on the venues, see live_check.py.
     """
-    modes = [m for m, in conn.execute("SELECT DISTINCT mode FROM trades ORDER BY mode DESC")]
-    if not modes:
-        print("\ntrades: none yet, the recorder's executors write them")
-        return
-    for mode in modes:
-        print_mode_trades(conn, since, hours, mode)
+    balances = query_rows(conn, """
+        SELECT l.venue, ROUND(l.balance, 2), ROUND(COALESCE((SELECT SUM(amount) FROM transfers WHERE to_venue = l.venue AND arrived_at IS NULL), 0))
+        FROM ledger l WHERE l.id IN (SELECT MAX(id) FROM ledger GROUP BY venue) ORDER BY l.venue""")
+    if balances:
+        print("  paper balances from the ledger: " + ", ".join(f"{v} {a:,.2f}$" + (f" (+{p:,.0f}$ pending)" if p else "") for v, a, p in balances))
+    transfers = query_rows(conn, "SELECT from_venue, to_venue, ROUND(amount), reason, substr(requested_at, 1, 10), substr(expected_at, 1, 10), substr(arrived_at, 1, 10) FROM transfers ORDER BY id DESC LIMIT 5")
+    if transfers:
+        print_table("paper transfers", ("from", "to", "amount $", "reason", "requested", "status"),
+                    [(f, t, a, r, q, f"arrived {v}" if v else f"in transit, due {e}") for f, t, a, r, q, e, v in transfers])
+
+
+def print_live_orders(conn, since, hours):
+    """
+    The real orders sent in the window, by venue, purpose, and what came back.
+    """
+    body = query_rows(conn, """
+        SELECT venue, purpose, status, COUNT(*), SUM(quantity), SUM(filled), ROUND(SUM(dollars), 2), ROUND(SUM(fees), 2), ROUND(AVG(latency_ms))
+        FROM orders WHERE sent_at >= ? GROUP BY venue, purpose, status ORDER BY venue, purpose, status""", (since,))
+    if body:
+        print_table(f"live orders, last {hours} hours", ("venue", "purpose", "status", "orders", "asked", "filled", "dollars $", "fees $", "avg ms"), body)
 
 
 def print_mode_trades(conn, since, hours, mode):
@@ -207,30 +221,16 @@ def print_mode_trades(conn, since, hours, mode):
         print_live_orders(conn, since, hours)
 
 
-def print_paper_money(conn):
+def print_trades(conn, since, hours):
     """
-    The paper balances from the ledger and the paper transfers. Live money is on the venues, see live_check.py.
+    The trades of each mode apart, paper first, since paper and live money never mix.
     """
-    balances = query_rows(conn, """
-        SELECT l.venue, ROUND(l.balance, 2), ROUND(COALESCE((SELECT SUM(amount) FROM transfers WHERE to_venue = l.venue AND arrived_at IS NULL), 0))
-        FROM ledger l WHERE l.id IN (SELECT MAX(id) FROM ledger GROUP BY venue) ORDER BY l.venue""")
-    if balances:
-        print("  paper balances from the ledger: " + ", ".join(f"{v} {a:,.2f}$" + (f" (+{p:,.0f}$ pending)" if p else "") for v, a, p in balances))
-    transfers = query_rows(conn, "SELECT from_venue, to_venue, ROUND(amount), reason, substr(requested_at, 1, 10), substr(expected_at, 1, 10), substr(arrived_at, 1, 10) FROM transfers ORDER BY id DESC LIMIT 5")
-    if transfers:
-        print_table("paper transfers", ("from", "to", "amount $", "reason", "requested", "status"),
-                    [(f, t, a, r, q, f"arrived {v}" if v else f"in transit, due {e}") for f, t, a, r, q, e, v in transfers])
-
-
-def print_live_orders(conn, since, hours):
-    """
-    The real orders sent in the window, by venue, purpose, and what came back.
-    """
-    body = query_rows(conn, """
-        SELECT venue, purpose, status, COUNT(*), SUM(quantity), SUM(filled), ROUND(SUM(dollars), 2), ROUND(SUM(fees), 2), ROUND(AVG(latency_ms))
-        FROM orders WHERE sent_at >= ? GROUP BY venue, purpose, status ORDER BY venue, purpose, status""", (since,))
-    if body:
-        print_table(f"live orders, last {hours} hours", ("venue", "purpose", "status", "orders", "asked", "filled", "dollars $", "fees $", "avg ms"), body)
+    modes = [m for m, in conn.execute("SELECT DISTINCT mode FROM trades ORDER BY mode DESC")]
+    if not modes:
+        print("\ntrades: none yet, the recorder's executors write them")
+        return
+    for mode in modes:
+        print_mode_trades(conn, since, hours, mode)
 
 
 # MAIN

@@ -76,17 +76,25 @@ class LiveExecutor(Executor):
 
     # ORDERS
 
-    async def fill(self, trade, leg, purpose):
-        return await self.send(trade, leg, purpose, "buy", leg.quantity, leg.limit)
-
-    async def sell_back(self, trade, leg, quantity, floor):
-        return await self.send(trade, leg, "flatten", "sell", quantity, floor)
-
-    def flatten_limit(self, reached):
+    def set_trade_aside(self, trade, order):
         """
-        No higher than the deepest price the books said the order would pay.
+        Send no more orders for a trade one of whose orders has an unknown outcome, and tell a human which order to look up.
         """
-        return reached
+        if trade.id in self.set_aside:
+            return
+        self.set_aside[trade.id] = f"set aside, order {order.id} has an unknown outcome"
+        self.log(f"live trade {trade.id} set aside: order {order.id}, {order.action} {order.quantity} {order.outcome} of {order.venue} "
+                 f"{order.contract_id}, has an unknown outcome: {order.note}")
+        if self.notifier:
+            venue_id = f", venue order id {order.venue_order_id}" if order.venue_order_id else ""
+            self.notifier.send("set_aside", f"SportsArb live trade {trade.id} set aside",
+                               f"Order {order.id} of live trade {trade.id} got no answer that says what happened: {order.note}.\n\n"
+                               f"It was an order to {order.action} {order.quantity} {order.outcome} of {order.venue} {order.contract_id} "
+                               f"at {order.limit_price:.4f}, sent at {order.sent_at[:19]} UTC, client id {order.client_id}{venue_id}.\n\n"
+                               f"No more orders are sent for the trade, since what it holds is unknown. Look the order up on the venue, "
+                               f"and flatten what the trade holds by hand if it traded.\n\n"
+                               f"Live trading goes on, and halts if {config.LIVE_UNKNOWN_LIMIT} of the last {config.LIVE_ORDER_WINDOW} "
+                               f"orders have an unknown outcome.", self.clock())
 
     async def send(self, trade, leg, purpose, action, quantity, price):
         """
@@ -118,25 +126,17 @@ class LiveExecutor(Executor):
         note = f"{answer.status}: {answer.note}" if answer.note else ""
         return Fill(answer.filled, answer.dollars, order.latency_ms, order.answered_at, note)
 
-    def set_trade_aside(self, trade, order):
+    async def fill(self, trade, leg, purpose):
+        return await self.send(trade, leg, purpose, "buy", leg.quantity, leg.limit)
+
+    async def sell_back(self, trade, leg, quantity, floor):
+        return await self.send(trade, leg, "flatten", "sell", quantity, floor)
+
+    def flatten_limit(self, reached):
         """
-        Send no more orders for a trade one of whose orders has an unknown outcome, and tell a human which order to look up.
+        No higher than the deepest price the books said the order would pay.
         """
-        if trade.id in self.set_aside:
-            return
-        self.set_aside[trade.id] = f"set aside, order {order.id} has an unknown outcome"
-        self.log(f"live trade {trade.id} set aside: order {order.id}, {order.action} {order.quantity} {order.outcome} of {order.venue} "
-                 f"{order.contract_id}, has an unknown outcome: {order.note}")
-        if self.notifier:
-            venue_id = f", venue order id {order.venue_order_id}" if order.venue_order_id else ""
-            self.notifier.send("set_aside", f"SportsArb live trade {trade.id} set aside",
-                               f"Order {order.id} of live trade {trade.id} got no answer that says what happened: {order.note}.\n\n"
-                               f"It was an order to {order.action} {order.quantity} {order.outcome} of {order.venue} {order.contract_id} "
-                               f"at {order.limit_price:.4f}, sent at {order.sent_at[:19]} UTC, client id {order.client_id}{venue_id}.\n\n"
-                               f"No more orders are sent for the trade, since what it holds is unknown. Look the order up on the venue, "
-                               f"and flatten what the trade holds by hand if it traded.\n\n"
-                               f"Live trading goes on, and halts if {config.LIVE_UNKNOWN_LIMIT} of the last {config.LIVE_ORDER_WINDOW} "
-                               f"orders have an unknown outcome.", self.clock())
+        return reached
 
     # RESULTS, which the brakes check whenever a trade may have been decided.
 

@@ -64,26 +64,6 @@ class Notifier:
         self.sender = sender
         self.tasks = set()          # Emails being sent.
 
-    def send(self, kind, subject, body, now=None):
-        """
-        Raise an alert at now, the current time unless given. Inside the
-        running loop the email goes out in a background thread, outside it at once.
-        """
-        alert = Alert(ts=now or now_iso(), kind=kind, subject=subject, body=body)
-        database.insert_alert(self.conn, alert)
-        self.log(f"alert: {subject}")
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            self.finish(alert, self.deliver(subject, body))
-            return alert
-        task = asyncio.create_task(asyncio.to_thread(self.deliver, subject, body))
-        self.tasks.add(task)
-        task.add_done_callback(self.tasks.discard)
-        task.add_done_callback(lambda t: t.cancelled() or t.exception() or self.finish(alert, t.result()))
-        task.add_done_callback(on_failure(self.log, "alert email"))
-        return alert
-
     def deliver(self, subject, body):
         """
         Email one alert. Returns None when it went out, or why it did not.
@@ -108,3 +88,23 @@ class Notifier:
         database.update_alert(self.conn, alert)
         if error:
             self.log(f"alert {alert.id} was not emailed: {error}")
+
+    def send(self, kind, subject, body, now=None):
+        """
+        Raise an alert at now, the current time unless given. Inside the
+        running loop the email goes out in a background thread, outside it at once.
+        """
+        alert = Alert(ts=now or now_iso(), kind=kind, subject=subject, body=body)
+        database.insert_alert(self.conn, alert)
+        self.log(f"alert: {subject}")
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            self.finish(alert, self.deliver(subject, body))
+            return alert
+        task = asyncio.create_task(asyncio.to_thread(self.deliver, subject, body))
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+        task.add_done_callback(lambda t: t.cancelled() or t.exception() or self.finish(alert, t.result()))
+        task.add_done_callback(on_failure(self.log, "alert email"))
+        return alert

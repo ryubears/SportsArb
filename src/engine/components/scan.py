@@ -79,6 +79,17 @@ class Scanner:
         self.finished = []                  # (kind, Opportunity) for episodes ended since the last summary.
         self.reload()
 
+    def close(self, pair_id, now):
+        """
+        End an episode, store it, and log it when it was worth something.
+        """
+        episode = self.episodes.pop(pair_id)
+        o = finish(episode["pair"], episode["peak"], episode["start_ts"], now)
+        database.insert_opportunities(self.conn, [o])
+        self.finished.append((episode["pair"]["kind"], o))
+        if o.peak_profit >= config.LOG_PROFIT_DOLLARS:
+            self.log(f"episode {episode['pair']['label']}: {o.trade}, {100 * o.peak_edge:.1f}c x {o.peak_size:.0f} = {o.peak_profit:.2f}$, lasted {o.seconds:.1f}s")
+
     def reload(self):
         """
         Load the pairs and fee schedules again, ending open episodes of pairs that are gone.
@@ -104,20 +115,6 @@ class Scanner:
             return None
         return best_trade(members, latest, self.fee_infos)
 
-    def on_book(self, venue, contract_id, latest, now):
-        """
-        Price every pair this contract belongs to.
-        """
-        for pair_id in self.by_contract.get((venue, contract_id), ()):
-            self.update(pair_id, latest, now)
-
-    def tick(self, latest, now):
-        """
-        Price every open episode again, so ones whose books went stale or unseen end.
-        """
-        for pair_id in list(self.episodes):
-            self.update(pair_id, latest, now)
-
     def update(self, pair_id, latest, now):
         """
         Open, extend, or end the episode for one pair from the current books.
@@ -136,16 +133,19 @@ class Scanner:
         elif episode is not None:
             self.close(pair_id, now)
 
-    def close(self, pair_id, now):
+    def on_book(self, venue, contract_id, latest, now):
         """
-        End an episode, store it, and log it when it was worth something.
+        Price every pair this contract belongs to.
         """
-        episode = self.episodes.pop(pair_id)
-        o = finish(episode["pair"], episode["peak"], episode["start_ts"], now)
-        database.insert_opportunities(self.conn, [o])
-        self.finished.append((episode["pair"]["kind"], o))
-        if o.peak_profit >= config.LOG_PROFIT_DOLLARS:
-            self.log(f"episode {episode['pair']['label']}: {o.trade}, {100 * o.peak_edge:.1f}c x {o.peak_size:.0f} = {o.peak_profit:.2f}$, lasted {o.seconds:.1f}s")
+        for pair_id in self.by_contract.get((venue, contract_id), ()):
+            self.update(pair_id, latest, now)
+
+    def tick(self, latest, now):
+        """
+        Price every open episode again, so ones whose books went stale or unseen end.
+        """
+        for pair_id in list(self.episodes):
+            self.update(pair_id, latest, now)
 
     def summary(self):
         """

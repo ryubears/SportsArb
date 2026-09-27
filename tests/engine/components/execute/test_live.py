@@ -262,6 +262,16 @@ def test_orders_the_latency_stopgap_turned_away_do_not_count_as_refusals(tmp_pat
     assert "yes leg unfilled: latency stopgap" in stored(conn, "trades")[0]["hedge"]
 
 
+def nothing_and_the_money_gone(cash):
+    """
+    A scripted Kalshi answer that fills nothing while the venue's cash falls to 5.10, as a reading would show.
+    """
+    def answer(quantity, price):
+        cash.read["kalshi"] = 5.10
+        return fills(0)(quantity, price)
+    return answer
+
+
 def test_new_trades_leave_five_dollars_on_each_venue_that_flattening_may_use(tmp_path):
     latest = books()
     logs = []
@@ -281,13 +291,3 @@ def test_new_trades_leave_five_dollars_on_each_venue_that_flattening_may_use(tmp
     cash.read["kalshi"] = 20.0                                          # A payout arrives.
     ex.tick(NOW)
     assert logs[-1] == "live kalshi has 17.18$, back over its 5.00$ floor"         # 20 read, less the 2.82 bought since.
-
-
-def nothing_and_the_money_gone(cash):
-    """
-    A scripted Kalshi answer that fills nothing while the venue's cash falls to 5.10, as a reading would show.
-    """
-    def answer(quantity, price):
-        cash.read["kalshi"] = 5.10
-        return fills(0)(quantity, price)
-    return answer

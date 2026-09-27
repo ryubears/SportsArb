@@ -190,6 +190,16 @@ class Session:
             if len(self.streams.streams[venue]) > 1:
                 log(f"{venue} needs {len(self.streams.streams[venue])} connections for {len(contract_ids)} contracts")
 
+    def summaries(self):
+        """
+        Log one line per component about what it did since the last summary.
+        """
+        if self.scanner:
+            log(self.scanner.summary())
+        for desk in self.desks:
+            for line in desk.summaries(now_iso()):
+                log(line)
+
     def tick(self):
         """
         One pass of the timer: write the changed books, price them, settle
@@ -218,16 +228,6 @@ class Session:
         for desk in self.desks:
             desk.allocator.reload()
             log(desk.allocator.summary(now_iso()))
-
-    def summaries(self):
-        """
-        Log one line per component about what it did since the last summary.
-        """
-        if self.scanner:
-            log(self.scanner.summary())
-        for desk in self.desks:
-            for line in desk.summaries(now_iso()):
-                log(line)
 
     async def close(self):
         """
