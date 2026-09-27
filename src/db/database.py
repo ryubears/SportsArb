@@ -13,7 +13,7 @@ SQLite browser. The tables follow the pipeline in order.
     trades         every trade the executors made, paper or live, by execute/
     settlements    how each trade's legs paid out, by settle.py
     orders         every real order the live executor sent, by execute/live.py
-    ledger         every paper cash movement per venue, by balances.py
+    ledger         every paper cash movement per venue, by balance/paper.py
     alerts         everything the live process emailed a human, by notify.py
     transfers      paper rebalancing transfers between venues, by rebalance.py
 
@@ -365,6 +365,16 @@ def has_open_trades(conn, mode):
           AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id) LIMIT 1""", (mode,)).fetchone() is not None
 
 
+def load_open_cost(conn, mode):
+    """
+    Dollars paid for what the unsettled trades of one mode still hold.
+    """
+    return conn.execute("""
+        SELECT COALESCE(SUM(t.yes_cost + t.no_cost), 0) FROM trades t
+        WHERE t.mode = ? AND t.yes_held + t.no_held > 0
+          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""", (mode,)).fetchone()[0]
+
+
 def load_open_game_costs(conn, mode):
     """
     What each unsettled trade of one mode on a game still holds, as
@@ -412,6 +422,45 @@ def update_order(conn, order):
     """
     conn.execute(update_sql("orders", ORDER_ANSWER), asdict(order))
     conn.commit()
+
+
+def recent_order_statuses(conn, count, venue=None, since=None):
+    """
+    The statuses of the newest answered live orders, newest first, at most
+    count of them, only one venue's when given, and only those sent after
+    since when given.
+    """
+    sql, params = "SELECT status FROM orders WHERE status != 'sent'", []
+    if venue:
+        sql, params = sql + " AND venue = ?", params + [venue]
+    if since:
+        sql, params = sql + " AND sent_at > ?", params + [since]
+    return [status for status, in conn.execute(sql + " ORDER BY id DESC LIMIT ?", params + [count])]
+
+
+def load_trade_cash(conn, mode, since):
+    """
+    The cash each done trade of one mode moved, for those with an order
+    answered or a settlement at or after since, as dicts with its id,
+    yes_held and no_held, settled_at and payouts once it has settled, the
+    dollars its orders bought and sold, fees included, the time of its last
+    answer, and unknown, how many of its orders had an unknown outcome.
+    Only live trades have orders, so paper ones show nothing bought.
+    """
+    return [dict(r) for r in conn.execute("""
+        SELECT t.id, t.yes_held, t.no_held, s.settled_at,
+               COALESCE(s.yes_payout, 0) + COALESCE(s.no_payout, 0) AS payouts,
+               COALESCE(SUM(CASE WHEN o.action = 'buy' THEN o.dollars END), 0) AS bought,
+               COALESCE(SUM(CASE WHEN o.action = 'sell' THEN o.dollars END), 0) AS sold,
+               MAX(o.answered_at) AS last_answer,
+               COALESCE(SUM(o.status = 'error'), 0) AS unknown
+        FROM trades t
+        LEFT JOIN settlements s ON s.trade_id = t.id
+        LEFT JOIN orders o ON o.trade_id = t.id
+        WHERE t.mode = ? AND t.status != 'sent'
+        GROUP BY t.id
+        HAVING COALESCE(s.settled_at, MAX(o.answered_at)) >= ?
+        ORDER BY t.id""", (mode, since))]
 
 
 def load_orders(conn, trade_id=None):

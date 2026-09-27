@@ -132,9 +132,14 @@ def signed_headers(method, path):
 INTENTS = {("buy", "yes"): "ORDER_INTENT_BUY_LONG", ("sell", "yes"): "ORDER_INTENT_SELL_LONG",
            ("buy", "no"): "ORDER_INTENT_BUY_SHORT", ("sell", "no"): "ORDER_INTENT_SELL_SHORT"}
 FILL_TYPES = ("EXECUTION_TYPE_FILL", "EXECUTION_TYPE_PARTIAL_FILL")
+# The executions after which an order is done: filled in full, the rest canceled, rejected, or expired.
+FINAL_TYPES = ("EXECUTION_TYPE_FILL", "EXECUTION_TYPE_CANCELED", "EXECUTION_TYPE_REJECTED", "EXECUTION_TYPE_EXPIRED")
+FINAL_STATES = ("ORDER_STATE_FILLED", "ORDER_STATE_CANCELED", "ORDER_STATE_REJECTED", "ORDER_STATE_EXPIRED")
 # The message of an order rejected by the latency stopgap: one not processed within 5 seconds, when the exchange
 # is slow, to spare a fill at a stale price. It reads like a rate limit but is not one, so it counts as unfilled.
 STOPGAP = "Global Rate Limit Exceeded"
+NO_LIQUIDITY = "ORD_REJECT_REASON_NO_LIQUIDITY"     # A rejection for finding nothing to trade, which is also unfilled rather than refused.
+MAX_BLOCK_SECONDS = 5   # How long an order call waits for its order to end, as long as the latency stopgap gives it.
 
 
 def signed_request(method, path, body=None):
@@ -179,7 +184,7 @@ def order_body(slug, action, outcome, quantity, price):
     return {"marketSlug": slug, "intent": INTENTS[(action, outcome)], "type": "ORDER_TYPE_LIMIT",
             "price": {"value": price_text(long_price), "currency": "USD"}, "quantity": quantity,
             "tif": "TIME_IN_FORCE_IMMEDIATE_OR_CANCEL", "manualOrderIndicator": "MANUAL_ORDER_INDICATOR_AUTOMATIC",
-            "synchronousExecution": True}
+            "synchronousExecution": True, "maxBlockTime": str(MAX_BLOCK_SECONDS)}
 
 
 def place_order(slug, action, outcome, quantity, price, client_id):
@@ -189,9 +194,11 @@ def place_order(slug, action, outcome, quantity, price, client_id):
     is 'buy' or 'sell', outcome 'yes' or 'no', and price the worst price per
     contract accepted for that outcome. Execution prices are the long side's,
     since the market's one instrument is its yes side, so a short side fill
-    at p cost 1 - p. An order the latency stopgap turned away is unfilled,
-    not refused. The API takes no id of ours, so client_id is only kept in
-    our own orders table.
+    at p cost 1 - p. An order turned away for having no liquidity or by the
+    latency stopgap is unfilled, not refused. An answer that does not say
+    how the order ended is followed by a look at the order itself, since a
+    returned order id does not mean the order is done. The API takes no id
+    of ours, so client_id is only kept in our own orders table.
     """
     try:
         answer = signed_request("POST", "/orders", order_body(slug, action, outcome, quantity, price))
@@ -202,6 +209,8 @@ def place_order(slug, action, outcome, quantity, price, client_id):
     except Exception as e:
         return orders.unknown(e)
     executions = answer.get("executions") or []
+    if not any(e.get("type") in FINAL_TYPES for e in executions):
+        return look_up(answer, action, outcome, quantity)
     filled, traded, fees = 0, 0.0, 0.0
     for e in executions:
         if e.get("type") not in FILL_TYPES:
@@ -213,11 +222,41 @@ def place_order(slug, action, outcome, quantity, price, client_id):
     rejected = next((e for e in executions if e.get("type") == "EXECUTION_TYPE_REJECTED"), None)
     if rejected and not filled:
         reason = rejected.get("orderRejectReason") or rejected.get("text")
-        if STOPGAP in f"{rejected.get('text')} {rejected.get('orderRejectReason')}":
+        said = f"{rejected.get('text')} {rejected.get('orderRejectReason')}"
+        if STOPGAP in said:
             return orders.Answer(answer.get("id"), "unfilled", 0, 0.0, 0.0, f"latency stopgap: {reason}", answer)
+        if NO_LIQUIDITY in said:
+            return orders.Answer(answer.get("id"), "unfilled", 0, 0.0, 0.0, f"no liquidity: {reason}", answer)
         return orders.Answer(answer.get("id"), "rejected", 0, 0.0, 0.0, reason, answer)
     paid = traded + fees if action == "buy" else traded - fees
     return orders.Answer(answer.get("id"), orders.status(filled, quantity), filled, paid, fees, None, answer)
+
+
+def look_up(answer, action, outcome, quantity):
+    """
+    What became of an order whose answer did not say how it ended, read from
+    the order itself. Its fate is unknown when it has no id, cannot be read,
+    or has still not ended.
+    """
+    order_id = answer.get("id")
+    if not order_id:
+        return orders.unknown(ValueError("the answer has neither an order id nor a final execution"), response={"answer": answer})
+    try:
+        order = signed_request("GET", f"/order/{order_id}")["order"]
+    except Exception as e:
+        return orders.unknown(e, order_id, {"answer": answer})
+    response = {"answer": answer, "order": order}
+    state = order.get("state")
+    if state not in FINAL_STATES:
+        return orders.unknown(ValueError(f"order {order_id} is still {state}"), order_id, response)
+    filled = int(float(order.get("cumQuantity") or 0))
+    if state == "ORDER_STATE_REJECTED" and not filled:
+        return orders.Answer(order_id, "rejected", 0, 0.0, 0.0, state, response)
+    long_price = amount(order.get("avgPx"))
+    traded = filled * (long_price if outcome == "yes" else 1 - long_price)
+    fees = amount(order.get("commissionNotionalTotalCollected"))
+    paid = traded + fees if action == "buy" else traded - fees
+    return orders.Answer(order_id, orders.status(filled, quantity), filled, paid, fees, None, response)
 
 
 # STREAMING

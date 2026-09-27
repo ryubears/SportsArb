@@ -183,7 +183,7 @@ CREATE TABLE IF NOT EXISTS ledger (
 CREATE TABLE IF NOT EXISTS alerts (
     id           INTEGER PRIMARY KEY,
     ts           TEXT NOT NULL,
-    kind         TEXT NOT NULL,     -- 'rebalance' when the live venues drifted apart, 'halt' when live trading stopped.
+    kind         TEXT NOT NULL,     -- 'rebalance' when the live venues drifted apart, 'set_aside' when a live trade's order had an unknown outcome, 'halt' when live trading stopped.
     subject      TEXT NOT NULL,
     body         TEXT NOT NULL,
     sent_at      TEXT,              -- When the email went out, null until it has.
@@ -198,5 +198,5 @@ CREATE TABLE IF NOT EXISTS transfers (
     requested_at TEXT NOT NULL,
     expected_at  TEXT NOT NULL,     -- When the money should land, business days after the request.
     arrived_at   TEXT,              -- Set when the money was credited to the receiving venue.
-    reason       TEXT NOT NULL      -- 'drift' for the weekly check, 'floor' for a venue running low.
+    reason       TEXT NOT NULL      -- 'drift' for the weekly check, or 'floor' on transfers from before the any-day top up was dropped.
 );

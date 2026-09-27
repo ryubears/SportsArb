@@ -6,9 +6,10 @@ import pytest
 from catalog import fetch
 from catalog.classify import classify
 from common.venues import SHORT_NAMES, VENUES
-from live.components import accounts, settle, streams
-from live.components.execute import live
-from live.helper import config, fees
+from run.components import settle, streams
+from run.components.balance import live as balance_live
+from run.components.execute import live as execute_live
+from run.helper import config, fees
 
 
 @pytest.mark.parametrize("name, table", [
@@ -22,8 +23,8 @@ from live.helper import config, fees
     ("streams.STREAMS", streams.STREAMS),
     ("settle.RESULTS", settle.RESULTS),
     ("settle.RESULTS_BY_EVENT", settle.RESULTS_BY_EVENT),
-    ("accounts.READERS", accounts.READERS),
-    ("live.PLACE", live.PLACE),
+    ("balance/live.READERS", balance_live.READERS),
+    ("execute/live.PLACE", execute_live.PLACE),
     ("config.LATENCY_MS", config.LATENCY_MS),
 ])
 def test_table_covers_every_venue(name, table):

@@ -28,12 +28,13 @@ def status(filled, quantity):
     return "filled" if filled >= quantity else "partial" if filled else "unfilled"
 
 
-def unknown(error):
+def unknown(error, order_id=None, response=None):
     """
     The Answer for an order whose fate we cannot know: it timed out, the
-    connection dropped, or the venue failed on its side. It may have traded.
+    connection dropped, the venue failed on its side, or it answered without
+    saying how the order ended. It may have traded.
     """
-    return Answer(None, "error", 0, 0.0, 0.0, repr(error)[:500], {"error": repr(error)})
+    return Answer(order_id, "error", 0, 0.0, 0.0, repr(error)[:500], {"error": repr(error), **(response or {})})
 
 
 def refused(error):

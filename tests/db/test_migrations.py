@@ -38,4 +38,4 @@ def test_the_database_layer_does_not_import_the_live_code():
         tree = ast.parse(path.read_text())
         modules = [n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)]
         modules += [a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names]
-        assert not [m for m in modules if m.split(".")[0] in ("live", "catalog", "api")], path.name
+        assert not [m for m in modules if m.split(".")[0] in ("run", "catalog", "api")], path.name

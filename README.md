@@ -72,13 +72,15 @@ contract count needs. Both clients also report how a contract resolved,
 which the settler uses, and carry the live trading calls: the account's
 balance, and an immediate or cancel limit order whose answer they turn
 into an `orders.Answer`, the same for both venues. Polymarket US prices
-every order on the long side, so a short side order at p is sent at 1 - p.
+every order on the long side, so a short side order at p is sent at 1 - p,
+and when its answer does not say how an order ended, the order itself is
+looked up, since a returned order id does not mean the order is done.
 Trading calls go over kept HTTPS connections from **http.py**, since a new
 TLS connection costs round trips a race cannot spare, and are never
 retried, since an order sent twice trades twice. The field names come from
 the venues' published Python SDKs.
 
-### Live loop (`src/live`)
+### Run loop (`src/run`)
 
 **run.py** is the process that runs. Its `Session` wires the recorder, the
 venue connections, the scanner, and a `Desk` for each mode it trades in
@@ -90,8 +92,8 @@ picks the desks: `paper`, the default, `live`, or `both`, which trades the
 same signals on paper and for real and so measures how far the paper fills
 are from real ones. The same loop starts the hourly catalog refresh in a
 background thread and applies the result to the live connections. The
-pieces it wires together are in `live/components/`, and what they share is
-in `live/helper/`: the settings, game timing, pricing, and fees.
+pieces it wires together are in `run/components/`, and what they share is
+in `run/helper/`: the settings, game timing, pricing, and fees.
 
 **record.py** holds the newest book for every paired contract in memory
 and, on each tick, writes a row with five levels a side for each contract
@@ -137,18 +139,40 @@ flattening only trade against a book that has changed within the last
 minute, since a market that has closed may stop changing rather than empty
 its book, and its last book cannot be traded. Signals need a net edge of
 at least five cents per contract, and only games being played are traded,
-so the money comes back the same day. Every trade is stored as soon as it
-is sent and updated when it is done.
+so the money comes back the same day. New trades leave a floor of cash
+untouched on each venue, $500 on paper and $5 live, so the money is never
+run down to nothing and flattening, which may use it, still can; a venue
+under its floor makes new trades wait until more arrives. Every trade is
+stored as soon as it is sent and updated when it is done.
 
-Live trading has brakes. It halts, sending no more orders of any kind,
-when an order's fate cannot be known (a timeout, a dropped connection, a
-venue failing on its side), since what is held is then unknown too; when
-a venue refuses three orders in a row; and when flattening has lost more
-than $25 since the start. A halt is logged and emailed, and what is held
-is still settled. It is also written to `data/live_halted.txt`, and live
-trading stays halted across restarts, a crash or a deploy, until a human
-has checked the venues and removed that file. Live trades hold 1 to 10
-contracts until the live results earn more.
+Live trading has brakes, in **brakes.py**, sized for a test with about
+$100 on each venue. An order whose outcome cannot be known (a timeout, a
+dropped connection, a venue failing on its side, or an answer that cannot
+be read) sets its trade aside: no more orders are sent for it, since what
+it holds is unknown, and an email says which order to look up. Trading
+goes on. It halts, sending no more orders of any kind, when:
+
+- 3 of the last 20 orders had an unknown outcome, three in a row or a
+  steady error rate;
+- one venue refused its last 3 orders. A refusal is the venue answering
+  that it will not take an order, so nothing traded: not authorized, not
+  enough money, a bad price, too many requests, or a market that has
+  closed. An order that found nothing at its price is unfilled, not
+  refused, as is one Polymarket US turned away for no liquidity or for
+  being slow;
+- the live trades decided in the last 6 hours lost more than 10% of the
+  live money, net;
+- at least 10 trades were decided in those 6 hours with a profit or a
+  loss, and 60% or more of them lost.
+
+A trade is decided once its legs hold the same number of contracts, which
+pay a dollar each whichever way the game goes, or once it settles. Each
+rule reads the orders and trades tables, so a restart does not reset it,
+and starts over after a halt. A halt is logged and emailed, and what is
+held is still settled. It is also written to `data/live_halted.txt`, and
+live trading stays halted across restarts, a crash or a deploy, until a
+human has checked the venues and removed that file. Live trades hold 1 to
+10 contracts until the live results earn more.
 
 **allocate.py** sets how many contracts one trade may hold, so the money
 covers every game in play. The games from kickoff until they settle share
@@ -157,12 +181,16 @@ A game's share becomes a cap at $20 of spending per contract of cap, the
 rate the first live game showed, between 5 and 500 contracts on paper and
 1 and 10 live. A game that has spent its share gets nothing more until
 others settle and fewer games share the pool. Paper and live each size
-from their own money and trades.
+from their own money and trades. A live game whose share is too small for
+one contract of cap still gets one contract until it has spent its share,
+so a test with $100 a venue trades a nine game Sunday window, $11 a game,
+rather than nothing.
 
-**balances.py**, **settle.py**, **rebalance.py** keep the paper books, and
-**accounts.py**, **settle.py**, **rebalance.py**, **notify.py** the live
-ones. Each paper venue starts with $10,000. Money for an order in flight
-is reserved before anything is awaited, so two signals in the same moment
+**balance/**, **settle.py**, **rebalance.py** keep the books: paper money
+in **balance/paper.py** and live money in **balance/live.py**, with what
+they share in **balances.py**, and **notify.py** for the live alerts.
+Each paper venue starts with $10,000. Money for an order in flight is
+reserved before anything is awaited, so two signals in the same moment
 cannot spend the same dollars. Every cash movement is a `Ledger` row that
 records the balance it left behind, starting with a `transfer_in` of each
 venue's opening balance, so the ledger accounts for every dollar and a
@@ -177,9 +205,8 @@ the executor stops flattening it. On Tuesdays, once Monday night's trades
 have settled, the rebalancer compares the venues and, when one sits more
 than 25% above the average, sends the excess to the other as a `Transfer`
 that takes four business days, during which the money is on neither venue.
-A venue under $500 is topped up on any day, also once no trade is open.
 
-Live money has no ledger of ours. `Accounts` reads each venue's balance
+Live money has no ledger of ours. `LiveBalances` reads each venue's balance
 every 30 seconds, and at once after a payout, and applies what our own
 fills move in between, so a burst of trades does not spend the same
 dollars twice. Nothing is traded before the first reading. The settler
@@ -210,7 +237,7 @@ before the first live run.
 The recorder runs on a t3.medium in us-east-1, the region Kalshi's
 matching engine runs in, where a signed round trip is about 35 ms to
 Kalshi and 30 ms to Polymarket US. A systemd service, `sportsarb-recorder`,
-starts `python3 -m live.run --sport nfl` from `~/SportsArb/src` on boot
+starts `python3 -m run.run --sport nfl` from `~/SportsArb/src` on boot
 and restarts it on any exit. That trades on paper only. Going live means
 adding `--execute both` to the service's command. The venue API keys
 live in `data/`, which is gitignored, and are copied to the instance by
@@ -327,15 +354,15 @@ Build the catalog and run the recorder locally, from `src/`:
 ```bash
 cd src
 python3 -m catalog.pipeline --sport nfl
-python3 -m live.run --sport nfl
+python3 -m run.run --sport nfl
 ```
 
 `--no-trade` scans without trading, `--no-scan` only records, and
 `--seconds 120` runs a short test. `--execute live` trades with real money
 and `--execute both` trades the same signals on paper and for real. The
 settings a run is tuned by, such as the minimum edge, the trade caps, and
-the starting balance, are in `src/live/helper/config.py`, and `--set
-NAME=VALUE` overrides one for a run, for example `python3 -m live.run
+the starting balance, are in `src/run/helper/config.py`, and `--set
+NAME=VALUE` overrides one for a run, for example `python3 -m run.run
 --sport nfl --set min_edge=0.03`. The run logs every setting when it
 starts. The streams need venue keys in `data/`: `kalshi_key_id.txt` and
 `kalshi_private_key.pem` for Kalshi, `polymarket_us_key_id.txt` and
@@ -368,8 +395,9 @@ src/
   catalog/    fetch, classify (one parser per venue), match, pipeline
   common/     paths, time and json helpers, the venue list, the logger
   db/         models, the SQLite schema and its migrations, reads and writes
-  live/       run, the process that wires the components together
-    components/  record, streams, scan, allocate, balances, accounts, settle, rebalance, notify
+  run/        run, the process that wires the components together
+    components/  record, streams, scan, allocate, settle, rebalance, notify
+      balance/   balances (what paper and live share), paper, live
       execute/   executor (what paper and live share), paper, live
     helper/      config (the settings a run is tuned by), game (which game a bet is on and when it is played), pricing, fees
   tools/      summary report, live_check

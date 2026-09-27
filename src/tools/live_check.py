@@ -14,7 +14,8 @@ Run from src/ with:
 import argparse
 import json
 import sys
-from live.components import accounts, notify
+from run.components import notify
+from run.components.balance.live import READERS
 
 
 def check_balances():
@@ -22,7 +23,7 @@ def check_balances():
     Print each venue's balance, or why it could not be read. Returns whether every venue was read.
     """
     ok = True
-    for venue, read in accounts.READERS.items():
+    for venue, read in READERS.items():
         try:
             print(f"{venue}: {read():,.2f}$ available to trade")
         except Exception as e:
