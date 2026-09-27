@@ -5,6 +5,7 @@ Tests for the Kalshi client's frames and book handling that need no network.
 import asyncio
 import json
 import pytest
+import random
 from api import bookstream, kalshi
 
 
@@ -31,6 +32,23 @@ def test_stream_restates_no_side_as_yes_asks_and_tracks_sid():
     stream.apply({"type": "orderbook_delta", "msg": {"market_ticker": "T", "price_dollars": "0.32", "delta_fp": "-5", "side": "no"}})
     assert seen[0] == ("T", [[0.30, 4.0], [0.28, 10.0]], [[0.32, 5.0], [0.35, 7.0]])
     assert seen[1] == ("T", [[0.30, 4.0], [0.28, 10.0]], [[0.35, 7.0]])
+
+
+def test_the_levels_passed_on_are_the_best_of_the_whole_book_after_every_delta():
+    rng = random.Random(3)
+    seen = []
+    stream = kalshi.KalshiBookStream(["T"], lambda ticker, bids, asks: seen.append((bids, asks)))
+    stream.reset()
+    stream.depth = 3
+    stream.apply({"type": "orderbook_snapshot", "msg": {"market_ticker": "T", "yes_dollars_fp": [["0.40", "5"], ["0.39", "0"]],
+                                                        "no_dollars_fp": [["0.45", "5"]]}})
+    for _ in range(3000):
+        stream.apply({"type": "orderbook_delta", "msg": {"market_ticker": "T", "price_dollars": f"{rng.randint(1, 99) / 100:.4f}",
+                                                         "delta_fp": str(rng.randint(-20, 20)), "side": rng.choice(["yes", "no"])}})
+        book = stream.books["T"]
+        assert all(size > 0 for side in ("yes", "no") for size in book[side].values())
+        assert seen[-1] == ([[p, s] for p, s in sorted(book["yes"].items(), reverse=True)][:3],
+                            [[p, s] for p, s in sorted(book["no"].items())][:3])
 
 
 def test_stream_asks_to_reconnect_on_a_sequence_gap():

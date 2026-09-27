@@ -200,7 +200,7 @@ class PolymarketUSBookStream(BookStream):
         slug = data.get("marketSlug")
         if slug not in self.wanted:
             return True
-        bids, asks = levels(data.get("bids"), reverse=True), levels(data.get("offers"), reverse=False)
+        bids, asks = levels(data.get("bids"), reverse=True)[:self.depth], levels(data.get("offers"), reverse=False)[:self.depth]
         self.books[slug] = {"bids": bids, "asks": asks}
         self.on_book(slug, bids, asks)
         return True

@@ -49,6 +49,7 @@ class BookStream:
 
     name = "venue"                  # Used in log lines.
     stale_seconds = STALE_SECONDS
+    depth = 5                       # Levels a side passed to on_book. Streams sets it to what the recorder keeps.
 
     def __init__(self, contract_ids, on_book, on_gap=None, log=print):
         self.wanted = set(contract_ids)
