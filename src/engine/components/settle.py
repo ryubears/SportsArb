@@ -1,5 +1,5 @@
 """
-Settle paper trades once their contracts have resolved.
+Settle trades, paper or live, once their contracts have resolved.
 
 The settler keeps asking the venues how the held contracts of open trades
 resolved, from the moment their game kicks off, since Kalshi settles a

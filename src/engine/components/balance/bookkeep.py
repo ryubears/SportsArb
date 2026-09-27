@@ -72,7 +72,7 @@ class PaperBookKeeper:
 
     def tick(self, now):
         """
-        Once a second from the recorder loop.
+        Once a second from the session.
         """
         self.receive(now)
         self.rebalance(now)

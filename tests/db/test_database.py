@@ -3,7 +3,7 @@ Round trip every table through the database module.
 """
 
 from db import database
-from db.models import Bet, Contract, Gap, Opportunity, Pair, Quote
+from db.models import Bet, Contract, Gap, Opportunity, Pair
 
 
 def contract(venue, contract_id, **fields):
@@ -24,7 +24,7 @@ def test_contracts_upsert_keeps_first_seen(tmp_path):
     assert (rows[0]["title"], rows[0]["first_seen"][:10], rows[0]["last_seen"][:10]) == ("renamed", "2026-01-01", "2026-01-02")
 
 
-def test_bets_pairs_quotes_and_targets(tmp_path):
+def test_bets_pairs_and_targets(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
     database.upsert_contracts(conn, [contract("polymarket_us", "pm"), contract("kalshi", "k")], "2026-01-01T00:00:00+00:00")
     bets = [Bet(v, cid, "champion", 2027, None, None, None, "BUF", None, "yes") for v, cid in (("polymarket_us", "pm"), ("kalshi", "k"))]
@@ -60,11 +60,6 @@ def test_game_contracts_stay_targets_through_the_game(tmp_path):
     after = database.load_recording_targets(conn, "nfl", "2026-09-21T00:00:00+00:00", "2026-09-28T00:00:00+00:00", ["polymarket_us"], "2026-09-20T19:00:00+00:00")
     assert during == {"polymarket_us": ["pm"]}
     assert after == {"polymarket_us": []}
-
-    database.insert_quotes(conn, [Quote("kalshi", "k", "2026-01-01T00:00:00+00:00", [[0.5, 1]], [[0.6, 2]])])
-    q = database.load_quotes(conn, "kalshi", ["k"])["k"][0]
-    assert (q.bids, q.asks) == ([[0.5, 1]], [[0.6, 2]])
-    assert database.load_quotes(conn, "kalshi", ["k"], since="2026-02-01")["k"] == []
 
 
 def test_gaps_are_stored_in_time_order_and_filtered_by_since(tmp_path):

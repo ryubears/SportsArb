@@ -15,7 +15,9 @@ other venue, whichever the books say leaves more money, and books the
 result with fees. What it cannot flatten stays on a list and is tried
 again on every tick, against the books as they are then, until it is
 flat, the bet pays out, or the settler says its contracts have resolved.
-The settler leaves alone a trade while an order to flatten it is in flight.
+The list is read back from the trades table when the process starts, so a
+restart does not leave a trade exposed. The settler leaves alone a trade
+while an order to flatten it is in flight.
 Only games being played are traded, so capital turns over the same day,
 and an Allocator from allocate.py caps each trade so the money covers every
 game in play. Every trade is stored in the trades table as soon as it is
@@ -111,6 +113,7 @@ class Executor:
         self.low = set()            # Venues whose free cash is under the floor, so new trades wait.
         self.retrying = None        # The task flattening exposed trades while one runs.
         self.totals = {"trades": 0, "profit": 0.0, "hedge": 0.0}
+        self.reload_exposed()
 
     # ORDERS, which each subclass fills its own way.
 
@@ -252,6 +255,22 @@ class Executor:
         Called by the settler when a trade has settled. Its contracts have resolved, so it is not flattened any more.
         """
         self.exposed.pop(trade_id, None)
+
+    def reload_exposed(self):
+        """
+        Take back this mode's trades left holding more on one side than the
+        other when the process last stopped, so they are flattened again. A
+        trade past its payout time is left to settle as it stands, and one
+        with an order of unknown outcome is left to a human.
+        """
+        for trade, yes_fee_info, no_fee_info in database.load_exposed_trades(self.conn, self.mode, self.clock()):
+            yes = Leg("yes", {"venue": trade.yes_venue, "contract_id": trade.yes_contract, "polarity": trade.yes_polarity},
+                      yes_fee_info, trade.yes_limit, trade.quantity, trade.yes_held, trade.yes_cost)
+            no = Leg("no", {"venue": trade.no_venue, "contract_id": trade.no_contract, "polarity": trade.no_polarity},
+                     no_fee_info, trade.no_limit, trade.quantity, trade.no_held, trade.no_cost)
+            self.exposed[trade.id] = (trade, [yes, no])
+        if self.exposed:
+            self.log(f"{self.mode} trades left exposed before this start, flattening again: {', '.join(map(str, self.exposed))}")
 
     async def retry(self, now):
         """

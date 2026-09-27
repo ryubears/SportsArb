@@ -18,8 +18,8 @@ venues funded. By default the orders are paper. With `--execute live` or
 
 Everything lives in `src/` and reads or writes one SQLite file,
 `data/sportsarb.sqlite`. The tables follow the pipeline in order:
-contracts, bets, pairs, quotes, gaps, opportunities, trades, settlements,
-orders, ledger, alerts, transfers. Trades and settlements carry a `mode`,
+contracts, bets, pairs, gaps, opportunities, trades, settlements, orders,
+ledger, alerts, transfers. Trades and settlements carry a `mode`,
 `paper` or `live`, so the two books never mix. Every table has a model in
 `db/models.py` and its schema in `db/schema.sql`. Changes to a table for
 databases that already exist are numbered steps in `db/migrations.py`, and
@@ -53,9 +53,9 @@ that differ between venues carry a note, for example both venues settle
 props to the pre-game price if the player never takes a snap, but
 Polymarket US ignores stat corrections made after the game.
 
-**pipeline.py** runs fetch, classify, and match in one call. The recorder
-runs it every hour in a background thread, so new games and props enter
-the pairs while it records.
+**pipeline.py** runs fetch, classify, and match in one call. The live
+process runs it every hour in a background thread, so new games and props
+enter the pairs while it runs.
 
 ### Venue clients (`src/api`)
 
@@ -63,7 +63,8 @@ the pairs while it records.
 carrying every wanted contract, a live book per contract, changes to the
 wanted set applied without reconnecting, and a reconnect that is
 immediate on the first drop and backs off only on repeated ones, with the
-stretch until the new subscription is confirmed stored as a gap.
+stretch until the new subscription is confirmed stored as a gap, and the
+books of that connection's contracts dropped until it sends them again.
 **kalshi.py** signs each connection and request with RSA-PSS and holds the
 whole catalog on one connection. **polymarket_us.py** signs with Ed25519,
 subscribes in chunks of 100 slugs, and, because the feed refuses an
@@ -95,10 +96,10 @@ background thread and applies the result to the live connections. The
 pieces it wires together are in `engine/components/`, and what they share
 is in `engine/helper/`: the settings, game timing, pricing, and fees.
 
-**record.py** holds the newest book for every paired contract in memory
-and, on each tick, writes a row with five levels a side for each contract
-whose top of book changed. Quiet contracts write nothing, busy ones at most
-one row a second. **streams.py** owns the connections behind it, one per
+**record.py** holds the newest book for every paired contract in memory,
+five levels a side, which the scanner prices and the executors trade
+against. Books are not stored, only the gaps when a venue's feed was down.
+**streams.py** owns the connections behind it, one per
 venue, or several when a venue caps how much one connection may carry,
 and moves contracts between them as the catalog changes.
 
@@ -132,9 +133,11 @@ venue's answer. Either way a leg that filled short is flattened at once,
 by selling the excess back or buying the missing side on the other venue,
 whichever the books say leaves more money, and whatever stays exposed is
 tried again on every tick until it is flat, the bet pays out, or the
-settler settles it. A live order that flattens is limited to the deepest
-price the books said it would reach, so a book that moved leaves the rest
-for the next tick rather than filling far from its price. Orders and
+settler settles it. A restart takes back from the trades table whatever
+is still exposed, so a crash or a deploy does not leave it unhedged. A
+live order that flattens is limited to the deepest price the books said
+it would reach, so a book that moved leaves the rest for the next tick
+rather than filling far from its price. Orders and
 flattening only trade against a book that has changed within the last
 minute, since a market that has closed may stop changing rather than empty
 its book, and its last book cannot be traded. Signals need a net edge of
@@ -150,7 +153,8 @@ $100 on each venue. An order whose outcome cannot be known (a timeout, a
 dropped connection, a venue failing on its side, or an answer that cannot
 be read) sets its trade aside: no more orders are sent for it, since what
 it holds is unknown, and an email says which order to look up. Trading
-goes on. It halts, sending no more orders of any kind, when:
+goes on. It halts, sending no more orders of any kind, when the orders
+themselves fail:
 
 - 3 of the last 20 orders had an unknown outcome, three in a row or a
   steady error rate;
@@ -159,17 +163,23 @@ goes on. It halts, sending no more orders of any kind, when:
   enough money, a bad price, too many requests, or a market that has
   closed. An order that found nothing at its price is unfilled, not
   refused, as is one Polymarket US turned away for no liquidity or for
-  being slow;
+  being slow.
+
+It halts new trades, but goes on flattening what is exposed, when the
+results go wrong:
+
 - the live trades decided in the last 6 hours lost more than 10% of the
   live money, net;
-- at least 10 trades were decided in those 6 hours with a profit or a
-  loss, and 60% or more of them lost.
+- at least 50 trades were decided in those 6 hours with a profit or a
+  loss, and 90% or more of them lost.
+
+If the orders then fail as above, flattening stops as well.
 
 A trade is decided once its legs hold the same number of contracts, which
 pay a dollar each whichever way the game goes, or once it settles. Each
 rule reads the orders and trades tables, so a restart does not reset it,
 and starts over after a halt. A halt is logged and emailed, and what is
-held is still settled. It is also written to `data/live_halted.txt`, and
+held is still settled. It is also written to `data/live_halt.txt`, and
 live trading stays halted across restarts, a crash or a deploy, until a
 human has checked the venues and removed that file. Live trades hold 1 to
 10 contracts until the live results earn more.
@@ -224,7 +234,7 @@ table and emails it in a background thread through the SMTP server in
 ### Tools
 
 `src/tools/summary.py` prints a report from the database: row counts,
-pairs by kind, recording health, opportunities by kind with the largest
+pairs by kind, feed drops, opportunities by kind with the largest
 that beat a 10% annual return, and for paper and live apart the trades by
 outcome and kind and the settled legs by venue, then the paper balances
 with any transfer in transit, and the real orders sent by venue and what
@@ -236,7 +246,7 @@ before the first live run.
 
 ## Deployment
 
-The recorder runs on a t3.medium in us-east-1, the region Kalshi's
+The live process runs on a t3.medium in us-east-1, the region Kalshi's
 matching engine runs in, where a signed round trip is about 35 ms to
 Kalshi and 30 ms to Polymarket US. A systemd service, `sportsarb-recorder`,
 starts `python3 -m engine.run --sport nfl` from `~/SportsArb/src` on boot
@@ -256,8 +266,9 @@ operate the instance, with the instance's address, key, and ids written
 into them. It is gitignored, so it lives only on the machine that operates
 the instance.
 
-The process is light. It holds 4,900 books in about 190 MB of memory,
-and the database grows by roughly 500 MB a day.
+The process is light. It holds 4,900 books in about 190 MB of memory.
+Books are not stored, so the database grows only with the episodes,
+trades, and orders.
 
 ## Results so far
 
@@ -351,7 +362,7 @@ pip3 install -r requirements.txt
 python3 -m pytest tests -q
 ```
 
-Build the catalog and run the recorder locally, from `src/`:
+Build the catalog and run the live process locally, from `src/`:
 
 ```bash
 cd src

@@ -42,18 +42,20 @@ class BookStream:
     One websocket connection carrying every wanted contract. Runs forever
     once started, reconnecting when the connection drops, goes silent, or
     a subclass asks for it. Every failure starts a gap that ends when the
-    next connection is subscribed, reported through on_gap so the recorder
-    can mark the stretch. Subclasses set name and implement the venue hooks below.
+    next connection is subscribed, reported through on_gap with the
+    contracts this connection carries, so the recorder can mark the stretch
+    and drop just their books. Subclasses set name and implement the venue hooks below.
     """
 
     name = "venue"                  # Used in log lines.
     stale_seconds = STALE_SECONDS
+    depth = 5                       # Levels a side passed to on_book. Streams sets it to what the recorder keeps.
 
     def __init__(self, contract_ids, on_book, on_gap=None, log=print):
         self.wanted = set(contract_ids)
         self.on_book = on_book
         self.log = log
-        self.on_gap = on_gap or (lambda start_ts, end_ts: None)    # Called with the gap's start and end times.
+        self.on_gap = on_gap or (lambda start_ts, end_ts, contract_ids: None)  # Called with the gap's times and this connection's contracts.
         self.down_since = None      # When the current gap began, or None while connected.
         self.num_failures = 0       # Failures in a row, reset once a connection is subscribed.
         self.books = {}
@@ -160,7 +162,7 @@ class BookStream:
                 async with self.connect() as ws:
                     await self.subscribe(ws)
                     if self.down_since:
-                        self.on_gap(self.down_since, now_iso())
+                        self.on_gap(self.down_since, now_iso(), sorted(self.wanted))
                         self.down_since = None
                     self.num_failures = 0
                     sender = asyncio.create_task(self.send_commands(ws))

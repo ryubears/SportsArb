@@ -18,8 +18,8 @@ An order whose outcome cannot be known, because no answer came, the venue
 failed on its side, or its answer cannot be read, leaves what its trade
 holds unknown. That trade is set aside: no more orders are sent for it,
 and a human is told which order to look up on the venue. The rest of live
-trading goes on. When live trading halts altogether, and what counts as
-a refusal, is in brakes.py.
+trading goes on. When live trading halts, whether flattening goes on then,
+and what counts as a refusal, is in brakes.py.
 """
 
 import asyncio
@@ -102,7 +102,7 @@ class LiveExecutor(Executor):
         The outcome traded is the contract itself when the leg holds the side
         the contract pays on, and its other side otherwise.
         """
-        if self.halted:
+        if self.brakes.stopped or (purpose == "open" and self.halted):
             return Fill(ts=self.clock(), note="not sent, live trading halted")
         outcome = "yes" if leg.side == leg.polarity else "no"
         order = Order(trade_id=trade.id, venue=leg.venue, contract_id=leg.contract_id, purpose=purpose, action=action, outcome=outcome,
@@ -153,4 +153,6 @@ class LiveExecutor(Executor):
         self.brakes.check_results()
 
     def summary(self):
-        return super().summary() + (f"; HALTED: {self.halted}" if self.halted else "")
+        if self.brakes.stopped:
+            return super().summary() + f"; HALTED, no orders at all: {self.brakes.stopped}"
+        return super().summary() + (f"; HALTED, still flattening: {self.halted}" if self.halted else "")

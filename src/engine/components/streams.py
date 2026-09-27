@@ -11,6 +11,7 @@ catalog refresh never reconnects. Book updates and gaps go to the recorder.
 import asyncio
 from api import kalshi, polymarket_us
 from common.log import log
+from engine.helper import config
 
 STREAMS = {"kalshi": kalshi.KalshiBookStream, "polymarket_us": polymarket_us.PolymarketUSBookStream}
 
@@ -44,7 +45,9 @@ class Streams:
         Open one more connection for a venue, carrying these contracts.
         """
         stream = self.stream_classes[venue](list(contract_ids), lambda cid, b, a: self.on_book(venue, cid, b, a),
-                                            lambda start_ts, end_ts: self.recorder.on_gap(venue, start_ts, end_ts), log)
+                                            lambda start_ts, end_ts, contract_ids: self.recorder.on_gap(venue, start_ts, end_ts, contract_ids),
+                                            log)
+        stream.depth = config.BOOK_LEVELS
         self.streams[venue].append(stream)
         self.tasks.append(asyncio.create_task(stream.run()))
         return stream

@@ -49,3 +49,21 @@ def test_streams_open_more_connections_when_a_venue_has_a_capacity(tmp_path, fak
     assert summary == "polymarket_us +3 -1"
     assert after == [["b", "d"], ["c", "e"], ["f"]]      # Room on the open connections is used first, then a third opens.
     assert kalshi_connections == 1                        # No capacity, one connection whatever the size.
+
+
+def test_a_drop_on_one_connection_leaves_the_books_of_the_others(tmp_path, fake_stream):
+    class SmallStream(fake_stream):
+        capacity = 2
+
+    async def scenario():
+        r = record.Recorder(database.connect(tmp_path / "test.sqlite"))
+        s = streams.Streams(r, {"polymarket_us": SmallStream, "kalshi": fake_stream})
+        s.start("polymarket_us", ["a", "b", "c"])
+        first, second = s.streams["polymarket_us"]
+        for stream, contract_id in ((first, "a"), (first, "b"), (second, "c")):
+            stream.on_book(contract_id, [[0.5, 1]], [[0.6, 1]])
+        second.on_gap("2026-09-27T17:00:00+00:00", "2026-09-27T17:00:05+00:00", sorted(second.wanted))
+        await s.stop_all()
+        return r.latest
+    latest = asyncio.run(scenario())
+    assert sorted(latest) == [("polymarket_us", "a"), ("polymarket_us", "b")]     # Only c waits for its connection to send it again.

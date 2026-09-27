@@ -34,7 +34,7 @@ WS_URL = "wss://api.polymarket.us/v1/ws/markets"
 WS_PATH = "/v1/ws/markets"
 WS_CHUNK = 100          # Market slugs per subscription, the documented maximum.
 WS_SUBSCRIPTIONS = 10   # Subscriptions per connection. The feed refuses an eleventh with 'max subscriptions per connection reached'.
-WS_DEBOUNCE = True      # Ask the feed to batch updates. Cuts bandwidth by a third, and the recorder writes once a second anyway.
+WS_DEBOUNCE = True      # Ask the feed to batch updates, which cuts bandwidth by a third and the messages to parse with it.
 KEY_ID_FILE = DATA_DIR / "polymarket_us_key_id.txt"
 SECRET_KEY_FILE = DATA_DIR / "polymarket_us_secret_key.txt"
 
@@ -200,7 +200,7 @@ class PolymarketUSBookStream(BookStream):
         slug = data.get("marketSlug")
         if slug not in self.wanted:
             return True
-        bids, asks = levels(data.get("bids"), reverse=True), levels(data.get("offers"), reverse=False)
+        bids, asks = levels(data.get("bids"), reverse=True)[:self.depth], levels(data.get("offers"), reverse=False)[:self.depth]
         self.books[slug] = {"bids": bids, "asks": asks}
         self.on_book(slug, bids, asks)
         return True

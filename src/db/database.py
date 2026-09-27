@@ -7,8 +7,7 @@ SQLite browser. The tables follow the pipeline in order.
     contracts      what each venue lists, written by fetch.py
     bets           each contract restated in venue neutral terms, by classify.py
     pairs          the contracts on both venues for one bet, by match.py
-    quotes         order book snapshots for paired contracts, by record.py
-    gaps           stretches when a venue's feed was down, also by record.py
+    gaps           stretches when a venue's feed was down, by record.py
     opportunities  every episode the live scanner saw, by scan.py
     trades         every trade the executors made, paper or live, by execute/
     settlements    how each trade's legs paid out, by settle.py
@@ -29,7 +28,7 @@ from dataclasses import asdict, fields
 from common import jsonutil
 from common.paths import DATA_DIR
 from db import migrations, schema
-from db.models import Alert, Bet, Gap, Ledger, Opportunity, Order, Quote, Settlement, Trade, Transfer
+from db.models import Alert, Bet, Gap, Ledger, Opportunity, Order, Settlement, Trade, Transfer
 from pathlib import Path
 
 DB_PATH = DATA_DIR / "sportsarb.sqlite"
@@ -76,7 +75,7 @@ def connect(db_path=None):
     # A long busy timeout lets the recorder and the hourly catalog job share the file.
     conn = sqlite3.connect(db_path, timeout=30)
     conn.row_factory = sqlite3.Row
-    # Write ahead logging lets readers query while the recorder writes.
+    # Write ahead logging lets readers query while the live process writes.
     conn.execute("PRAGMA journal_mode=WAL")
     fresh = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table'").fetchone() is None
     schema.create(conn)
@@ -260,36 +259,6 @@ def load_kickoffs(conn):
         WHERE p.game_date IS NOT NULL GROUP BY 1, 2, 3 HAVING MAX(c.start_time) IS NOT NULL""")}
 
 
-# QUOTES
-
-def insert_quotes(conn, quotes):
-    """
-    Append Quotes. Bids and asks are stored as JSON text.
-    """
-    conn.executemany(
-        "INSERT OR REPLACE INTO quotes (venue, contract_id, ts, bids, asks) VALUES (?,?,?,?,?)",
-        [(q.venue, q.contract_id, q.ts, jsonutil.dump(q.bids), jsonutil.dump(q.asks)) for q in quotes],
-    )
-    conn.commit()
-
-
-def load_quotes(conn, venue, contract_ids, since=None):
-    """
-    Return {contract_id: [Quote, ...]} in time order for the given contracts.
-    """
-    out = {cid: [] for cid in contract_ids}
-    sql = "SELECT contract_id, ts, bids, asks FROM quotes WHERE venue = ?"
-    params = [venue]
-    if since:
-        sql += " AND ts >= ?"
-        params.append(since)
-    sql += " ORDER BY ts"
-    for cid, ts, bids, asks in conn.execute(sql, params):
-        if cid in out:
-            out[cid].append(Quote(venue, cid, ts, jsonutil.parse(bids), jsonutil.parse(asks)))
-    return out
-
-
 # GAPS
 
 def insert_gap(conn, gap):
@@ -354,6 +323,31 @@ def load_open_trades(conn, mode):
         FROM trades t JOIN pairs p ON p.id = t.pair_id
         WHERE t.mode = ? AND t.status != 'sent' AND t.yes_held + t.no_held > 0
           AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id) ORDER BY t.id""", (mode,))]
+
+
+def load_exposed_trades(conn, mode, now):
+    """
+    Trades of one mode that are done, hold more on one side than the other,
+    have not settled, and pay out after now, with their pair's label, as
+    (Trade, yes fee_info, no fee_info) with the fee schedule of each leg's
+    contract. A trade with an order of unknown outcome is left out, since
+    what it holds is unknown.
+    """
+    out = []
+    for r in conn.execute("""
+        SELECT t.*, p.label, yc.fee_info AS yes_fee_info, nc.fee_info AS no_fee_info
+        FROM trades t
+        LEFT JOIN pairs p ON p.id = t.pair_id
+        LEFT JOIN contracts yc ON yc.venue = t.yes_venue AND yc.contract_id = t.yes_contract
+        LEFT JOIN contracts nc ON nc.venue = t.no_venue AND nc.contract_id = t.no_contract
+        WHERE t.mode = ? AND t.status != 'sent' AND t.yes_held != t.no_held AND t.pays_at > ?
+          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)
+          AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.trade_id = t.id AND o.status = 'error')
+        ORDER BY t.id""", (mode, now)):
+        row = dict(r)
+        yes_fee_info, no_fee_info = jsonutil.parse(row.pop("yes_fee_info"), {}), jsonutil.parse(row.pop("no_fee_info"), {})
+        out.append((Trade(**row), yes_fee_info, no_fee_info))
+    return out
 
 
 def has_open_trades(conn, mode):

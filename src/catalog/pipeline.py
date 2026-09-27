@@ -2,8 +2,8 @@
 Refresh the catalog. Fetch every venue, classify the contracts into bets,
 and pair them across venues, in one call.
 
-The recorder runs this on a timer so new games enter the pairs while it
-is recording. The same steps are available one at a time as fetch.py,
+The live process runs this on a timer so new games enter the pairs while
+it runs. The same steps are available one at a time as fetch.py,
 classify.py, and match.py, which also print their full reports.
 
 Run with:

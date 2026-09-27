@@ -32,6 +32,20 @@ def test_an_older_database_runs_each_missing_step_once(tmp_path, monkeypatch):
     assert (version(conn), ran) == (3, [2, 3])          # Nothing runs twice.
 
 
+def test_the_quotes_table_is_dropped_and_its_space_given_back(tmp_path):
+    path = tmp_path / "t.sqlite"
+    old = sqlite3.connect(path)
+    old.execute("PRAGMA journal_mode=WAL")
+    old.execute("CREATE TABLE quotes (venue TEXT, contract_id TEXT, ts TEXT, bids TEXT, asks TEXT, PRIMARY KEY (venue, contract_id, ts))")
+    old.executemany("INSERT INTO quotes VALUES ('kalshi', 'k', ?, ?, '[]')", [(f"2026-09-27T17:00:{i:05d}", "[[0.5, 100]]" * 20) for i in range(3000)])
+    old.execute("PRAGMA user_version = 4")
+    old.commit(); old.close()
+    before = path.stat().st_size
+    conn = database.connect(path)
+    assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'quotes'").fetchone() is None
+    assert version(conn) == 5 and path.stat().st_size < before / 4
+
+
 def test_the_database_layer_does_not_import_the_live_code():
     import ast, pathlib
     for path in pathlib.Path(database.__file__).parent.glob("*.py"):

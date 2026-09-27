@@ -220,7 +220,9 @@ class KalshiBookStream(BookStream):
     already priced as the Yes ask it is, rather than at the No price, which
     Kalshi's default did until it announced it would flip. Every message
     counts as data because the feed has no keepalive replies. A skipped
-    sequence number forces a reconnect.
+    sequence number forces a reconnect. Each side's best levels are kept
+    with its book and sorted again only when a delta reaches them, so a
+    delta deeper in the book costs no sort.
     """
 
     name = "kalshi"
@@ -244,9 +246,18 @@ class KalshiBookStream(BookStream):
         await ws.send(json.dumps(update_frame(self.message_id, self.sid, tickers, kalshi_action)))
         self.message_id += 1
 
+    def best(self, book, side):
+        """
+        The best self.depth levels of one side of a book as [price, size]
+        lists: the yes bids highest first, the asks, on the no side, lowest first.
+        """
+        return [[p, s] for p, s in sorted(book[side].items(), reverse=side == "yes")[:self.depth]]
+
     def apply(self, m):
         """
-        Update the local books from one feed message and report the changed ticker.
+        Update the local books from one feed message and pass the ticker's
+        best levels on. A delta deeper than the levels shown leaves them as
+        they were.
         """
         kind, body = m.get("type"), m.get("msg") or {}
         ticker = body.get("market_ticker")
@@ -258,23 +269,28 @@ class KalshiBookStream(BookStream):
             self.log(f"kalshi stream error {body}")
             return
         if kind == "orderbook_snapshot" and ticker in self.wanted:
-            self.books[ticker] = {
-                "yes": {float(p): float(s) for p, s in body.get("yes_dollars_fp") or []},
-                "no": {float(p): float(s) for p, s in body.get("no_dollars_fp") or []},
+            book = self.books[ticker] = {
+                "yes": {float(p): float(s) for p, s in body.get("yes_dollars_fp") or [] if float(s) > 0},
+                "no": {float(p): float(s) for p, s in body.get("no_dollars_fp") or [] if float(s) > 0},
             }
+            book["shown"] = {side: self.best(book, side) for side in ("yes", "no")}    # The levels last passed on.
         elif kind == "orderbook_delta" and ticker in self.books:
-            side = self.books[ticker][body["side"]]
+            book = self.books[ticker]
+            side = body["side"]
+            levels = book[side]
             price = float(body["price_dollars"])
             # Round to cents so summing many deltas does not leave floating point residue.
-            side[price] = round(side.get(price, 0.0) + float(body["delta_fp"]), 2)
-            if side[price] <= 0:
-                del side[price]
+            size = round(levels.get(price, 0.0) + float(body["delta_fp"]), 2)
+            if size > 0:
+                levels[price] = size
+            else:
+                levels.pop(price, None)
+            shown = book["shown"][side]
+            if len(shown) < self.depth or (price >= shown[-1][0] if side == "yes" else price <= shown[-1][0]):
+                book["shown"][side] = self.best(book, side)
         else:
             return
-        b = self.books[ticker]
-        bids = [[p, s] for p, s in sorted(b["yes"].items(), reverse=True) if s > 0]
-        asks = [[p, s] for p, s in sorted(b["no"].items()) if s > 0]
-        self.on_book(ticker, bids, asks)
+        self.on_book(ticker, book["shown"]["yes"], book["shown"]["no"])
 
     def handle(self, raw):
         m = json.loads(raw)
