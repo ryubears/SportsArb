@@ -186,10 +186,11 @@ one contract of cap still gets one contract until it has spent its share,
 so a test with $100 a venue trades a nine game Sunday window, $11 a game,
 rather than nothing.
 
-**balance/**, **settle.py**, **rebalance.py** keep the books: paper money
-in **balance/paper.py** and live money in **balance/live.py**, with what
-they share in **balances.py**, and **notify.py** for the live alerts.
-Each paper venue starts with $10,000. Money for an order in flight is
+**balance/** and **settle.py** keep the books: paper money in
+**balance/paper.py** and live money in **balance/live.py**, with what they
+share in **balances.py**, the book keepers that keep the venues funded in
+**balance/bookkeep.py**, and **notify.py** for the live alerts. Each paper
+venue starts with $10,000. Money for an order in flight is
 reserved before anything is awaited, so two signals in the same moment
 cannot spend the same dollars. Every cash movement is a `Ledger` row that
 records the balance it left behind, starting with a `transfer_in` of each
@@ -202,9 +203,10 @@ which is what a tax return needs. A trade still exposed on one side is
 settled as it stands, each leg paid for what it holds. The settler skips a
 trade while an order to flatten it is in flight, and once a trade settles
 the executor stops flattening it. On Tuesdays, once Monday night's trades
-have settled, the rebalancer compares the venues and, when one sits more
-than 25% above the average, sends the excess to the other as a `Transfer`
-that takes four business days, during which the money is on neither venue.
+have settled, the `PaperBookKeeper` compares the venues and, when one sits
+more than 25% above the average, sends the excess to the other as a
+`Transfer` that takes four business days, during which the money is on
+neither venue.
 
 Live money has no ledger of ours. `LiveBalances` reads each venue's balance
 every 30 seconds, and at once after a payout, and applies what our own
@@ -212,8 +214,8 @@ fills move in between, so a burst of trades does not spend the same
 dollars twice. Nothing is traded before the first reading. The settler
 settles live trades as it does paper ones, storing each as a `live`
 `Settlement`, while the venue pays out on its own. Live money is moved
-between venues by hand, so instead of transferring, the live
-`RebalanceAlert` emails when, with no live trade open, one venue sits more
+between venues by hand, so instead of transferring, the `LiveBookKeeper`
+emails when, with no live trade open, one venue sits more
 than 25% above the average, saying how much to move where, and again each
 day while they stay apart. `notify.py` stores every alert in the alerts
 table and emails it in a background thread through the SMTP server in
@@ -396,8 +398,8 @@ src/
   common/     paths, time and json helpers, the venue list, the logger
   db/         models, the SQLite schema and its migrations, reads and writes
   run/        run, the process that wires the components together
-    components/  record, streams, scan, allocate, settle, rebalance, notify
-      balance/   balances (what paper and live share), paper, live
+    components/  record, streams, scan, allocate, settle, notify
+      balance/   balances (what paper and live share), paper, live, bookkeep
       execute/   executor (what paper and live share), paper, live
     helper/      config (the settings a run is tuned by), game (which game a bet is on and when it is played), pricing, fees
   tools/      summary report, live_check

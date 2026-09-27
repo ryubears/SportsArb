@@ -1,10 +1,10 @@
 """
-Tests for rebalancing paper money between the venues.
+Tests for the book keepers: paper money moved between the venues, and live money a human is asked to move.
 """
 
 from db import database
 from db.models import Settlement, Trade
-from run.components import rebalance
+from run.components.balance import bookkeep
 from run.components.balance.paper import PaperBalances
 
 
@@ -13,7 +13,7 @@ def test_weekly_check_moves_the_excess_and_it_lands_after_four_business_days(tmp
     cash = PaperBalances(conn)
     cash.amounts = {"kalshi": 3000.0, "polymarket_us": 7000.0}     # 2000 above a 5000 average, past the 25 percent drift.
     logs = []
-    r = rebalance.Rebalancer(conn, cash, logs.append)
+    r = bookkeep.PaperBookKeeper(conn, cash, logs.append)
     r.rebalance("2026-09-21T12:00:00+00:00")                        # A Monday, no check.
     assert database.load_transfers(conn) == []
     r.rebalance("2026-09-22T12:00:00+00:00")                        # Tuesday.
@@ -38,7 +38,7 @@ def test_a_venue_running_low_waits_for_the_weekly_check(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
     cash = PaperBalances(conn)
     cash.amounts = {"kalshi": 400.0, "polymarket_us": 6000.0}
-    r = rebalance.Rebalancer(conn, cash, lambda m: None)
+    r = bookkeep.PaperBookKeeper(conn, cash, lambda m: None)
     r.rebalance("2026-09-23T12:00:00+00:00")                        # A Wednesday.
     assert database.load_transfers(conn) == []
     r.rebalance("2026-09-29T12:00:00+00:00")                        # The next Tuesday.
@@ -50,7 +50,7 @@ def test_balanced_venues_need_no_transfer(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
     cash = PaperBalances(conn)
     cash.amounts = {"kalshi": 4600.0, "polymarket_us": 5400.0}     # 8 percent apart.
-    r = rebalance.Rebalancer(conn, cash, lambda m: None)
+    r = bookkeep.PaperBookKeeper(conn, cash, lambda m: None)
     r.rebalance("2026-09-22T12:00:00+00:00")
     assert database.load_transfers(conn) == []
 
@@ -71,7 +71,7 @@ def test_the_tuesday_check_waits_for_monday_nights_trades_to_settle(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
     cash = PaperBalances(conn)
     cash.amounts = {"kalshi": 3000.0, "polymarket_us": 7000.0}
-    r = rebalance.Rebalancer(conn, cash, lambda m: None)
+    r = bookkeep.PaperBookKeeper(conn, cash, lambda m: None)
     t = open_trade(conn)                                            # Monday night's game, still out after midnight UTC.
     r.rebalance("2026-09-22T01:00:00+00:00")
     assert database.load_transfers(conn) == []
@@ -98,7 +98,7 @@ def alert_for(conn, cash, emails, tmp_path, monkeypatch):
     monkeypatch.setattr(notify, "EMAIL_FILE", tmp_path / "email.json")
     (tmp_path / "email.json").write_text('{"host": "smtp.example.com", "from": "bot@example.com", "to": ["me@example.com"]}')
     notifier = notify.Notifier(conn, lambda m: None, sender=lambda settings, subject, body: emails.append((settings["to"], subject, body)))
-    return rebalance.RebalanceAlert(conn, cash, notifier)
+    return bookkeep.LiveBookKeeper(conn, cash, notifier)
 
 
 def test_live_venues_apart_are_emailed_once_a_day_and_nothing_is_moved(tmp_path, monkeypatch):
