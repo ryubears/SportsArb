@@ -14,8 +14,8 @@ Run from src/ with:
 import argparse
 import json
 import sys
-from run.components import notify
-from run.components.balance.live import READERS
+from engine.components import notify
+from engine.components.balance.live import READERS
 
 
 def check_balances():

@@ -244,16 +244,6 @@ class KalshiBookStream(BookStream):
         await ws.send(json.dumps(update_frame(self.message_id, self.sid, tickers, kalshi_action)))
         self.message_id += 1
 
-    def handle(self, raw):
-        m = json.loads(raw)
-        seq = m.get("seq")
-        if seq is not None:
-            if self.last_seq is not None and seq != self.last_seq + 1:
-                raise Reconnect(f"skipped from seq {self.last_seq} to {seq}")
-            self.last_seq = seq
-        self.apply(m)
-        return True
-
     def apply(self, m):
         """
         Update the local books from one feed message and report the changed ticker.
@@ -285,6 +275,16 @@ class KalshiBookStream(BookStream):
         bids = [[p, s] for p, s in sorted(b["yes"].items(), reverse=True) if s > 0]
         asks = [[p, s] for p, s in sorted(b["no"].items()) if s > 0]
         self.on_book(ticker, bids, asks)
+
+    def handle(self, raw):
+        m = json.loads(raw)
+        seq = m.get("seq")
+        if seq is not None:
+            if self.last_seq is not None and seq != self.last_seq + 1:
+                raise Reconnect(f"skipped from seq {self.last_seq} to {seq}")
+            self.last_seq = seq
+        self.apply(m)
+        return True
 
 
 # TRADING

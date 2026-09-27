@@ -172,13 +172,6 @@ class PolymarketUSBookStream(BookStream):
     def connect(self):
         return self.open_connection(WS_URL, signed_headers("GET", WS_PATH))
 
-    async def subscribe(self, ws):
-        await self.send_subscriptions(ws, sorted(self.wanted))
-
-    async def send_command(self, ws, action, slugs):
-        if action == "add":
-            await self.send_subscriptions(ws, slugs)
-
     async def send_subscriptions(self, ws, slugs):
         """
         Subscribe to full market data for the slugs, WS_CHUNK at a time.
@@ -189,6 +182,13 @@ class PolymarketUSBookStream(BookStream):
                                                     "subscriptionType": "SUBSCRIPTION_TYPE_MARKET_DATA",
                                                     "marketSlugs": slugs[i:i + WS_CHUNK],
                                                     "responsesDebounced": WS_DEBOUNCE}}))
+
+    async def subscribe(self, ws):
+        await self.send_subscriptions(ws, sorted(self.wanted))
+
+    async def send_command(self, ws, action, slugs):
+        if action == "add":
+            await self.send_subscriptions(ws, slugs)
 
     def handle(self, raw):
         m = json.loads(raw)
@@ -250,6 +250,33 @@ def order_body(slug, action, outcome, quantity, price):
             "synchronousExecution": True, "maxBlockTime": str(MAX_BLOCK_SECONDS)}
 
 
+def look_up(answer, action, outcome, quantity):
+    """
+    What became of an order whose answer did not say how it ended, read from
+    the order itself. Its fate is unknown when it has no id, cannot be read,
+    or has still not ended.
+    """
+    order_id = answer.get("id")
+    if not order_id:
+        return orders.unknown(ValueError("the answer has neither an order id nor a final execution"), response={"answer": answer})
+    try:
+        order = signed_request("GET", f"/order/{order_id}")["order"]
+    except Exception as e:
+        return orders.unknown(e, order_id, {"answer": answer})
+    response = {"answer": answer, "order": order}
+    state = order.get("state")
+    if state not in FINAL_STATES:
+        return orders.unknown(ValueError(f"order {order_id} is still {state}"), order_id, response)
+    filled = int(float_or_zero(order.get("cumQuantity")))
+    if state == "ORDER_STATE_REJECTED" and not filled:
+        return orders.Answer(order_id, "rejected", 0, 0.0, 0.0, state, response)
+    long_price = amount(order.get("avgPx"))
+    traded = filled * (long_price if outcome == "yes" else 1 - long_price)
+    fees = amount(order.get("commissionNotionalTotalCollected"))
+    paid = traded + fees if action == "buy" else traded - fees
+    return orders.Answer(order_id, orders.status(filled, quantity), filled, paid, fees, None, response)
+
+
 def place_order(slug, action, outcome, quantity, price, client_id):
     """
     Send an immediate or cancel limit order and return what came back as an
@@ -293,30 +320,3 @@ def place_order(slug, action, outcome, quantity, price, client_id):
         return orders.Answer(answer.get("id"), "rejected", 0, 0.0, 0.0, reason, answer)
     paid = traded + fees if action == "buy" else traded - fees
     return orders.Answer(answer.get("id"), orders.status(filled, quantity), filled, paid, fees, None, answer)
-
-
-def look_up(answer, action, outcome, quantity):
-    """
-    What became of an order whose answer did not say how it ended, read from
-    the order itself. Its fate is unknown when it has no id, cannot be read,
-    or has still not ended.
-    """
-    order_id = answer.get("id")
-    if not order_id:
-        return orders.unknown(ValueError("the answer has neither an order id nor a final execution"), response={"answer": answer})
-    try:
-        order = signed_request("GET", f"/order/{order_id}")["order"]
-    except Exception as e:
-        return orders.unknown(e, order_id, {"answer": answer})
-    response = {"answer": answer, "order": order}
-    state = order.get("state")
-    if state not in FINAL_STATES:
-        return orders.unknown(ValueError(f"order {order_id} is still {state}"), order_id, response)
-    filled = int(float_or_zero(order.get("cumQuantity")))
-    if state == "ORDER_STATE_REJECTED" and not filled:
-        return orders.Answer(order_id, "rejected", 0, 0.0, 0.0, state, response)
-    long_price = amount(order.get("avgPx"))
-    traded = filled * (long_price if outcome == "yes" else 1 - long_price)
-    fees = amount(order.get("commissionNotionalTotalCollected"))
-    paid = traded + fees if action == "buy" else traded - fees
-    return orders.Answer(order_id, orders.status(filled, quantity), filled, paid, fees, None, response)
