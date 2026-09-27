@@ -67,7 +67,7 @@ class Venues:
 
 @pytest.fixture(autouse=True)
 def halt_file(tmp_path, monkeypatch):
-    monkeypatch.setattr(brakes, "HALT_FILE", tmp_path / "live_halted.txt")
+    monkeypatch.setattr(brakes, "HALT_FILE", tmp_path / "live_halt.txt")
     return brakes.HALT_FILE
 
 
@@ -190,6 +190,7 @@ def test_live_trading_halts_at_three_unknown_outcomes_in_twenty_orders(tmp_path)
     assert trade(ex, 2) == [True, True] and ex.halted is None           # Two in eight, not in a row.
     assert trade(ex, 1) == [True] and ex.halted.startswith("3 of the last ")      # The third, in the tenth order, halts.
     assert "orders had an unknown outcome, the last order " in ex.halted and trade(ex) == [False]
+    assert ex.brakes.stopped == ex.halted                               # Flattening stops too.
     assert [kind for kind, _, _ in notifier.sent] == ["set_aside", "set_aside", "set_aside", "halt"]
 
 
@@ -199,6 +200,7 @@ def test_a_venue_refusing_orders_in_a_row_halts_live_trading(tmp_path):
     assert trade(ex, 2) == [True, True] and not ex.halted               # An order Polymarket US took, though it filled nothing, starts it over.
     assert trade(ex, 2) == [True, False]
     assert ex.halted == "kalshi refused 3 orders in a row, the last with: insufficient balance"
+    assert ex.brakes.stopped == ex.halted                               # Flattening stops too.
 
 
 def test_flattening_losses_over_the_limit_halt_live_trading(tmp_path, monkeypatch):
@@ -208,6 +210,31 @@ def test_flattening_losses_over_the_limit_halt_live_trading(tmp_path, monkeypatc
     conn, cash, ex = executor(tmp_path, venues, latest)
     trade(ex)                                                           # Sold back at a cent under cost, 10 cents in all, and flat.
     assert ex.halted == "the live trades decided in the last 6 hours lost 0.10$, 0% of the live money, over the 0% limit"
+    assert ex.brakes.stopped is None                                    # Flattening goes on.
+
+
+def test_after_a_loss_halt_flattening_goes_on_until_its_orders_fail(tmp_path):
+    latest = books()
+    venues = Venues(polymarket_us=[fills(), fills(0), fills(4)] + [REFUSED] * 3, kalshi=[bids_gone(latest)])
+    notifier = FakeNotifier()
+    conn, cash, ex = executor(tmp_path, venues, latest, notifier=notifier)
+    trade(ex)                                                           # Kalshi filled nothing, and the sale back found nothing.
+    assert list(ex.exposed) == [1]
+    ex.brakes.halt("the live trades decided in the last 6 hours lost too much")
+    assert trade(ex) == [False] and len(venues.orders) == 3             # No new trades.
+    assert "; HALTED, still flattening: the live trades decided" in ex.summary()
+    ex.clock = ex.brakes.clock = lambda: "2026-09-27T17:30:01+00:00"    # A second on.
+    asyncio.run(ex.retry(ex.clock()))
+    assert venues.orders[-1] == ("polymarket_us", "sell", "yes", 10, 0.44) and stored(conn, "trades")[0]["yes_held"] == 6
+    for _ in range(3):
+        asyncio.run(ex.retry(ex.clock()))                               # Refused each time.
+    assert ex.brakes.stopped == "polymarket_us refused 3 orders in a row, the last with: insufficient balance"
+    asyncio.run(ex.retry(ex.clock()))
+    assert len(venues.orders) == 7 and list(ex.exposed) == [1]          # Nothing more is sent.
+    assert "; HALTED, no orders at all: polymarket_us refused 3 orders in a row" in ex.summary()
+    (_, first, halted), (_, second, stopped) = notifier.sent
+    assert (first, second) == ("SportsArb live trading halted", "SportsArb live flattening stopped")
+    assert "Exposed trades are still flattened." in halted and "No more orders are sent, flattening included." in stopped
 
 
 def test_nothing_is_traded_before_the_first_balance_reading(tmp_path):
