@@ -112,3 +112,35 @@ def test_the_latency_stopgap_leaves_an_order_unfilled_rather_than_refused(monkey
     assert (answer.status, answer.filled, answer.note) == ("unfilled", 0, "latency stopgap: Global Rate Limit Exceeded")
     fake_api(monkeypatch, {("POST", "/orders"): RequestFailed(429, '{"status": 429, "message": "Global Rate Limit Exceeded"}')})
     assert polymarket_us.place_order("slug", "buy", "yes", 3, 0.44, "c6").status == "unfilled"
+
+
+def test_an_order_waits_as_long_as_the_stopgap_for_its_answer():
+    assert polymarket_us.order_body("slug", "buy", "yes", 3, 0.44)["maxBlockTime"] == "5"
+
+
+def test_an_order_turned_away_for_no_liquidity_is_unfilled_rather_than_refused(monkeypatch):
+    executions = [{"type": "EXECUTION_TYPE_REJECTED", "orderRejectReason": "ORD_REJECT_REASON_NO_LIQUIDITY"}]
+    fake_api(monkeypatch, {("POST", "/orders"): {"id": "p7", "executions": executions}})
+    answer = polymarket_us.place_order("slug", "buy", "yes", 3, 0.44, "c7")
+    assert (answer.status, answer.filled, answer.note) == ("unfilled", 0, "no liquidity: ORD_REJECT_REASON_NO_LIQUIDITY")
+
+
+def test_an_answer_that_does_not_say_how_the_order_ended_is_followed_by_a_look_at_the_order(monkeypatch):
+    partial = [{"type": "EXECUTION_TYPE_PARTIAL_FILL", "lastShares": "1", "lastPx": {"value": "0.54"}}]
+    order = {"id": "p8", "state": "ORDER_STATE_CANCELED", "cumQuantity": 3, "avgPx": {"value": "0.54", "currency": "USD"},
+             "commissionNotionalTotalCollected": {"value": "0.05", "currency": "USD"}}
+    calls = fake_api(monkeypatch, {("POST", "/orders"): {"id": "p8", "executions": partial}, ("GET", "/order/p8"): {"order": order}})
+    answer = polymarket_us.place_order("slug", "buy", "no", 5, 0.47, "c8")
+    # The order went on to fill 3 before the rest was canceled, bought as no at a yes price of 0.54.
+    assert (answer.order_id, answer.status, answer.filled) == ("p8", "partial", 3)
+    assert answer.dollars == pytest.approx(3 * 0.46 + 0.05) and answer.fees == pytest.approx(0.05)
+    assert calls[1][:3] == ("GET", "/order/p8", "GET /v1/order/p8")
+
+
+def test_an_order_that_has_still_not_ended_has_an_unknown_fate(monkeypatch):
+    fake_api(monkeypatch, {("POST", "/orders"): {"id": "p9", "executions": []},
+                           ("GET", "/order/p9"): {"order": {"id": "p9", "state": "ORDER_STATE_PENDING_NEW"}}})
+    answer = polymarket_us.place_order("slug", "buy", "yes", 5, 0.44, "c9")
+    assert (answer.status, answer.order_id, answer.filled) == ("error", "p9", 0) and "still ORDER_STATE_PENDING_NEW" in answer.note
+    fake_api(monkeypatch, {("POST", "/orders"): {"executions": []}})
+    assert polymarket_us.place_order("slug", "buy", "yes", 5, 0.44, "c10").status == "error"      # Not even an order id to look up.

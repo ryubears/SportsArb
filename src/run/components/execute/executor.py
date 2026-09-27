@@ -106,6 +106,7 @@ class Executor:
         self.done = []              # Trades finished since the last summary.
         self.exposed = {}           # Trade id maps to (Trade, [yes Leg, no Leg]) for trades holding more on one side than the other.
         self.flattening = set()     # Ids of exposed trades with an order in flight to flatten them, which the settler leaves alone.
+        self.set_aside = {}         # Trade id maps to why no more orders are sent for it, which only live trading does.
         self.retrying = None        # The task flattening exposed trades while one runs.
         self.totals = {"trades": 0, "profit": 0.0, "hedge": 0.0}
 
@@ -135,7 +136,7 @@ class Executor:
                                                        (yes_leg.venue, yes_leg.fee_info), (no_leg.venue, no_leg.fee_info), config.MIN_EDGE)
         # Ask for the share of the visible size we expect to get, so an unchanged book fills in full.
         cap = self.allocator.cap(pair, now) if self.allocator else cap_range(self.mode)[1]
-        quantity = int(min(available * config.FILL_SHARE, cap, *(self.cash[l.venue] // l.limit for l in legs))) if available else 0
+        quantity = int(min(available * config.FILL_SHARE, cap, *(self.spendable(l.venue) // l.limit for l in legs))) if available else 0
         if quantity < 1:
             return False
         for l in legs:
@@ -154,6 +155,12 @@ class Executor:
         task.add_done_callback(self.tasks.discard)
         task.add_done_callback(on_failure(self.log, f"{self.mode} trade task"))
         return task
+
+    def spendable(self, venue):
+        """
+        Dollars a new trade may spend on a venue: all its free cash.
+        """
+        return self.cash[venue]
 
     def tick(self, now):
         """
@@ -220,13 +227,14 @@ class Executor:
         trade.profit = trade.matched * (1 - yes_fill.average - no_fill.average)
         trade.hedge, trade.hedge_pnl = "none", 0.0
         if yes_fill.filled != no_fill.filled:
-            trade.hedge = await self.flatten(trade, legs) or f"{abs(yes_fill.filled - no_fill.filled)} exposed, no book to flatten"
+            trade.hedge = await self.flatten(trade, legs) or \
+                f"{abs(yes_fill.filled - no_fill.filled)} exposed, {self.set_aside.get(trade.id, 'no book to flatten')}"
         self.settle_legs(trade, legs)
         notes = [f"{leg.side} leg {fill.note}" for leg, fill in zip(legs, fills) if fill.note]
         if notes:
             trade.hedge = trade.hedge + ", " + ", ".join(notes) if trade.hedge != "none" else ", ".join(notes)
         database.update_trade(self.conn, trade)
-        if legs[0].held != legs[1].held:
+        if legs[0].held != legs[1].held and trade.id not in self.set_aside:
             self.exposed[trade.id] = (trade, legs)
         self.totals["trades"] += 1
         self.totals["profit"] += trade.profit
@@ -260,6 +268,11 @@ class Executor:
             if now >= trade.pays_at:
                 del self.exposed[trade_id]
                 continue
+            if trade_id in self.set_aside:
+                del self.exposed[trade_id]
+                trade.hedge += f", then {self.set_aside[trade_id]}"
+                database.update_trade(self.conn, trade)
+                continue
             before = trade.hedge_pnl
             self.flattening.add(trade_id)
             try:
@@ -282,8 +295,11 @@ class Executor:
         Undo the excess on the leg holding more, by selling it back on its
         venue or buying the missing amount on the other venue, whichever the
         books say leaves more money. The chosen order is sent like any other.
-        Returns what was done in words, or None when no fresh book allowed anything.
+        Returns what was done in words, or None when no fresh book allowed
+        anything or the trade has been set aside.
         """
+        if trade.id in self.set_aside:
+            return None
         long_leg, short_leg = sorted(legs, key=lambda l: l.held, reverse=True)
         excess = long_leg.held - short_leg.held
         average = long_leg.cost / long_leg.held

@@ -34,13 +34,20 @@ REBALANCE_WEEKDAY = 1       # Tuesday in UTC, when balances are compared, once M
 REBALANCE_DRIFT = 0.25      # A venue this far above the two venue average on the weekly check sends the excess over.
 TRANSFER_DAYS = 4           # Business days a transfer between venues takes.
 
-# LIVE, execute/live.py, balance/live.py, and rebalance.py. Real money, so each limit is kept small until the live results earn more.
+# LIVE, execute/live.py, execute/brakes.py, balance/live.py, and rebalance.py. Real money, so each limit is kept small
+# until the live results earn more. Sized for a test with about 100 dollars on each venue.
 
 LIVE_MIN_CAP = 1            # Contracts per live trade, the least worth sending.
 LIVE_MAX_CAP = 10           # Contracts per live trade, the most one trade may hold, whatever the allocator would give.
 LIVE_BALANCE_SECONDS = 30   # Between readings of the venues' balances.
-LIVE_REJECT_LIMIT = 3       # Orders a venue may refuse in a row before live trading halts.
-LIVE_MAX_HEDGE_LOSS = 25.0  # Dollars flattening may lose since the start before live trading halts.
+LIVE_CASH_FLOOR = 0.05      # Share of the average venue's live money that new trades leave untouched on each venue, 5 of 100 dollars.
+LIVE_ORDER_WINDOW = 20      # The newest orders the unknown outcome brake looks at.
+LIVE_UNKNOWN_LIMIT = 3      # Orders with an unknown outcome among the newest LIVE_ORDER_WINDOW at which live trading halts.
+LIVE_REJECT_LIMIT = 3       # Orders one venue refuses in a row at which live trading halts.
+LIVE_RESULT_HOURS = 6       # The sliding window the loss and losing rate brakes look at, in hours.
+LIVE_MAX_LOSS_SHARE = 0.10  # Net loss of the trades decided in the window, as a share of the live money, over which live trading halts.
+LIVE_MIN_RESULTS = 10       # Trades decided in the window with a profit or a loss before the losing rate counts.
+LIVE_MAX_LOSING_SHARE = 0.6 # Share of those trades that lost at which live trading halts.
 LIVE_ALERT_HOURS = 24       # Between emails asking for the live venues to be rebalanced, while they stay apart.
 
 # GAMES, game.py. Measured on the first live game, Atlanta at Green Bay.

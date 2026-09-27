@@ -183,7 +183,7 @@ CREATE TABLE IF NOT EXISTS ledger (
 CREATE TABLE IF NOT EXISTS alerts (
     id           INTEGER PRIMARY KEY,
     ts           TEXT NOT NULL,
-    kind         TEXT NOT NULL,     -- 'rebalance' when the live venues drifted apart, 'halt' when live trading stopped.
+    kind         TEXT NOT NULL,     -- 'rebalance' when the live venues drifted apart, 'set_aside' when a live trade's order had an unknown outcome, 'halt' when live trading stopped.
     subject      TEXT NOT NULL,
     body         TEXT NOT NULL,
     sent_at      TEXT,              -- When the email went out, null until it has.

@@ -9,7 +9,7 @@ from db import database
 from db.models import Quote
 from run.components.balance.live import LiveBalances
 from run.components.balance.paper import PaperBalances
-from run.components.execute import live
+from run.components.execute import brakes
 from run.components.execute.live import LiveExecutor
 from run.components.execute.paper import PaperExecutor
 from run.helper import config
@@ -67,17 +67,17 @@ class Venues:
 
 @pytest.fixture(autouse=True)
 def halt_file(tmp_path, monkeypatch):
-    monkeypatch.setattr(live, "HALT_FILE", tmp_path / "live_halted.txt")
-    return live.HALT_FILE
+    monkeypatch.setattr(brakes, "HALT_FILE", tmp_path / "live_halted.txt")
+    return brakes.HALT_FILE
 
 
-def executor(tmp_path, venues, latest=None, alerts=None, logs=None, read=True):
+def executor(tmp_path, venues, latest=None, alerts=None, logs=None, read=True, balance=1000.0):
     conn = database.connect(tmp_path / "t.sqlite")
-    cash = LiveBalances(lambda m: None, {"kalshi": lambda: 1000.0, "polymarket_us": lambda: 1000.0})
+    cash = LiveBalances(lambda m: None, {"kalshi": lambda: balance, "polymarket_us": lambda: balance})
     if read:
         asyncio.run(cash.refresh(NOW))
     latest = books() if latest is None else latest
-    alert = (lambda subject, body: alerts.append((subject, body))) if alerts is not None else None
+    alert = (lambda kind, subject, body, now: alerts.append((kind, subject, body))) if alerts is not None else None
     ex = LiveExecutor(conn, cash, lambda: latest, (logs.append if logs is not None else lambda m: None), clock=lambda: NOW,
                       place=venues.place(), alert=alert)
     return conn, cash, ex
@@ -152,41 +152,51 @@ def test_a_sale_back_is_sent_no_lower_than_the_books_said(tmp_path):
     assert t["hedge_pnl"] == pytest.approx(10 * (0.44 - 0.45))
 
 
-def test_an_order_of_unknown_fate_halts_live_trading_and_tells_a_human(tmp_path):
-    venues = Venues(polymarket_us=[fills()], kalshi=[UNKNOWN])
+def test_an_order_of_unknown_outcome_sets_its_trade_aside_and_trading_goes_on(tmp_path):
+    venues = Venues(polymarket_us=[fills(), fills()], kalshi=[UNKNOWN, fills()])
     alerts, logs = [], []
     conn, cash, ex = executor(tmp_path, venues, alerts=alerts, logs=logs)
     trade(ex)
-    assert len(venues.orders) == 2                                      # Nothing is sent to flatten, since what is held is unknown.
+    assert len(venues.orders) == 2                                      # Nothing is sent to flatten, since what the trade holds is unknown.
     t = stored(conn, "trades")[0]
-    assert (t["yes_held"], t["no_held"]) == (10, 0)
-    assert "10 exposed" in t["hedge"] and "no leg error: TimeoutError('timed out')" in t["hedge"]
     kalshi_order = next(o for o in stored(conn, "orders") if o["venue"] == "kalshi")
     assert (kalshi_order["status"], kalshi_order["filled"]) == ("error", 0)
-    assert ex.halted.startswith(f"order {kalshi_order['id']} for trade {t['id']} (buy 10 no of kalshi k) has an unknown fate")
-    assert kalshi_order["client_id"] in ex.halted
-    assert [subject for subject, _ in alerts] == ["SportsArb live trading halted"] and "remove" in alerts[0][1]
-    assert any(line.startswith("live trading halted: ") for line in logs)
-    assert trade(ex) == [False] and len(venues.orders) == 2             # No new trades either.
-    assert "HALTED" in ex.summary()
+    assert (t["yes_held"], t["no_held"]) == (10, 0) and ex.exposed == {}
+    assert t["hedge"] == f"10 exposed, set aside, order {kalshi_order['id']} has an unknown outcome, no leg error: TimeoutError('timed out')"
+    ((kind, subject, body),) = alerts
+    assert (kind, subject) == ("set_aside", f"SportsArb live trade {t['id']} set aside")
+    assert kalshi_order["client_id"] in body and "buy 10 no of kalshi k" in body
+    assert any(line.startswith(f"live trade {t['id']} set aside") for line in logs)
+    assert ex.halted is None and trade(ex) == [True]                    # The next trade goes ahead.
+    assert stored(conn, "trades")[1]["status"] == "filled"
+
+
+def test_live_trading_halts_at_three_unknown_outcomes_in_twenty_orders(tmp_path):
+    venues = Venues(polymarket_us=[UNKNOWN, fills(), fills(), fills(), UNKNOWN] + [fills()] * 5, kalshi=[fills(), fills(), UNKNOWN] + [fills()] * 7)
+    alerts = []
+    conn, cash, ex = executor(tmp_path, venues, alerts=alerts)
+    assert trade(ex, 2) == [True, True] and ex.halted is None           # One unknown in four orders.
+    assert trade(ex, 2) == [True, True] and ex.halted is None           # Two in eight, not in a row.
+    assert trade(ex, 1) == [True] and ex.halted.startswith("3 of the last ")      # The third, in the tenth order, halts.
+    assert "orders had an unknown outcome, the last order " in ex.halted and trade(ex) == [False]
+    assert [kind for kind, _, _ in alerts] == ["set_aside", "set_aside", "set_aside", "halt"]
 
 
 def test_a_venue_refusing_orders_in_a_row_halts_live_trading(tmp_path):
     venues = Venues(polymarket_us=[REFUSED, fills(0), REFUSED, REFUSED], kalshi=[REFUSED, REFUSED, REFUSED, REFUSED])
     conn, cash, ex = executor(tmp_path, venues)
-    assert trade(ex, 2) == [True, True] and not ex.halted
-    assert ex.rejects == {"polymarket_us": 0, "kalshi": 2}              # An order Polymarket US took, though it filled nothing, starts it over.
+    assert trade(ex, 2) == [True, True] and not ex.halted               # An order Polymarket US took, though it filled nothing, starts it over.
     assert trade(ex, 2) == [True, False]
     assert ex.halted == "kalshi refused 3 orders in a row, the last with: insufficient balance"
 
 
 def test_flattening_losses_over_the_limit_halt_live_trading(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "LIVE_MAX_HEDGE_LOSS", 0.05)
+    monkeypatch.setattr(config, "LIVE_MAX_LOSS_SHARE", 0.00004)          # A tenth of a dollar lost on 2,000 is 0.005%.
     latest = books()
     venues = Venues(polymarket_us=[fills(), fills()], kalshi=[bids_gone(latest)])
     conn, cash, ex = executor(tmp_path, venues, latest)
-    trade(ex)                                                           # Sold back at a cent under cost, 10 cents in all.
-    assert ex.halted == "flattening has lost 0.10$ since the start, over the limit of 0.05$"
+    trade(ex)                                                           # Sold back at a cent under cost, 10 cents in all, and flat.
+    assert ex.halted == "the live trades decided in the last 6 hours lost 0.10$, 0% of the live money, over the 0% limit"
 
 
 def test_nothing_is_traded_before_the_first_balance_reading(tmp_path):
@@ -203,28 +213,35 @@ def test_each_executor_trades_only_its_own_money(tmp_path):
         PaperExecutor(conn, LiveBalances(), lambda: {})
 
 
-def test_an_answer_that_cannot_be_read_counts_as_an_unknown_fate(tmp_path):
+def test_an_answer_that_cannot_be_read_counts_as_an_unknown_outcome(tmp_path):
     def unreadable(quantity, price):
         raise KeyError("executions")
     venues = Venues(polymarket_us=[fills()], kalshi=[unreadable])
     conn, cash, ex = executor(tmp_path, venues)
     trade(ex)
-    assert ex.halted and "KeyError('executions')" in ex.halted
+    assert "KeyError('executions')" in ex.set_aside[1] or "KeyError('executions')" in stored(conn, "orders")[1]["note"]
+    assert 1 in ex.set_aside and ex.halted is None
     assert cash.reserved == {"kalshi": 0, "polymarket_us": 0}          # The reservation came back all the same.
 
 
-def test_a_halt_outlasts_a_restart_until_a_human_removes_the_file(tmp_path, halt_file):
-    conn, cash, ex = executor(tmp_path, Venues(polymarket_us=[fills()], kalshi=[UNKNOWN]))
-    trade(ex)
-    assert halt_file.read_text().startswith("2026-09-27T17:30:00 UTC order ") and "has an unknown fate" in halt_file.read_text()
+def test_a_halt_outlasts_a_restart_until_a_human_removes_the_file_and_then_starts_over(tmp_path, halt_file):
+    from run.components import notify
+    conn = database.connect(tmp_path / "t.sqlite")
+    notifier = notify.Notifier(conn, lambda m: None, sender=lambda *args: None)
+    venues = Venues(polymarket_us=[fills()] * 3, kalshi=[REFUSED] * 3)
+    conn, cash, ex = executor(tmp_path, venues)
+    ex.brakes.alert = ex.alert = notifier.send                         # Halts are stored as alerts, as the session wires them.
+    trade(ex, 3)
+    assert halt_file.read_text().startswith("2026-09-27T17:30:00 UTC kalshi refused 3 orders in a row")
     logs = []
-    venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
+    venues = Venues(polymarket_us=[fills(), fills()], kalshi=[REFUSED, fills()])
     conn, cash, again = executor(tmp_path, venues, logs=logs)           # A crash or a deploy restarts the process.
     assert again.halted.startswith(f"halted before this start, remove {halt_file} to resume: ")
     assert logs[0].startswith("live trading halted before this start") and trade(again) == [False] and venues.orders == []
     halt_file.unlink()                                                  # Checked and cleared by a human.
     conn, cash, resumed = executor(tmp_path, venues)
     assert resumed.halted is None and trade(resumed) == [True]
+    assert resumed.halted is None                                       # Its refusal is the first since the halt, not the fourth in a row.
 
 
 def test_orders_the_latency_stopgap_turned_away_do_not_count_as_refusals(tmp_path):
@@ -233,3 +250,27 @@ def test_orders_the_latency_stopgap_turned_away_do_not_count_as_refusals(tmp_pat
     conn, cash, ex = executor(tmp_path, venues)
     assert trade(ex, 4) == [True] * 4 and ex.halted is None
     assert "yes leg unfilled: latency stopgap" in stored(conn, "trades")[0]["hedge"]
+
+
+def test_new_trades_leave_a_floor_on_each_venue_that_flattening_may_use(tmp_path):
+    latest = books()
+    venues = Venues(polymarket_us=[fills()], kalshi=[fills(3), fills()])
+    logs = []
+    conn, cash, ex = executor(tmp_path, venues, latest, logs=logs, balance=10.0)
+    # 5% of the average venue's 10 dollars is 0.50 left untouched, so 9.50 is free on each venue: 21 contracts at 0.45 or 20 at
+    # 0.47. The cap of 10 is less. Kalshi fills 3, and the 7 missing are bought there with the floor if need be.
+    assert ex.brakes.floor() == pytest.approx(0.5)
+    assert trade(ex) == [True]
+    assert venues.orders[-1] == ("kalshi", "buy", "no", 7, 0.47)
+    # The venues now read 0.20 each, and the open trade holds 9.20 at cost, so the live money is 9.60 and the floor 0.24.
+    cash.read.update(kalshi=0.2, polymarket_us=0.2)
+    cash.moved.update(kalshi=0.0, polymarket_us=0.0)
+    ex.tick(NOW)
+    assert ex.brakes.floor() == pytest.approx(0.24)
+    assert trade(ex) == [False] and len(venues.orders) == 3             # Under the floor, so no new trades.
+    assert logs[-2:] == ["live kalshi has 0.20$, under its 0.24$ floor, so new trades wait until more arrives",
+                         "live polymarket_us has 0.20$, under its 0.24$ floor, so new trades wait until more arrives"]
+    assert "new trades wait on kalshi, polymarket_us, under the floor" in ex.summary()
+    cash.read.update(kalshi=5.0)                                        # A payout arrives.
+    ex.tick(NOW)
+    assert logs[-1] == "live kalshi has 5.00$, back over its 0.36$ floor"          # 5.20 cash and 9.20 held: 14.40.

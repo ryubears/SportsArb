@@ -238,7 +238,7 @@ class Alert:
     """
     id: int | None = row_id()
     ts: str
-    kind: str               # 'rebalance' when the live venues drifted apart, 'halt' when live trading stopped.
+    kind: str               # 'rebalance' when the live venues drifted apart, 'set_aside' when a live trade's order had an unknown outcome, 'halt' when live trading stopped.
     subject: str
     body: str
     sent_at: str | None = None      # When the email went out, None until it has.

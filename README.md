@@ -72,7 +72,9 @@ contract count needs. Both clients also report how a contract resolved,
 which the settler uses, and carry the live trading calls: the account's
 balance, and an immediate or cancel limit order whose answer they turn
 into an `orders.Answer`, the same for both venues. Polymarket US prices
-every order on the long side, so a short side order at p is sent at 1 - p.
+every order on the long side, so a short side order at p is sent at 1 - p,
+and when its answer does not say how an order ended, the order itself is
+looked up, since a returned order id does not mean the order is done.
 Trading calls go over kept HTTPS connections from **http.py**, since a new
 TLS connection costs round trips a race cannot spare, and are never
 retried, since an order sent twice trades twice. The field names come from
@@ -140,15 +142,37 @@ at least five cents per contract, and only games being played are traded,
 so the money comes back the same day. Every trade is stored as soon as it
 is sent and updated when it is done.
 
-Live trading has brakes. It halts, sending no more orders of any kind,
-when an order's fate cannot be known (a timeout, a dropped connection, a
-venue failing on its side), since what is held is then unknown too; when
-a venue refuses three orders in a row; and when flattening has lost more
-than $25 since the start. A halt is logged and emailed, and what is held
-is still settled. It is also written to `data/live_halted.txt`, and live
-trading stays halted across restarts, a crash or a deploy, until a human
-has checked the venues and removed that file. Live trades hold 1 to 10
-contracts until the live results earn more.
+Live trading has brakes, in **brakes.py**, sized for a test with about
+$100 on each venue. An order whose outcome cannot be known (a timeout, a
+dropped connection, a venue failing on its side, or an answer that cannot
+be read) sets its trade aside: no more orders are sent for it, since what
+it holds is unknown, and an email says which order to look up. Trading
+goes on. It halts, sending no more orders of any kind, when:
+
+- 3 of the last 20 orders had an unknown outcome, three in a row or a
+  steady error rate;
+- one venue refused its last 3 orders. A refusal is the venue answering
+  that it will not take an order, so nothing traded: not authorized, not
+  enough money, a bad price, too many requests, or a market that has
+  closed. An order that found nothing at its price is unfilled, not
+  refused, as is one Polymarket US turned away for no liquidity or for
+  being slow;
+- the live trades decided in the last 6 hours lost more than 10% of the
+  live money, net;
+- at least 10 trades were decided in those 6 hours with a profit or a
+  loss, and 60% or more of them lost.
+
+A trade is decided once its legs hold the same number of contracts, which
+pay a dollar each whichever way the game goes, or once it settles. Each
+rule reads the orders and trades tables, so a restart does not reset it,
+and starts over after a halt. A halt is logged and emailed, and what is
+held is still settled. It is also written to `data/live_halted.txt`, and
+live trading stays halted across restarts, a crash or a deploy, until a
+human has checked the venues and removed that file. New trades leave 5% of
+the average venue's live money, cash and open trades at cost, untouched on
+each venue, $5 of $100, so a balance lower than it looks between readings
+still covers fees and flattening, which may use it. Live trades hold 1 to
+10 contracts until the live results earn more.
 
 **allocate.py** sets how many contracts one trade may hold, so the money
 covers every game in play. The games from kickoff until they settle share

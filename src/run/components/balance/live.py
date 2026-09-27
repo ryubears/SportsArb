@@ -46,6 +46,12 @@ class LiveBalances(Balances):
     def amounts(self):
         return {venue: self.read[venue] + self.moved[venue] - self.reserved[venue] for venue in VENUES}
 
+    def total(self):
+        """
+        The cash on both venues, what is held back for orders in flight included.
+        """
+        return sum(self.read[venue] + self.moved[venue] for venue in VENUES)
+
     def reserve(self, venue, dollars):
         self.reserved[venue] += dollars
 

@@ -14,16 +14,13 @@ far from where it was priced. Every order is stored in the orders table
 before it is sent and updated with the venue's answer, and the money is
 the venues' own, through LiveBalances from balance/live.py.
 
-Real money calls for brakes. Live trading halts, sending no more orders of
-any kind, when an order's fate cannot be
-known, since what is held is then unknown too, when a venue refuses
-config.LIVE_REJECT_LIMIT orders in a row, since one leg of every trade
-would fill and be flattened at a loss, and when flattening has lost more
-than config.LIVE_MAX_HEDGE_LOSS since the start. A halt is logged and
-sent to the alert, and what is held is still settled. It is also written
-to HALT_FILE, and a live executor that starts while the file is there
-starts halted, so a crash or a deploy does not resume live trading before
-a human has checked the venues and removed the file.
+An order whose outcome cannot be known, because no answer came, the venue
+failed on its side, or its answer cannot be read, leaves what its trade
+holds unknown. That trade is set aside: no more orders are sent for it,
+and a human is told which order to look up on the venue. The rest of live
+trading goes on. When live trading halts altogether, when it pauses new
+trades on a venue running low, and what counts as a refusal, is in
+brakes.py.
 """
 
 import asyncio
@@ -32,23 +29,23 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from api import kalshi, orders, polymarket_us
 from common import jsonutil
-from common.paths import DATA_DIR
 from common.timeutil import now_iso
+from common.venues import VENUES
 from db import database
 from db.models import Order
+from run.components.execute.brakes import Brakes
 from run.components.execute.executor import Executor, Fill
 from run.helper import config
 
 PLACE = {"kalshi": kalshi.place_order, "polymarket_us": polymarket_us.place_order}   # How each venue takes an order.
 ORDER_THREADS = 8       # Orders in flight at once. Two per trade, so a burst of signals is not held back.
-HALT_FILE = DATA_DIR / "live_halted.txt"    # Why live trading halted, kept until a human removes it.
 
 
 class LiveExecutor(Executor):
     """
     Sends real orders for the trades the shared Executor decides on.
     place maps a venue to its place_order function. alert is called with a
-    subject and a body when trading halts, to tell a human, for example by email.
+    kind, a subject, a body, and the time, to tell a human, for example by email.
     """
 
     mode = "live"
@@ -58,11 +55,12 @@ class LiveExecutor(Executor):
         self.place = place or PLACE
         self.alert = alert
         self.threads = ThreadPoolExecutor(ORDER_THREADS, thread_name_prefix="orders")
-        self.halted = None          # Why live trading stopped, once it has.
-        self.rejects = {}           # Venue maps to the orders it has refused in a row.
-        if HALT_FILE.exists():
-            self.halted = f"halted before this start, remove {HALT_FILE} to resume: {HALT_FILE.read_text().strip()}"
-            self.log(f"live trading {self.halted}")
+        self.brakes = Brakes(conn, cash, log, alert, clock)
+        self.low = set()            # Venues whose cash is under the floor new trades leave untouched.
+
+    @property
+    def halted(self):
+        return self.brakes.halted
 
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """
@@ -71,6 +69,25 @@ class LiveExecutor(Executor):
         if self.halted:
             return False
         return super().signal(pair, yes, no, edge, size, fee_infos, now)
+
+    def spendable(self, venue):
+        """
+        A venue's free cash less the floor new trades leave untouched.
+        """
+        return max(0.0, self.cash[venue] - self.brakes.floor())
+
+    def tick(self, now):
+        """
+        Retry what is exposed, and log when a venue goes under the floor or comes back over it.
+        """
+        super().tick(now)
+        floor = self.brakes.floor()
+        for venue in VENUES:
+            low = self.cash.read_at[venue] is not None and self.cash[venue] < floor
+            if low != (venue in self.low):
+                (self.low.add if low else self.low.discard)(venue)
+                self.log(f"live {venue} has {self.cash[venue]:,.2f}$, " +
+                         (f"under its {floor:,.2f}$ floor, so new trades wait until more arrives" if low else f"back over its {floor:,.2f}$ floor"))
 
     # ORDERS
 
@@ -110,55 +127,48 @@ class LiveExecutor(Executor):
             answer.status, answer.order_id, answer.filled, answer.dollars, answer.fees, answer.note)
         order.response = jsonutil.dump(answer.response)
         database.update_order(self.conn, order)
-        self.watch(trade, order)
+        if order.status == "error":
+            self.set_trade_aside(trade, order)
+        self.brakes.watch(order)
         note = f"{answer.status}: {answer.note}" if answer.note else ""
         return Fill(answer.filled, answer.dollars, order.latency_ms, order.answered_at, note)
 
-    # BRAKES
-
-    def watch(self, trade, order):
+    def set_trade_aside(self, trade, order):
         """
-        Halt on an order whose fate is unknown, or on too many refusals in a row from one venue.
+        Send no more orders for a trade one of whose orders has an unknown outcome, and tell a human which order to look up.
         """
-        if order.status == "error":
-            self.halt(f"order {order.id} for trade {trade.id} ({order.action} {order.quantity} {order.outcome} of {order.venue} "
-                      f"{order.contract_id}) has an unknown fate: {order.note}. Check the venue for client id {order.client_id} "
-                      f"and what the account holds.")
-        elif order.status == "rejected":
-            self.rejects[order.venue] = self.rejects.get(order.venue, 0) + 1
-            if self.rejects[order.venue] >= config.LIVE_REJECT_LIMIT:
-                self.halt(f"{order.venue} refused {self.rejects[order.venue]} orders in a row, the last with: {order.note}")
-        else:
-            self.rejects[order.venue] = 0
-
-    def halt(self, reason):
-        """
-        Stop sending orders, keep the reason in HALT_FILE, log it, and tell a human. Only the first reason counts.
-        """
-        if self.halted:
+        if trade.id in self.set_aside:
             return
-        self.halted = reason
-        HALT_FILE.parent.mkdir(parents=True, exist_ok=True)
-        HALT_FILE.write_text(f"{self.clock()[:19]} UTC {reason}\n")
-        self.log(f"live trading halted: {reason}")
+        self.set_aside[trade.id] = f"set aside, order {order.id} has an unknown outcome"
+        self.log(f"live trade {trade.id} set aside: order {order.id}, {order.action} {order.quantity} {order.outcome} of {order.venue} "
+                 f"{order.contract_id}, has an unknown outcome: {order.note}")
         if self.alert:
-            self.alert("SportsArb live trading halted",
-                       f"Live trading stopped at {self.clock()[:19]} UTC and sends no more orders.\n\n{reason}\n\n"
-                       f"What is held is still settled. Balances: {self.cash.summary()}.\n\n"
-                       f"Once the venues are checked, remove {HALT_FILE} and restart the process to resume.")
+            venue_id = f", venue order id {order.venue_order_id}" if order.venue_order_id else ""
+            self.alert("set_aside", f"SportsArb live trade {trade.id} set aside",
+                       f"Order {order.id} of live trade {trade.id} got no answer that says what happened: {order.note}.\n\n"
+                       f"It was an order to {order.action} {order.quantity} {order.outcome} of {order.venue} {order.contract_id} "
+                       f"at {order.limit_price:.4f}, sent at {order.sent_at[:19]} UTC, client id {order.client_id}{venue_id}.\n\n"
+                       f"No more orders are sent for the trade, since what it holds is unknown. Look the order up on the venue, "
+                       f"and flatten what the trade holds by hand if it traded.\n\n"
+                       f"Live trading goes on, and halts if {config.LIVE_UNKNOWN_LIMIT} of the last {config.LIVE_ORDER_WINDOW} "
+                       f"orders have an unknown outcome.", self.clock())
 
-    async def retry(self, now):
-        await super().retry(now)
-        self.check_losses()
+    # RESULTS, which the brakes check whenever a trade may have been decided.
 
     async def run_trade(self, trade, legs):
         await super().run_trade(trade, legs)
-        self.check_losses()
+        self.brakes.check_results()
 
-    def check_losses(self):
-        if self.totals["hedge"] < -config.LIVE_MAX_HEDGE_LOSS:
-            self.halt(f"flattening has lost {-self.totals['hedge']:.2f}$ since the start, over the limit of {config.LIVE_MAX_HEDGE_LOSS:.2f}$")
+    async def retry(self, now):
+        await super().retry(now)
+        self.brakes.check_results()
+
+    def settled(self, trade_id):
+        super().settled(trade_id)
+        self.brakes.check_results()
 
     def summary(self):
         line = super().summary()
+        if self.low:
+            line += f"; new trades wait on {', '.join(sorted(self.low))}, under the floor"
         return line + (f"; HALTED: {self.halted}" if self.halted else "")

@@ -100,7 +100,9 @@ def live_settings():
     """
     c = config
     return (f"LIVE TRADING with real money: cap {c.LIVE_MIN_CAP} to {c.LIVE_MAX_CAP} contracts, balances read every "
-            f"{c.LIVE_BALANCE_SECONDS}s, halt after {c.LIVE_REJECT_LIMIT} refusals in a row or {c.LIVE_MAX_HEDGE_LOSS:,.2f}$ lost flattening, "
+            f"{c.LIVE_BALANCE_SECONDS}s, {c.LIVE_CASH_FLOOR:.0%} of each venue's share left untouched; halt at {c.LIVE_UNKNOWN_LIMIT} "
+            f"unknown outcomes in {c.LIVE_ORDER_WINDOW} orders, {c.LIVE_REJECT_LIMIT} refusals in a row, or over {c.LIVE_RESULT_HOURS}h "
+            f"a loss over {c.LIVE_MAX_LOSS_SHARE:.0%} or {c.LIVE_MAX_LOSING_SHARE:.0%} losing of {c.LIVE_MIN_RESULTS}+ trades; "
             f"email to rebalance over {c.REBALANCE_DRIFT:.0%} every {c.LIVE_ALERT_HOURS}h")
 
 
@@ -122,8 +124,7 @@ class Desk:
         elif mode == "live":
             self.cash = LiveBalances(log)
             self.allocator = allocate.Allocator(conn, self.cash)
-            self.executor = LiveExecutor(conn, self.cash, books, log, allocator=self.allocator,
-                                         alert=lambda subject, body: notifier.send("halt", subject, body))
+            self.executor = LiveExecutor(conn, self.cash, books, log, allocator=self.allocator, alert=notifier.send)
             self.keeper = rebalance.RebalanceAlert(conn, self.cash, notifier, log)
         else:
             raise ValueError(f"unknown mode {mode!r}")
