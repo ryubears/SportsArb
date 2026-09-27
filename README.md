@@ -72,10 +72,13 @@ immediate on the first drop and backs off only on repeated ones, with the
 stretch until the new subscription is confirmed stored as a gap, and the
 books of that connection's contracts dropped until it sends them again.
 **kalshi.py** signs each connection and request with RSA-PSS and holds the
-whole catalog on one connection. **polymarket_us.py** signs with Ed25519,
-subscribes in chunks of 100 slugs, and, because the feed refuses an
-eleventh subscription on one connection, opens as many connections as the
-contract count needs. Both clients also report how a contract resolved,
+whole catalog on one connection. **polymarket_us.py** signs with Ed25519
+and subscribes in requests of up to 100 slugs. The feed takes ten requests
+on a connection and has no unsubscribe, and every catalog refresh that
+adds contracts spends one more, however few it adds. So new contracts go
+to a connection with requests left, a new connection opens when none has
+any, and contracts a connection refuses anyway, as one request too many,
+move to another. Both clients also report how a contract resolved,
 which the settler uses, and carry the live trading calls: the account's
 balance, and an immediate or cancel limit order whose answer they turn
 into an `Answer`, the same for both venues. Polymarket US prices
@@ -106,14 +109,15 @@ is in `engine/helper/`: the settings, game timing, pricing, and fees.
 five levels a side, which the scanner prices and the executors trade
 against. Books are not stored, only the gaps when a venue's feed was down.
 **feeds.py** holds a venue's connections, one, or several when the venue
-caps how much one connection may carry, and moves contracts between them
-as the catalog changes. Each venue's feed runs in a child process of its
-own, so receiving, parsing, and keeping the books use another core. The
-child passes each changed book's best levels over a pipe, only the newest
-of a contract when the main process falls behind, and a child that dies
-is started again, with the stretch stored as a gap. **streams.py** gives
-each venue its feed and passes the books to the recorder. With
-`--set feed_processes=false` every feed runs in the main process instead.
+caps how much one connection may carry, and applies catalog changes to them
+in place, each new contract going to a connection with room. Each venue's
+feed runs in a child process of its own, so receiving, parsing, and keeping
+the books use another core. The child passes each changed book's best
+levels over a pipe, only the newest of a contract when the main process
+falls behind, and a child that dies is started again, with the stretch
+stored as a gap. **streams.py** gives each venue its feed and passes the
+books to the recorder. With `--set feed_processes=false` every feed runs in
+the main process instead.
 
 **scan.py** prices every pair whose member's book just changed. Using
 **pricing.py** it walks the ladders to find the cheapest way to hold yes and

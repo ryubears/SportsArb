@@ -1,9 +1,9 @@
 """
 One venue's feed: its connections, run here or in a process of its own.
 
-A VenueFeed holds a venue's BookStreams, as many as its contracts need at
-the venue's capacity, and applies changes to the wanted contracts on the
-live connections in place, so a catalog refresh never reconnects.
+A VenueFeed holds a venue's BookStreams, as many as the venue's limits
+need, and applies changes to the wanted contracts on the live connections
+in place, so a catalog refresh never reconnects.
 
 A Python process runs on one core, and with nine games at once the feeds
 alone kept it busy: every message is received over TLS, parsed, and
@@ -39,11 +39,15 @@ STOP_SECONDS = 5                # How long a child may take to stop before it is
 class VenueFeed:
     """
     One venue's connections. A venue whose stream class sets a capacity gets
-    as many connections as its contracts need, filled in order. Each book is
-    passed to on_book(contract_id, bids, asks, ts) with the time it arrived,
-    depth levels a side, and each gap to on_gap(start_ts, end_ts, contract_ids).
-    down_since, when given, is when the venue's connections were lost before
-    these, so their first subscriptions end a gap.
+    as many connections as its contracts need: new contracts go to the
+    connections in order, as many as each one's room() allows, and to new
+    connections once none has room. Contracts a venue refuses on one
+    connection come back through its on_refused and are placed the same
+    way. Each book is passed to on_book(contract_id, bids, asks, ts) with
+    the time it arrived, depth levels a side, and each gap to
+    on_gap(start_ts, end_ts, contract_ids). down_since, when given, is when
+    the venue's connections were lost before these, so their first
+    subscriptions end a gap.
     """
 
     def __init__(self, stream_class, on_book, on_gap, log=log, depth=None, down_since=None):
@@ -58,7 +62,7 @@ class VenueFeed:
 
     @property
     def capacity(self):
-        return getattr(self.stream_class, "capacity", None)
+        return self.stream_class.capacity
 
     def open(self, contract_ids):
         """
@@ -68,6 +72,7 @@ class VenueFeed:
         if self.depth:
             stream.depth = self.depth
         stream.down_since = self.down_since
+        stream.on_refused = self.add
         self.streams.append(stream)
         self.tasks.append(asyncio.create_task(stream.run()))
         return stream
@@ -88,12 +93,13 @@ class VenueFeed:
         """
         ids = sorted(contract_ids)
         for stream in self.streams:
-            room = len(ids) if self.capacity is None else max(self.capacity - len(stream.wanted), 0)
-            if room:
-                stream.add(ids[:room])
-                ids = ids[room:]
             if not ids:
                 return
+            room = stream.room()
+            taken = ids if room is None else ids[:room]
+            if taken:
+                stream.add(taken)
+                ids = ids[len(taken):]
         while ids:
             size = self.capacity or len(ids)
             self.open(ids[:size])

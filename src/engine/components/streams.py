@@ -42,9 +42,9 @@ class Streams:
 
     def connections(self, venue):
         """
-        How many connections the venue's contracts take.
+        How many connections the venue's contracts take to start with.
         """
-        capacity = getattr(self.stream_classes[venue], "capacity", None)
+        capacity = self.stream_classes[venue].capacity
         return max(1, math.ceil(len(self.wanted[venue]) / capacity)) if capacity else 1
 
     def start(self, venue, contract_ids):

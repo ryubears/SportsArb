@@ -17,6 +17,7 @@ id and secret live in the data folder, see KEY_ID_FILE and SECRET_KEY_FILE.
 import base64
 import functools
 import json
+import math
 import time
 from api import orders
 from api.bookstream import BookStream
@@ -32,8 +33,9 @@ API = "https://api.polymarket.us/v1"            # Signed requests for books and 
 API_PATH = "/v1"                                # API's path, which a signed request's signature covers.
 WS_URL = "wss://api.polymarket.us/v1/ws/markets"
 WS_PATH = "/v1/ws/markets"
-WS_CHUNK = 100          # Market slugs per subscription, the documented maximum.
-WS_SUBSCRIPTIONS = 10   # Subscriptions per connection. The feed refuses an eleventh with 'max subscriptions per connection reached'.
+WS_CHUNK = 100          # Market slugs per subscription request, the documented maximum.
+WS_SUBSCRIPTIONS = 10   # Subscription requests per connection, however few slugs each carries.
+WS_FULL = "max subscriptions per connection reached"    # The error refusing a request past WS_SUBSCRIPTIONS.
 WS_DEBOUNCE = True      # Ask the feed to batch updates, which cuts bandwidth by a third and the messages to parse with it.
 KEY_ID_FILE = DATA_DIR / "polymarket_us_key_id.txt"
 SECRET_KEY_FILE = DATA_DIR / "polymarket_us_secret_key.txt"
@@ -156,18 +158,44 @@ def levels(entries, reverse):
 class PolymarketUSBookStream(BookStream):
     """
     The signed markets websocket. Each message carries a market's whole
-    book, so the local copy is replaced rather than patched. Subscriptions
-    are sent in groups of WS_CHUNK slugs, batched when WS_DEBOUNCE is set.
-    The feed documents no unsubscribe, so removed slugs are simply ignored
-    until the next connect. A connection carries at most capacity slugs,
-    so the recorder opens more connections for a larger set.
+    book, so the local copy is replaced rather than patched.
+
+    The feed allows WS_SUBSCRIPTIONS subscription requests on a connection,
+    of up to WS_CHUNK slugs each, and documents no unsubscribe, so removed
+    slugs are simply ignored until the next connect and never give their
+    request back. A fresh connection subscribes its slugs, capacity at most,
+    in full requests, but every later add spends a request of its own, even
+    for a single slug. So room() counts the requests left, and the feed
+    opens another connection once none has any. A request refused anyway,
+    as past the limit, has its slugs handed back through on_refused to go
+    on another connection.
     """
 
     name = "polymarket_us"
     capacity = WS_CHUNK * WS_SUBSCRIPTIONS
 
+    def __init__(self, contract_ids, on_book, on_gap=None, log=print):
+        super().__init__(contract_ids, on_book, on_gap, log)
+        self.reset()            # The request count is read before the first connect, to place adds.
+
     def reset(self):
         self.request_id = 0
+        self.requests = 0       # Subscription requests this connection has spent, adds still queued included.
+        self.asked = {}         # Each request id sent maps to its slugs, to hand them back if it is refused.
+
+    def room(self):
+        """
+        The slugs one add may bring: as many as fit in the requests left.
+        Before the connection subscribes, the requests counted are only the
+        adds, which the subscription will carry with the rest, so the slug
+        capacity bounds it too.
+        """
+        return max(0, min((WS_SUBSCRIPTIONS - self.requests) * WS_CHUNK, self.capacity - len(self.wanted)))
+
+    def add(self, contract_ids):
+        new = set(contract_ids) - self.wanted
+        super().add(new)
+        self.requests += math.ceil(len(new) / WS_CHUNK)    # What send_command will spend on them.
 
     def connect(self):
         return self.open_connection(WS_URL, signed_headers("GET", WS_PATH))
@@ -178,24 +206,44 @@ class PolymarketUSBookStream(BookStream):
         """
         for i in range(0, len(slugs), WS_CHUNK):
             self.request_id += 1
-            await ws.send(json.dumps({"subscribe": {"requestId": f"md-{self.request_id}",
+            request_id = f"md-{self.request_id}"
+            self.asked[request_id] = slugs[i:i + WS_CHUNK]
+            await ws.send(json.dumps({"subscribe": {"requestId": request_id,
                                                     "subscriptionType": "SUBSCRIPTION_TYPE_MARKET_DATA",
                                                     "marketSlugs": slugs[i:i + WS_CHUNK],
                                                     "responsesDebounced": WS_DEBOUNCE}}))
 
     async def subscribe(self, ws):
-        await self.send_subscriptions(ws, sorted(self.wanted))
+        slugs = sorted(self.wanted)
+        self.requests = math.ceil(len(slugs) / WS_CHUNK)    # Replaces the count of adds, which these slugs include.
+        await self.send_subscriptions(ws, slugs)
 
     async def send_command(self, ws, action, slugs):
         if action == "add":
             await self.send_subscriptions(ws, slugs)
 
+    def refused(self, request_id):
+        """
+        The feed refused a request as past the limit. Whatever the count
+        said, the connection is full, so it takes nothing more, and the
+        request's slugs still wanted go on another connection.
+        """
+        self.requests = WS_SUBSCRIPTIONS
+        slugs = sorted(set(self.asked.pop(request_id)) & self.wanted)
+        self.log(f"polymarket_us refused {request_id} as one subscription too many, moving its {len(slugs)} contracts to another connection")
+        if slugs:
+            self.remove(slugs)
+            self.on_refused(slugs)
+
     def handle(self, raw):
         m = json.loads(raw)
         data = m.get("marketData")
         if not data:
-            if m.get("error"):
-                self.log(f"polymarket_us stream error {m['error']} on {m.get('requestId')}")
+            error = m.get("error")
+            if error and WS_FULL in str(error) and m.get("requestId") in self.asked:
+                self.refused(m["requestId"])
+            elif error:
+                self.log(f"polymarket_us stream error {error} on {m.get('requestId')}")
             return False
         slug = data.get("marketSlug")
         if slug not in self.wanted:

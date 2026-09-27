@@ -181,6 +181,41 @@ def test_changes_made_while_running_are_sent_and_pending_ones_dropped_on_connect
     assert stream.wanted == {"y", "z"}
 
 
+class SlowConnection(FakeConnection):
+    """
+    A connection whose handshake lasts until the test lets it finish.
+    """
+
+    def __init__(self, messages, then):
+        super().__init__(messages, then)
+        self.opening = asyncio.Event()      # Set once the handshake has begun.
+        self.finish = asyncio.Event()       # Set by the test to end it.
+
+    async def __aenter__(self):
+        self.opening.set()
+        await self.finish.wait()
+        return self
+
+
+def test_a_change_made_during_the_handshake_is_left_to_the_subscription():
+    conn = SlowConnection([], then="hang")
+    stream = ScriptedStream(["x"], [conn])
+
+    async def scenario():
+        task = asyncio.create_task(stream.run())
+        await conn.opening.wait()
+        stream.add(["y"])
+        conn.finish.set()
+        await asyncio.sleep(0.02)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    asyncio.run(scenario())
+    assert conn.sent == [("subscribe", ["x", "y"])]     # Not sent again as an add, which a venue may count as another subscription.
+
+
 def test_run_waits_until_something_is_wanted():
     stream = ScriptedStream([], [FakeConnection([], then="hang")])
 
