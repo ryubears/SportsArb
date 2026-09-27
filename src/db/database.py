@@ -14,10 +14,10 @@ SQLite browser. The tables follow the pipeline in order.
     orders         every real order the live executor sent, by execute/live.py
     ledger         every paper cash movement per venue, by balance/paper.py
     alerts         everything the live process emailed a human, by notify.py
-    transfers      paper rebalancing transfers between venues, by balance/bookkeep.py
+    transfers      paper rebalancing transfers between venues, by balance/rebalance.py
 
 Trades and settlements carry a mode, 'paper' or 'live', and every read of
-open trades is for one mode, so the paper and live books never mix.
+open trades is for one mode, so paper and live trades never mix.
 
 The tables themselves are in schema.sql, and the steps that bring older
 databases up to them in migrations.py. This file holds the reads and writes.

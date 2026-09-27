@@ -11,14 +11,14 @@ What runs, and where it lives:
   stores every episode of positive edge in the opportunities table, and
   offers each episode to the desks.
 - A Desk for each mode the run trades in, with its own money, allocator,
-  executor, settler, and book keeper, and its trades stored with its mode,
+  executor, settler, and rebalancer, and its trades stored with its mode,
   so paper and live never mix. Both can run at once on the same signals,
   which shows how far the paper fills are from real ones.
   - Paper: execute/paper.py fills against the same books with the paper
-    money of balance/paper.py, and a PaperBookKeeper moves paper money
+    money of balance/paper.py, and a PaperRebalancer moves paper money
     between the venues.
   - Live: execute/live.py sends real orders with the money the venues
-    report through balance/live.py, and a LiveBookKeeper emails a human,
+    report through balance/live.py, and a LiveRebalancer emails a human,
     through notify.py, when the venues drift apart, as the executor does
     when live trading halts.
 
@@ -53,9 +53,9 @@ from common.paths import ROOT
 from common.timeutil import now_iso
 from db import database
 from engine.components import allocate, notify, scan, settle
-from engine.components.balance.bookkeep import LiveBookKeeper, PaperBookKeeper
 from engine.components.balance.live import LiveBalances
 from engine.components.balance.paper import PaperBalances
+from engine.components.balance.rebalance import LiveRebalancer, PaperRebalancer
 from engine.components.execute.live import LiveExecutor
 from engine.components.execute.paper import PaperExecutor
 from engine.components.record import Recorder, load_targets
@@ -118,7 +118,7 @@ class Desk:
     """
     One mode of trading, paper or live: its executor, the money it trades,
     the allocator that sizes its trades, the settler that pays them out, and
-    the book keeper that keeps its venues funded, paper or live.
+    the rebalancer that keeps its venues funded, paper or live.
     books is a function returning the recorder's newest books.
     """
 
@@ -128,12 +128,12 @@ class Desk:
             self.cash = PaperBalances(conn)
             self.allocator = allocate.Allocator(conn, self.cash)
             self.executor = PaperExecutor(conn, self.cash, books, log, allocator=self.allocator)
-            self.keeper = PaperBookKeeper(conn, self.cash, log)
+            self.rebalancer = PaperRebalancer(conn, self.cash, log)
         elif mode == "live":
             self.cash = LiveBalances(log)
             self.allocator = allocate.Allocator(conn, self.cash)
             self.executor = LiveExecutor(conn, self.cash, books, log, allocator=self.allocator, notifier=notifier)
-            self.keeper = LiveBookKeeper(conn, self.cash, notifier, log)
+            self.rebalancer = LiveRebalancer(conn, self.cash, notifier, log)
         else:
             raise ValueError(f"unknown mode {mode!r}")
         self.settler = settle.Settler(conn, self.cash, log, executor=self.executor)
@@ -146,15 +146,15 @@ class Desk:
             self.cash.tick(now, clock)
         self.executor.tick(now)
         self.settler.tick(now, clock)
-        self.keeper.tick(now)
+        self.rebalancer.tick(now)
 
     def summaries(self, now):
         """
         One line per component about what it did since the last summary.
         """
         lines = [self.executor.summary(), self.settler.summary(), self.allocator.summary(now)]
-        if self.mode == "paper" and self.keeper.summary():
-            lines.append(self.keeper.summary())
+        if self.mode == "paper" and self.rebalancer.summary():
+            lines.append(self.rebalancer.summary())
         return lines
 
 

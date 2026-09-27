@@ -50,7 +50,7 @@ Both share the venue clients in `src/api`, the database layer in
 - **Mode**: `paper` or `live`. Paper fills are simulated against the real
   books, live ones are real orders. Every trade is stored with its mode.
 - **Desk**: everything one mode needs: its money, its sizing, its
-  executor, its settler, and its book keeper.
+  executor, its settler, and its rebalancer.
 
 ## The processes
 
@@ -68,7 +68,7 @@ processes, one per venue feed plus the main one:
                           v
   main process:  Streams -> Recorder -> Scanner -> a Desk per mode
                             (books in   (stores     (executor, allocator,
-                             memory)     episodes)   settler, book keeper)
+                             memory)     episodes)   settler, rebalancer)
 ```
 
 A child keeps its venue's connections and full books, and sends the main
@@ -151,7 +151,7 @@ level reaches the scanner.
   on how many contracts one of its trades may hold.
 - **Floors**. New trades leave 500 paper dollars or 5 live dollars on each
   venue, so flattening always has something to use.
-- **Keeping the venues funded** (`balance/bookkeep.py`). The venue
+- **Keeping the venues funded** (`balance/rebalance.py`). The venue
   holding a winning leg gets the whole dollar, so the two drift apart.
   Paper money is moved on Tuesdays when the venues have drifted more than
   25% apart. For live money a human gets an email saying how much to move
@@ -178,7 +178,7 @@ level reaches the scanner.
 - the scanner prices every open episode again, so episodes whose books go
   stale end;
 - each desk reads the live balances when due, retries exposed trades,
-  starts a settlement pass every 30 seconds, and lets its book keeper
+  starts a settlement pass every 30 seconds, and lets its rebalancer
   check the balances;
 - a status line is logged every minute, and each component's summary
   every ten.

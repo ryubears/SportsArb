@@ -76,7 +76,7 @@ class LiveBalances(Balances):
     def apply(self, entry):
         """
         Apply what one of our orders moved, a Ledger entry that is not stored,
-        since the venue keeps the books. A payout is not spent until the
+        since the venue keeps the record. A payout is not spent until the
         venue's next reading shows it, which is asked for at once, since the
         venue pays it on its own and it may already be in the last one.
         """

@@ -4,7 +4,7 @@ Keep both venues funded: move paper money between them, and ask a human to move 
 Balances drift apart as games resolve, because the venue holding the
 winning leg receives the whole dollar and the other receives nothing.
 
-The PaperBookKeeper moves the money itself. On
+The PaperRebalancer moves the money itself. On
 config.REBALANCE_WEEKDAY, a Tuesday so that Monday night's game has paid
 out, the balances are compared, and when the larger sits more than
 config.REBALANCE_DRIFT above the two venue average the excess is sent to
@@ -14,7 +14,7 @@ something once it has. A transfer takes config.TRANSFER_DAYS business
 days, during which the money is on neither venue, and one is in flight at
 a time. Every transfer is stored.
 
-Live money is moved by hand, so the LiveBookKeeper only emails. Once
+Live money is moved by hand, so the LiveRebalancer only emails. Once
 no live trade is open, it compares the venues' balances each minute, and
 when the larger sits more than config.REBALANCE_DRIFT above the average it
 sends an alert saying how much to move where, again every
@@ -29,7 +29,7 @@ from db.models import Ledger, Transfer
 from engine.helper import config
 
 
-class PaperBookKeeper:
+class PaperRebalancer:
     """
     Requests transfers when the balances call for one and lands them when their time comes.
     """
@@ -87,7 +87,7 @@ class PaperBookKeeper:
         return "transfers: " + ", ".join(f"{t.amount:,.0f}$ {t.from_venue} to {t.to_venue}, due {t.expected_at[:10]}" for t in pending)
 
 
-class LiveBookKeeper:
+class LiveRebalancer:
     """
     Emails a human through the notifier when the live venues have drifted apart. Live money is never moved here.
     """
