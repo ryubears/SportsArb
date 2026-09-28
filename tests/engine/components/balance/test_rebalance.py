@@ -3,7 +3,7 @@ Tests for the rebalancers: paper money moved between the venues, and live money 
 """
 
 from db import database
-from db.models import Settlement, Trade
+from db.models import Settlement, Trade, Transfer
 from engine.components.balance import rebalance
 from engine.components.balance.paper import PaperBalances
 
@@ -11,7 +11,7 @@ from engine.components.balance.paper import PaperBalances
 def test_weekly_check_moves_the_excess_and_it_lands_after_four_business_days(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
     cash = PaperBalances(conn)
-    cash.amounts = {"kalshi": 3000.0, "polymarket_us": 7000.0}     # 2000 above a 5000 average, past the 25 percent drift.
+    cash.amounts = {"kalshi": 3000.0, "polymarket_us": 7000.0}     # 2000 above a 5000 average, past the 20 percent drift.
     logs = []
     r = rebalance.PaperRebalancer(conn, cash, logs.append)
     r.rebalance("2026-09-21T12:00:00+00:00")                        # A Monday, no check.
@@ -22,7 +22,7 @@ def test_weekly_check_moves_the_excess_and_it_lands_after_four_business_days(tmp
     assert transfer.expected_at == "2026-09-28T12:00:00+00:00"     # Four business days, over the weekend.
     assert cash.amounts == {"kalshi": 3000.0, "polymarket_us": 5000.0}     # In transit, on neither venue.
     assert r.summary() == "transfers: 2,000$ polymarket_us to kalshi, due 2026-09-28"
-    r.rebalance("2026-09-22T13:00:00+00:00")                        # Same Tuesday, one transfer at a time anyway.
+    r.rebalance("2026-09-22T13:00:00+00:00")                        # Same Tuesday, checked once a day.
     assert len(database.load_transfers(conn)) == 1
     r.receive("2026-09-28T11:00:00+00:00")
     assert cash["kalshi"] == 3000.0
@@ -44,6 +44,18 @@ def test_a_venue_running_low_waits_for_the_weekly_check(tmp_path):
     r.rebalance("2026-09-29T12:00:00+00:00")                        # The next Tuesday.
     (transfer,) = database.load_transfers(conn)
     assert (transfer.reason, transfer.amount) == ("drift", 2800)
+
+
+def test_a_transfer_still_in_flight_does_not_hold_up_the_weekly_check(tmp_path):
+    conn = database.connect(tmp_path / "t.sqlite")
+    cash = PaperBalances(conn)
+    database.insert_transfer(conn, Transfer("polymarket_us", "kalshi", 374.0, "2026-09-24T03:00:00+00:00",
+                                            "2026-10-01T03:00:00+00:00", "floor"))        # Lands after the Tuesday check.
+    cash.amounts = {"kalshi": 3900.0, "polymarket_us": 6100.0}     # 1100 above a 5000 average: 22 percent, past 20.
+    r = rebalance.PaperRebalancer(conn, cash, lambda m: None)
+    r.rebalance("2026-09-29T12:00:00+00:00")
+    assert [(t.amount, t.reason, t.arrived_at) for t in database.load_transfers(conn)] == [(374.0, "floor", None), (1100.0, "drift", None)]
+    assert cash.amounts == {"kalshi": 3900.0, "polymarket_us": 5000.0}
 
 
 def test_balanced_venues_need_no_transfer(tmp_path):
@@ -103,7 +115,7 @@ def rebalancer_for(conn, cash, emails, tmp_path, monkeypatch):
 
 def test_live_venues_apart_are_emailed_once_a_day_and_nothing_is_moved(tmp_path, monkeypatch):
     conn = database.connect(tmp_path / "t.sqlite")
-    cash = live_money(300.0, 700.0)                     # 200 above a 500 average, past the 25 percent drift.
+    cash = live_money(300.0, 700.0)                     # 200 above a 500 average, past the 20 percent drift.
     emails = []
     rebalancer = rebalancer_for(conn, cash, emails, tmp_path, monkeypatch)
     rebalancer.check("2026-09-28T00:00:00+00:00")             # A Monday, any day will do.

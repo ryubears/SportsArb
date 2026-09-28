@@ -11,8 +11,10 @@ config.REBALANCE_DRIFT above the two venue average the excess is sent to
 the other venue. The check waits until no trade is open, since money still
 out in trades comes back as they settle and the balances only mean
 something once it has. A transfer takes config.TRANSFER_DAYS business
-days, during which the money is on neither venue, and one is in flight at
-a time. Every transfer is stored.
+days, during which the money is on neither venue. A transfer still in
+flight does not hold up the check: the balances are compared as they
+stand, with the money in transit on neither of them. Every transfer is
+stored.
 
 Live money is moved by hand, so the LiveRebalancer only emails. Once
 no live trade is open, it compares the venues' balances each minute, and
@@ -48,8 +50,8 @@ class PaperRebalancer:
         today = now[:10]
         if datetime.fromisoformat(now).weekday() != config.REBALANCE_WEEKDAY or self.last_check == today:
             return
-        if database.load_transfers(self.conn, pending_only=True) or database.has_open_trades(self.conn, self.cash.mode):
-            return          # One transfer at a time, and money still out in trades comes back first.
+        if database.has_open_trades(self.conn, self.cash.mode):
+            return          # Money still out in trades comes back first.
         self.last_check = today
         rich, poor = self.cash.largest(), self.cash.smallest()
         excess = self.cash[rich] - self.cash.average()
