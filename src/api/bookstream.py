@@ -44,7 +44,9 @@ class BookStream:
     a subclass asks for it. Every failure starts a gap that ends when the
     next connection is subscribed, reported through on_gap with the
     contracts this connection carries, so the recorder can mark the stretch
-    and drop just their books. Subclasses set name and implement the venue hooks below.
+    and drop just their books. A connection left with nothing to carry
+    stays closed, and reports no gap, until contracts are added to it.
+    Subclasses set name and implement the venue hooks below.
     """
 
     name = "venue"                  # Used in log lines.
@@ -165,10 +167,11 @@ class BookStream:
         subscribe to their contracts twice.
         """
         while True:
-            while not self.wanted:
-                await asyncio.sleep(1)
             self.books = {}
-            self.reset()
+            self.reset()                    # Before waiting, so a connection left with nothing to carry counts as fresh.
+            while not self.wanted:
+                self.down_since = None      # Nothing is carried, so no stretch without data is missed.
+                await asyncio.sleep(1)
             try:
                 async with self.connect() as ws:
                     while not self.commands.empty():

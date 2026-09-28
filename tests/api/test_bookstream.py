@@ -216,6 +216,29 @@ def test_a_change_made_during_the_handshake_is_left_to_the_subscription():
     assert conn.sent == [("subscribe", ["x", "y"])]     # Not sent again as an add, which a venue may count as another subscription.
 
 
+def test_a_connection_left_with_nothing_to_carry_stays_closed_and_reports_no_gap_when_given_more(monkeypatch):
+    monkeypatch.setattr(bookstream, "RECONNECT_SECONDS", (0,))
+    first, second = FakeConnection(["a"], then="hang"), FakeConnection([], then="hang")
+    stream = ScriptedStream(["x"], [first, second])
+
+    async def scenario():
+        task = asyncio.create_task(stream.run())
+        await asyncio.sleep(0.02)
+        stream.remove(["x"])            # Its game is over, say.
+        await asyncio.sleep(0.2)        # Long past going silent.
+        assert stream.used == [first]   # It did not reconnect for nothing.
+        stream.add(["y"])
+        await asyncio.sleep(1.1)        # An empty connection looks for contracts once a second.
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    asyncio.run(scenario())
+    assert stream.used == [first, second] and second.sent[0] == ("subscribe", ["y"])
+    assert stream.gaps == []            # y was not carried while it waited, so no stretch of its data was missed.
+
+
 def test_run_waits_until_something_is_wanted():
     stream = ScriptedStream([], [FakeConnection([], then="hang")])
 
