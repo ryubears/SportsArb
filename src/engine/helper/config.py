@@ -42,8 +42,9 @@ TRANSFER_DAYS = 4           # Business days a transfer between venues takes.
 # LIVE, execute/live.py, execute/brakes.py, balance/live.py, and balance/rebalance.py. Real money, so each limit is kept small
 # until the live results earn more. Sized for a test with about 100 dollars on each venue.
 
-LIVE_MIN_CAP = 1            # Contracts per live trade, the least worth sending, and what a game with money left in its share gets.
-LIVE_MAX_CAP = 10           # Contracts per live trade, the most one trade may hold, whatever the allocator would give.
+LIVE_MIN_CAP = 1            # The cap a live game gets when its share is too small for even one contract of cap, until it has spent its
+                            # share. It only keeps the cap from rounding down to nothing: a trade still needs the edge, the depth, and the cash.
+LIVE_MAX_CAP = 5            # Contracts per live trade, the most one trade may hold, whatever the allocator would give.
 LIVE_BALANCE_SECONDS = 30   # Between readings of the venues' balances.
 LIVE_CASH_FLOOR = 5.0       # Dollars new live trades leave untouched on each venue. Flattening may still use them.
 LIVE_ORDER_WINDOW = 20      # The newest orders the unknown outcome brake looks at.
@@ -57,7 +58,8 @@ LIVE_ALERT_HOURS = 24       # Between emails asking for the live venues to be re
 
 GAME_HOURS = 3.25           # Kickoff to final whistle, with a little margin over the 3.05 measured.
 SETTLE_HOURS = 0.5          # Final whistle to the venues settling. A game pays out GAME_HOURS + SETTLE_HOURS after kickoff.
-RECORD_HOURS = 5            # Kickoff to when a game's contracts stop being recorded, whatever their close time says.
+RECORD_HOURS = 5            # Kickoff to when a game's contracts stop being recorded, whatever their close time says, where the venue
+                            # gives the kickoff. Polymarket US closes a game's markets two weeks after it. Kalshi gives none.
 
 # RECORDING, record.py
 
