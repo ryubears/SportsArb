@@ -43,7 +43,7 @@ class Episode:
         start_time = next((m["start_time"] for m in self.pair["members"] if m["start_time"]), None)
         live = 1 if start_time and self.peak_ts >= start_time else 0
         # Capital is locked until the slower of the two legs pays, so the later resolution counts.
-        pays_at = payout_time((self.peak.yes, self.peak.no))
+        pays_at = payout_time((self.peak.yes, self.peak.no), self.pair["sport"])
         days_held = max(seconds_between(self.peak_ts, pays_at) / 86400, 1 / 24) if pays_at else None
         return_pct = 100 * self.peak.edge / (1 - self.peak.edge)
         return Opportunity(
@@ -69,7 +69,7 @@ class Episode:
 
 class Scanner:
     """
-    Tracks episodes for the pairs of a sport from a map of the newest
+    Tracks episodes for the pairs of the sports from a map of the newest
     books, keyed by (venue, contract_id). Only the pairs a contract belongs
     to are priced when its book changes. A member is left out while its book
     is older than config.MAX_BOOK_AGE or missing from the map, which is how the
@@ -80,9 +80,9 @@ class Scanner:
     until it takes a trade, and then not again, see execute/executor.py.
     """
 
-    def __init__(self, conn, sport, log=print, on_signals=()):
+    def __init__(self, conn, sports, log=print, on_signals=()):
         self.conn = conn
-        self.sport = sport
+        self.sports = sports
         self.log = log
         self.on_signals = list(on_signals)  # Each is called with the trade to make until it takes one in the episode.
         self.episodes = {}                  # Pair id maps to its open Episode.
@@ -104,8 +104,10 @@ class Scanner:
         """
         Load the pairs and fee schedules again, ending open episodes of pairs that are gone.
         """
-        self.fee_infos = defaultdict(dict, database.load_fee_infos(self.conn, self.sport))
-        self.pairs = database.load_pairs(self.conn, self.sport)
+        self.fee_infos, self.pairs = defaultdict(dict), {}
+        for sport in self.sports:
+            self.fee_infos.update(database.load_fee_infos(self.conn, sport))
+            self.pairs.update(database.load_pairs(self.conn, sport))
         by_contract = defaultdict(list)
         for pair_id, pair in self.pairs.items():
             for m in pair["members"]:

@@ -25,13 +25,17 @@ from db.models import Book, Gap
 from engine.helper import config
 
 
-def load_targets(conn, sport):
+def load_targets(conn, sports):
     """
-    The contracts to record right now, as {venue: [contract_id, ...]}.
+    The contracts of the sports to record right now, as {venue: [contract_id, ...]}.
     """
     now = now_iso()
-    return database.load_recording_targets(conn, sport, now, shift(now, days=config.GAME_WINDOW_DAYS), list(VENUES),
-                                           shift(now, hours=-config.RECORD_HOURS))
+    targets = {venue: [] for venue in VENUES}
+    for sport in sports:
+        for venue, contract_ids in database.load_recording_targets(conn, sport, now, shift(now, days=config.GAME_WINDOW_DAYS), list(VENUES),
+                                                                   shift(now, hours=-config.RECORD_HOURS)).items():
+            targets[venue].extend(contract_ids)
+    return targets
 
 
 def top(book):

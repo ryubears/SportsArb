@@ -43,7 +43,21 @@ def test_the_quotes_table_is_dropped_and_its_space_given_back(tmp_path):
     before = path.stat().st_size
     conn = database.connect(path)
     assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'quotes'").fetchone() is None
-    assert version(conn) == 5 and path.stat().st_size < before / 4
+    assert version(conn) == len(migrations.STEPS) and path.stat().st_size < before / 4
+
+
+def test_pairs_from_before_a_second_sport_become_nfl_ones_with_the_sport_in_their_labels(tmp_path):
+    path = tmp_path / "t.sqlite"
+    old = sqlite3.connect(path)
+    old.execute("""CREATE TABLE pairs (id INTEGER PRIMARY KEY, label TEXT NOT NULL UNIQUE, kind TEXT NOT NULL, season INTEGER,
+                   game_date TEXT, team_a TEXT, team_b TEXT, subject TEXT, line REAL, venues TEXT NOT NULL, contracts INTEGER NOT NULL,
+                   flags TEXT NOT NULL, matched_at TEXT NOT NULL)""")
+    old.execute("INSERT INTO pairs VALUES (7, 'champion 2027 DEN', 'champion', 2027, NULL, NULL, NULL, 'DEN', NULL, 'kalshi', 2, '[]', 'm')")
+    old.execute("PRAGMA user_version = 5")
+    old.commit(); old.close()
+    conn = database.connect(path)
+    assert [tuple(r) for r in conn.execute("SELECT id, sport, label FROM pairs")] == [(7, "nfl", "nfl champion 2027 DEN")]    # Same id.
+    assert version(conn) == len(migrations.STEPS)
 
 
 def test_the_database_layer_does_not_import_the_live_code():

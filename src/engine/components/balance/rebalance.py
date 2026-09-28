@@ -4,31 +4,76 @@ Keep both venues funded: move paper money between them, and ask a human to move 
 Balances drift apart as games resolve, because the venue holding the
 winning leg receives the whole dollar and the other receives nothing.
 
-The PaperRebalancer moves the money itself. On
-config.REBALANCE_WEEKDAY, a Tuesday so that Monday night's game has paid
-out, the balances are compared, and when the larger sits more than
-config.REBALANCE_DRIFT above the two venue average the excess is sent to
-the other venue. The check waits until no trade is open, since money still
-out in trades comes back as they settle and the balances only mean
-something once it has. A transfer takes config.TRANSFER_DAYS business
-days, during which the money is on neither venue. A transfer still in
-flight does not hold up the check: the balances are compared as they
-stand, with the money in transit on neither of them. Every transfer is
-stored.
+Trades are open most of the time, so the venues are compared as they
+stand, see drift(): each counts its free cash plus what open trades hold
+on it, at cost, which is about what those trades will pay back there. The
+excess is what the larger has above the two venue average, and only the
+part of it that is free cash above the floor can move, since money held
+in trades cannot.
 
-Live money is moved by hand, so the LiveRebalancer only emails. Once
-no live trade is open, it compares the venues' balances each minute, and
-when the larger sits more than config.REBALANCE_DRIFT above the average it
-sends an alert saying how much to move where, again every
-config.LIVE_ALERT_HOURS while they stay apart. Any day will do, since a
-person decides when to move the money.
+The PaperRebalancer moves the money itself. On config.REBALANCE_WEEKDAY,
+a Tuesday so that Monday night's game has paid out, the venues are
+compared, and when the larger sits more than config.REBALANCE_DRIFT above
+the average, what can move of the excess is sent to the other venue. A
+transfer takes config.TRANSFER_DAYS business days, during which the money
+is on neither venue. A transfer still in flight does not hold up the
+check: the venues are compared as they stand, with the money in transit
+on neither of them. Every transfer is stored.
+
+Live money is moved by hand, so the LiveRebalancer only emails. It
+compares the venues each minute, and when the larger sits more than
+config.REBALANCE_DRIFT above the average it sends an alert saying how much
+to move where, again every config.LIVE_ALERT_HOURS while they stay apart.
+Any day will do, since a person decides when to move the money.
 """
 
 from datetime import datetime
+from typing import NamedTuple
 from common.timeutil import add_business_days, seconds_between
 from db import database
 from db.models import Ledger, Transfer
 from engine.helper import config
+
+
+class Drift(NamedTuple):
+    """
+    How far apart the venues stand, from drift().
+    """
+    totals: dict        # Each venue's free cash plus what open trades hold on it, at cost.
+    held: dict          # What open trades hold on each venue, at cost.
+    average: float      # The average of the totals.
+    rich: str           # The venue with the largest total.
+    poor: str           # The venue with the smallest total.
+    excess: float       # What the rich venue's total has above the average.
+    movable: float      # The part of the excess the rich venue has free above its floor.
+
+    def apart(self):
+        """
+        Whether the venues are far enough apart to move money, and some of it can move.
+        """
+        return self.excess > config.REBALANCE_DRIFT * self.average and self.movable > 0
+
+    def standing(self):
+        """
+        The totals in one phrase, with what each venue has in open trades, for alerts and log lines.
+        """
+        return ", ".join(f"{venue} {total:,.0f}$" + (f" ({self.held[venue]:,.0f}$ of it in open trades)" if self.held.get(venue) else "")
+                         for venue, total in self.totals.items())
+
+
+def drift(conn, cash, floor):
+    """
+    How far apart the venues stand, as a Drift. A leg cost about what it
+    will pay back, since its price is about its chance of paying, so each
+    venue's free cash plus what open trades hold on it at cost is about
+    what it will have once they settle.
+    """
+    held = database.load_open_cost_by_venue(conn, cash.mode)
+    totals = {venue: cash[venue] + held.get(venue, 0.0) for venue in cash.amounts}
+    average = sum(totals.values()) / len(totals)
+    rich, poor = max(totals, key=totals.get), min(totals, key=totals.get)
+    excess = totals[rich] - average
+    return Drift(totals, held, average, rich, poor, excess, max(0.0, min(excess, cash[rich] - floor)))
 
 
 class PaperRebalancer:
@@ -44,23 +89,21 @@ class PaperRebalancer:
 
     def rebalance(self, now):
         """
-        Request a transfer from the larger balance to the smaller one when
-        they have drifted apart on the weekly check, once no trade is open.
+        Request a transfer from the richer venue to the poorer one when they
+        have drifted apart on the weekly check, of what can move of the excess.
         """
         today = now[:10]
         if datetime.fromisoformat(now).weekday() != config.REBALANCE_WEEKDAY or self.last_check == today:
             return
-        if database.has_open_trades(self.conn, self.cash.mode):
-            return          # Money still out in trades comes back first.
         self.last_check = today
-        rich, poor = self.cash.largest(), self.cash.smallest()
-        excess = self.cash[rich] - self.cash.average()
-        if excess <= config.REBALANCE_DRIFT * self.cash.average():
+        d = drift(self.conn, self.cash, config.CASH_FLOOR)
+        if not d.apart():
             return
-        transfer = Transfer(rich, poor, round(excess, 2), now, add_business_days(now, config.TRANSFER_DAYS), "drift")
+        transfer = Transfer(d.rich, d.poor, round(d.movable, 2), now, add_business_days(now, config.TRANSFER_DAYS), "drift")
         database.insert_transfer(self.conn, transfer)
-        self.cash.apply(Ledger(now, rich, -transfer.amount, "transfer_out"))
-        self.log(f"transfer {transfer.id}: {transfer.amount:.2f}$ from {rich} to {poor} for drift, expected {transfer.expected_at[:16]}")
+        self.cash.apply(Ledger(now, d.rich, -transfer.amount, "transfer_out"))
+        self.log(f"transfer {transfer.id}: {transfer.amount:.2f}$ from {d.rich} to {d.poor} for drift, expected {transfer.expected_at[:16]}, "
+                 f"with {d.standing()}")
 
     def receive(self, now):
         """
@@ -105,23 +148,24 @@ class LiveRebalancer:
 
     def check(self, now):
         """
-        Send an alert when the balances are apart, every venue has been read, no live trade is open, and none was sent lately.
+        Send an alert when the venues are apart, every venue has been read, and none was sent lately.
         """
-        if not all(self.cash.read_at.values()) or database.has_open_trades(self.conn, self.cash.mode):
+        if not all(self.cash.read_at.values()):
             return None
-        rich, poor = self.cash.largest(), self.cash.smallest()
-        average = self.cash.average()
-        excess = self.cash[rich] - average
-        if excess <= config.REBALANCE_DRIFT * average:
+        d = drift(self.conn, self.cash, config.LIVE_CASH_FLOOR)
+        if not d.apart():
             return None
         last = database.last_alert_ts(self.conn, "rebalance")
         if last and seconds_between(last, now) < config.LIVE_ALERT_HOURS * 3600:
             return None
-        body = (f"The live balances have drifted apart: {self.cash.summary()}, an average of {average:,.2f}$.\n\n"
-                f"Move {excess:,.2f}$ from {rich} to {poor} to level them. {rich} is {100 * excess / average:.0f}% above the average, "
-                f"past the {100 * config.REBALANCE_DRIFT:.0f}% that calls for a transfer.\n\n"
-                f"No live trade is open. Until the money arrives, {poor} limits how much each live trade can hold.")
-        return self.notifier.send("rebalance", f"SportsArb: move {excess:,.0f}$ from {rich} to {poor}", body, now)
+        rest = ("" if d.movable == d.excess else
+                f" The rest of its {d.excess:,.2f}$ excess is held in open trades and cannot move until they settle.")
+        body = (f"The live venues have drifted apart, counting what open trades hold on each at cost: {d.standing()}, "
+                f"an average of {d.average:,.2f}$.\n\n"
+                f"Move {d.movable:,.2f}$ from {d.rich} to {d.poor}. {d.rich} is {100 * d.excess / d.average:.0f}% above the average, "
+                f"past the {100 * config.REBALANCE_DRIFT:.0f}% that calls for a transfer.{rest}\n\n"
+                f"Until the money arrives, {d.poor} limits how much each live trade can hold.")
+        return self.notifier.send("rebalance", f"SportsArb: move {d.movable:,.0f}$ from {d.rich} to {d.poor}", body, now)
 
     def tick(self, now):
         """

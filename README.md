@@ -165,8 +165,9 @@ level reaches the scanner.
 - a status line is logged every minute, and each component's summary
   every ten.
 
-Every hour the catalog is refreshed in a background thread, and the new
-pairs' contracts are added to the running feeds without reconnecting.
+Every hour each sport's catalog is refreshed in a background thread, and
+the new pairs' contracts are added to the running feeds without
+reconnecting.
 
 ### Where things are stored
 
@@ -200,25 +201,28 @@ under the rate limit. Polymarket US is read through its gateway, one
 call per tag, deduplicated across tags.
 
 **classify/** turns each contract into a `Bet`, a venue neutral statement
-of what the contract is about: kind, season, game date, the two teams,
-a subject, and a line. Each venue has its own parser, since the two
-describe the same thing very differently. Kalshi encodes the game in the
-ticker, `KXNFLGAME-26SEP24ATLGB-GB`, and the prop in a series code and a
-title like *Player: 100+ receiving yards*. Polymarket US encodes it in a
-slug and a title like *Will Bijan Robinson record 100+ rushing yards?*.
-Team aliases are resolved through `teams.py` and `aliases.json`, player
-names are normalized to a key that ignores punctuation and suffixes, and
-lines are made strict, so *100+* on one venue and *over 99.5* on the other
-become the same bet. Contracts no parser understands are counted and
+of what the contract is about: kind, season, game date, the two teams, a
+subject, and a line. Each venue has its own parser, since the two describe
+the same thing very differently. Kalshi encodes the game in the ticker,
+`KXNFLGAME-26SEP24ATLGB-GB`, and the prop in a series code and a title like
+*Player: 100+ receiving yards*. Polymarket US encodes it in a slug and a
+title like *Will Bijan Robinson record 100+ rushing yards?*. Team aliases
+are resolved through `teams.py` and `aliases/`, which has a file for each
+sport, since leagues reuse codes (DAL is the Cowboys and the Mavericks).
+Player names are normalized to a key that ignores punctuation and suffixes,
+and lines are made strict, so *100+* on one venue and *over 99.5* on the
+other become the same bet. Contracts no parser understands are counted and
 left out.
 
-**match.py** groups bets whose identity agrees into a `Pair`. A pair only
-exists when both venues list the bet, and it carries every contract that
-expresses it, since a game winner can be held through either team's
-contract and a spread through either side. Kinds with settlement rules
-that differ between venues carry a note, for example both venues settle
-props to the pre-game price if the player never takes a snap, but
-Polymarket US ignores stat corrections made after the game.
+**match.py** groups a sport's bets whose identity agrees into a `Pair`,
+whose label starts with the sport, for example
+`nfl spread 2026-09-20 CAR@ATL ATL 4.5`. A pair only exists when both
+venues list the bet, and it carries every contract that expresses it, since
+a game winner can be held through either team's contract and a spread
+through either side. Kinds with settlement rules that differ between venues
+carry a note, for example both venues settle props to the pre-game price if
+the player never takes a snap, but Polymarket US ignores stat corrections
+made after the game.
 
 **pipeline.py** runs fetch, classify, and match in one call. The live
 process runs it every hour in a background thread, so new games and props
@@ -262,9 +266,13 @@ keeps its venues funded. `--execute` picks the desks: `paper`, the default,
 `live`, or `both`, which trades the same signals on paper and for real and
 so measures how far the paper fills are from real ones. The same loop
 starts the hourly catalog refresh in a background thread and applies the
-result to the live connections. The pieces it wires together are in
-`engine/components/`, and what they share is in `engine/helper/`: the
-settings, game timing, pricing, and fees.
+result to the live connections. One run trades every sport given to
+`--sport`, comma separated, since the money is one pool and a second
+process would spend the same dollars. How long a game lasts, which decides
+when it is traded and when it pays out, is set for each sport in
+`GAME_HOURS`. The pieces it wires together are in `engine/components/`, and
+what they share is in `engine/helper/`: the settings, game timing, pricing,
+and fees.
 
 **record.py** holds the newest book for every paired contract in memory,
 five levels a side, which the scanner prices and the executors trade
@@ -390,33 +398,34 @@ what a tax return needs. A trade still exposed on one side is settled as it
 stands, each leg paid for what it holds. The settler skips a trade while an
 order to flatten it is in flight, and once a trade settles the executor
 stops flattening it. The venue holding a winning leg receives the whole
-dollar, so the balances drift apart. On Tuesdays, once Monday night's
-trades have settled, the `PaperRebalancer` compares the venues and, when
-one sits more than 25% above the average, sends the excess to the other as
-a `Transfer` that takes four business days, during which the money is on
-neither venue.
+dollar, so the balances drift apart. Trades are open most of the time, so
+the venues are compared as they stand: each counts its free cash plus what
+open trades hold on it at cost, which is about what those trades will pay
+back there. On Tuesdays the `PaperRebalancer` compares them and, when one
+sits more than 20% above the average, sends the excess to the other, as
+much of it as is free above the floor, as a `Transfer` that takes four
+business days, during which the money is on neither venue.
 
 Live money has no ledger of ours. `LiveBalances` reads each venue's balance
 every 30 seconds, and at once after a payout, and applies what our own
-fills move in between, so a burst of trades does not spend the same
-dollars twice. Nothing is traded before the first reading. The settler
-settles live trades as it does paper ones, storing each as a `live`
-`Settlement`, while the venue pays out on its own. Live money is moved
-between venues by hand, so instead of transferring, the `LiveRebalancer`
-emails when, with no live trade open, one venue sits more
-than 25% above the average, saying how much to move where, and again each
-day while they stay apart. `notify.py` stores every alert in the alerts
-table and emails it in a background thread through the SMTP server in
-`data/email.json`.
+fills move in between, so a burst of trades does not spend the same dollars
+twice. Nothing is traded before the first reading. The settler settles live
+trades as it does paper ones, storing each as a `live` `Settlement`, while
+the venue pays out on its own. Live money is moved between venues by hand,
+so instead of transferring, the `LiveRebalancer` emails when one venue,
+counted the same way, sits more than 20% above the average, saying how much
+of its free cash to move where, and again each day while they stay apart.
+`notify.py` stores every alert in the alerts table and emails it in a
+background thread through the SMTP server in `data/email.json`.
 
 ### Tools
 
-`src/tools/summary.py` prints a report from the database: row counts,
-pairs by kind, feed drops, opportunities by kind with the largest
-that beat a 10% annual return, and for paper and live apart the trades by
-outcome and kind and the settled legs by venue, then the paper balances
-with any transfer in transit, and the real orders sent by venue and what
-came back. `--hours` sets the window.
+`src/tools/summary.py` prints a report from the database: row counts, pairs
+by sport and kind, feed drops, opportunities by sport and kind with the
+largest that beat a 10% annual return, and for paper and live apart the
+trades by outcome, the trades by sport and kind, and the settled legs by
+venue, then the paper balances with any transfer in transit, and the real
+orders sent by venue and what came back. `--hours` sets the window.
 
 `src/tools/live_check.py` reads both venues' balances with the keys in
 `data/`, and with `--email` sends a test email, without trading. Run it

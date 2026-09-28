@@ -32,7 +32,7 @@ def schedule(tmp_path, games):
                                       close_time=kickoff, fee_info=None))
             members.append(Bet(venue, cid, "game_winner", 2027, kickoff[:10], away, home, away, None, "yes"))
         bets += members
-        pairs.append(Pair(f"game_winner {kickoff[:10]} {away}@{home} {away}", "game_winner", 2027, kickoff[:10], away, home, away, None, members, []))
+        pairs.append(Pair(f"game_winner {kickoff[:10]} {away}@{home} {away}", "game_winner", 2027, kickoff[:10], away, home, away, None, members, [], sport="nfl"))
     database.upsert_contracts(conn, contracts, "2026-09-25T00:00:00+00:00")
     database.replace_bets(conn, "nfl", bets)
     database.replace_pairs(conn, "nfl", pairs, "2026-09-25T00:00:00+00:00")
@@ -40,7 +40,7 @@ def schedule(tmp_path, games):
 
 
 def pair_for(away, home, kickoff):
-    return {"game_date": kickoff[:10], "team_a": away, "team_b": home}
+    return {"sport": "nfl", "game_date": kickoff[:10], "team_a": away, "team_b": home}
 
 
 def test_caps_follow_the_active_games(tmp_path):
@@ -79,7 +79,7 @@ def test_money_a_game_holds_stays_in_the_pool_and_a_game_past_its_share_stops(tm
     database.insert_trade(conn, t)
     cash.amounts = {"kalshi": 6000.0, "polymarket_us": 6000.0}          # After paying for it.
     now = f"{SUNDAY}T17:30:00+00:00"
-    assert allocator.deployed() == {(SUNDAY, "E0", "H0"): {"kalshi": 4000.0, "polymarket_us": 4000.0}}
+    assert allocator.deployed() == {("nfl", SUNDAY, "E0", "H0"): {"kalshi": 4000.0, "polymarket_us": 4000.0}}
     # The pool is still 10,000 a venue and each game's share 5,000, so both caps stay at 250.
     assert allocator.cap(first_pair, now) == allocator.cap(pair_for(*second), now) == 250
     # Spent past its share, the first game gets nothing more while the second is unaffected.

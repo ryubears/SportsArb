@@ -31,7 +31,7 @@ def test_bets_pairs_and_targets(tmp_path):
     database.replace_bets(conn, "nfl", bets)
     assert {b["venue"] for b in database.load_bets(conn, "nfl")} == {"polymarket_us", "kalshi"}
 
-    g = Pair("champion 2027 BUF", "champion", 2027, None, None, None, "BUF", None, bets, ["note"])
+    g = Pair("champion 2027 BUF", "champion", 2027, None, None, None, "BUF", None, bets, ["note"], sport="nfl")
     database.replace_pairs(conn, "nfl", [g], "2026-01-01T00:00:00+00:00")
     pairs = database.load_pairs(conn, "nfl")
     assert list(pairs) == [g.id] and g.id == 1 and [m.pair_id for m in g.members] == [1, 1]
@@ -55,7 +55,7 @@ def test_game_contracts_stay_targets_through_the_game(tmp_path):
     database.upsert_contracts(conn, [contract("polymarket_us", "pm", **game), contract("kalshi", "k", **game)], "2026-01-01T00:00:00+00:00")
     bets = [Bet(v, cid, "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, "yes") for v, cid in (("polymarket_us", "pm"), ("kalshi", "k"))]
     database.replace_bets(conn, "nfl", bets)
-    database.replace_pairs(conn, "nfl", [Pair("game_winner 2026-09-20 CAR@ATL CAR", "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, bets, [])], "2026-01-01T00:00:00+00:00")
+    database.replace_pairs(conn, "nfl", [Pair("game_winner 2026-09-20 CAR@ATL CAR", "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, bets, [], sport="nfl")], "2026-01-01T00:00:00+00:00")
     during = database.load_recording_targets(conn, "nfl", "2026-09-20T18:30:00+00:00", "2026-09-27T18:30:00+00:00", ["polymarket_us"], "2026-09-20T13:30:00+00:00")
     after = database.load_recording_targets(conn, "nfl", "2026-09-21T00:00:00+00:00", "2026-09-28T00:00:00+00:00", ["polymarket_us"], "2026-09-20T19:00:00+00:00")
     assert during == {"polymarket_us": ["pm"]}
@@ -70,7 +70,7 @@ def test_a_game_contract_left_open_after_its_game_stops_being_recorded_when_the_
     database.upsert_contracts(conn, [pm, k], "2026-09-20T00:00:00+00:00")
     bets = [Bet(v, cid, "game_winner", 2027, "2026-09-27", "CAR", "ATL", "CAR", None, "yes") for v, cid in (("polymarket_us", "pm"), ("kalshi", "k"))]
     database.replace_bets(conn, "nfl", bets)
-    database.replace_pairs(conn, "nfl", [Pair("game_winner 2026-09-27 CAR@ATL CAR", "game_winner", 2027, "2026-09-27", "CAR", "ATL", "CAR", None, bets, [])],
+    database.replace_pairs(conn, "nfl", [Pair("game_winner 2026-09-27 CAR@ATL CAR", "game_winner", 2027, "2026-09-27", "CAR", "ATL", "CAR", None, bets, [], sport="nfl")],
                            "2026-09-20T00:00:00+00:00")
     venues = ["polymarket_us", "kalshi"]
 
@@ -80,6 +80,21 @@ def test_a_game_contract_left_open_after_its_game_stops_being_recorded_when_the_
     assert targets("2026-09-27T20:00:00+00:00", "2026-09-27T15:00:00+00:00") == {"polymarket_us": ["pm"], "kalshi": ["k"]}   # In play.
     assert targets("2026-09-28T00:00:00+00:00", "2026-09-27T19:00:00+00:00") == {"polymarket_us": [], "kalshi": ["k"]}       # Over.
     assert targets("2026-09-28T07:00:00+00:00", "2026-09-28T02:00:00+00:00") == {"polymarket_us": [], "kalshi": []}          # Closed.
+
+
+def test_the_same_matchup_in_two_sports_is_two_games(tmp_path):
+    conn = database.connect(tmp_path / "t.sqlite")
+    kickoff = dict(start_time="2026-11-01T18:00:00+00:00", close_time="2026-11-01T18:00:00+00:00")
+    for sport in ("nfl", "nba"):                    # Dallas at Denver, on the same day in both leagues.
+        contracts = [contract(venue, f"{sport}-{venue}", sport=sport, **kickoff) for venue in ("polymarket_us", "kalshi")]
+        database.upsert_contracts(conn, contracts, "2026-10-01T00:00:00+00:00")
+        bets = [Bet(c.venue, c.contract_id, "game_winner", 2027, "2026-11-01", "DAL", "DEN", "DAL", None, "yes") for c in contracts]
+        database.replace_bets(conn, sport, bets)
+        database.replace_pairs(conn, sport, [Pair(f"{sport} game_winner 2026-11-01 DAL@DEN DAL", "game_winner", 2027, "2026-11-01",
+                                                  "DAL", "DEN", "DAL", None, bets, [], sport=sport)], "2026-10-01T00:00:00+00:00")
+    assert set(database.load_kickoffs(conn)) == {("nfl", "2026-11-01", "DAL", "DEN"), ("nba", "2026-11-01", "DAL", "DEN")}
+    assert set(database.load_kickoffs(conn, ("nba",))) == {("nba", "2026-11-01", "DAL", "DEN")}
+    assert [p["sport"] for p in database.load_pairs(conn, "nba").values()] == ["nba"]
 
 
 def test_gaps_are_stored_in_time_order_and_filtered_by_since(tmp_path):
@@ -110,7 +125,7 @@ def test_replace_pairs_unlinks_pairs_that_disappeared_but_keeps_their_rows(tmp_p
     database.upsert_contracts(conn, [contract("polymarket_us", "pm"), contract("kalshi", "k")], "2026-01-01T00:00:00+00:00")
     bets = [Bet(v, cid, "champion", 2027, None, None, None, "BUF", None, "yes") for v, cid in (("polymarket_us", "pm"), ("kalshi", "k"))]
     database.replace_bets(conn, "nfl", bets)
-    g = Pair("champion 2027 BUF", "champion", 2027, None, None, None, "BUF", None, bets, [])
+    g = Pair("champion 2027 BUF", "champion", 2027, None, None, None, "BUF", None, bets, [], sport="nfl")
     database.replace_pairs(conn, "nfl", [g], "2026-01-01T00:00:00+00:00")
     database.replace_pairs(conn, "nfl", [], "2026-01-02T00:00:00+00:00")
     assert database.load_pairs(conn, "nfl") == {}
@@ -183,7 +198,7 @@ def test_old_settlement_rows_are_folded_into_their_trades(tmp_path):
     assert database.load_open_trades(conn, "paper") == []
     # Pairs got ids. The stored pair kept its row, the trade's and the second episode's pairs, long gone from the catalog, got bare rows.
     assert [tuple(r) for r in conn.execute("SELECT id, label, contracts FROM pairs ORDER BY id")] == [
-        (1, "spread 2026-09-27 KC@MIA KC 30.5", 2), (2, "l", 0)]
+        (1, "nfl spread 2026-09-27 KC@MIA KC 30.5", 2), (2, "nfl l", 0)]      # NFL ones, as every pair before a second sport.
     assert conn.execute("SELECT pair_id FROM bets").fetchone()[0] == 1
     assert [tuple(r) for r in conn.execute("SELECT id, pair_id, start_ts FROM opportunities ORDER BY id")] == [(1, 1, "s"), (2, 2, "gone")]
     assert [tuple(r) for r in conn.execute("SELECT id, pair_id FROM trades")] == [(1, 2)]
@@ -214,14 +229,14 @@ def test_paper_and_live_trades_and_settlements_are_kept_apart(tmp_path):
     held = dict(status="filled", yes_held=5, no_held=5, yes_cost=2.25, no_cost=2.35)
     paper, live = trade("paper", **held), trade("live", **held)
     database.insert_trade(conn, paper)
-    assert not database.has_open_trades(conn, "live")
+    assert database.load_open_cost_by_venue(conn, "live") == {}
     database.insert_trade(conn, live)
     assert [t.id for t in database.load_open_trades(conn, "paper")] == [paper.id]
     assert [(t.id, t.mode) for t in database.load_open_trades(conn, "live")] == [(live.id, "live")]
-    assert database.has_open_trades(conn, "paper") and database.has_open_trades(conn, "live")
-    assert database.load_open_game_costs(conn, "live") == [(("2026-09-27", "CAR", "ATL"), [("polymarket_us", 2.25), ("kalshi", 2.35)])]
+    assert database.load_open_cost_by_venue(conn, "live") == {"polymarket_us": 2.25, "kalshi": 2.35}
+    assert database.load_open_game_costs(conn, "live") == [(("nfl", "2026-09-27", "CAR", "ATL"), [("polymarket_us", 2.25), ("kalshi", 2.35)])]
     database.insert_settlement(conn, Settlement(live.id, "2026-09-27T20:30:00+00:00", mode="live"))
-    assert database.load_open_trades(conn, "live") == [] and not database.has_open_trades(conn, "live")
+    assert database.load_open_trades(conn, "live") == [] and database.load_open_cost_by_venue(conn, "live") == {}
     assert [t.id for t in database.load_open_trades(conn, "paper")] == [paper.id]             # Settling the live trade leaves paper alone.
     assert [s.trade_id for s in database.load_settlements(conn, "live")] == [live.id] and database.load_settlements(conn, "paper") == []
 

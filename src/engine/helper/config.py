@@ -56,8 +56,8 @@ LIVE_ALERT_HOURS = 24       # Between emails asking for the live venues to be re
 
 # GAMES, game.py. Measured on the first live game, Atlanta at Green Bay.
 
-GAME_HOURS = 3.25           # Kickoff to final whistle, with a little margin over the 3.05 measured.
-SETTLE_HOURS = 0.5          # Final whistle to the venues settling. A game pays out GAME_HOURS + SETTLE_HOURS after kickoff.
+GAME_HOURS = {"nfl": 3.25}  # Kickoff to final whistle in each sport. The NFL's has a little margin over the 3.05 measured.
+SETTLE_HOURS = 0.5          # Final whistle to the venues settling. A game pays out its GAME_HOURS + SETTLE_HOURS after kickoff.
 RECORD_HOURS = 5            # Kickoff to when a game's contracts stop being recorded, whatever their close time says, where the venue
                             # gives the kickoff. Polymarket US closes a game's markets two weeks after it. Kalshi gives none.
 

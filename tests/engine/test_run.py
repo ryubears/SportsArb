@@ -18,18 +18,30 @@ def test_run_survives_a_failing_refresh(tmp_path, monkeypatch, capsys, fake_stre
     for venue in streams.STREAMS:
         monkeypatch.setitem(streams.STREAMS, venue, fake_stream)
     conn = database.connect(tmp_path / "test.sqlite")
-    asyncio.run(run.run(conn, run.RunOptions(sport="nfl", seconds=3, catalog_seconds=1)))
+    asyncio.run(run.run(conn, run.RunOptions(sports=("nfl",), seconds=3, catalog_seconds=1)))
     out = capsys.readouterr().out
     assert "starting nfl, code " in out.splitlines()[0]
-    assert "catalog refresh failed (RuntimeError('kalshi is down')), starting with the stored catalog" in out
+    failed = "nfl catalog refresh failed (RuntimeError('kalshi is down')), keeping its stored catalog"
+    assert out.count(failed) >= 2                                                   # Before starting, and at the next refresh.
     assert "    RuntimeError: kalshi is down" in out                                  # With the traceback.
-    assert "catalog refresh failed (RuntimeError('kalshi is down')), keeping current subscriptions" in out
+    assert "catalog refreshed, nfl: failed" in out
+
+
+def test_a_sport_whose_refresh_fails_leaves_the_others_to_refresh(monkeypatch):
+    def refresh(sport, log=print, db_path=None):
+        if sport == "ncaaf":
+            raise RuntimeError("cfb tag gone")
+        return "1 pairs"
+    monkeypatch.setattr(run.pipeline, "refresh", refresh)
+    logs = []
+    assert run.refresh_catalog(("nfl", "ncaaf"), logs.append) == "nfl: 1 pairs; ncaaf: failed"
+    assert logs[0].startswith("ncaaf catalog refresh failed (RuntimeError('cfb tag gone')), keeping its stored catalog")
 
 
 def session(tmp_path, monkeypatch, fake_stream, **kwargs):
     for venue in streams.STREAMS:
         monkeypatch.setitem(streams.STREAMS, venue, fake_stream)
-    return run.Session(database.connect(tmp_path / "test.sqlite"), "nfl", **kwargs)
+    return run.Session(database.connect(tmp_path / "test.sqlite"), ("nfl",), **kwargs)
 
 
 def test_session_without_scanning_or_trading_only_records(tmp_path, monkeypatch, capsys, fake_stream):

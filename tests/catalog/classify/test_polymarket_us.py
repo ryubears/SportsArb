@@ -9,7 +9,7 @@ def row(event, slug, market_type=None, line=None, start_time="2026-09-20T17:00:0
     """
     A Polymarket US contract row with the fields the classifier reads.
     """
-    return {"venue": "polymarket_us", "contract_id": slug, "event_id": event, "market_type": market_type,
+    return {"venue": "polymarket_us", "sport": "nfl", "contract_id": slug, "event_id": event, "market_type": market_type,
             "line": line, "start_time": start_time, "title": "", "outcome": ""}
 
 
@@ -56,7 +56,7 @@ def test_glued_codes_cover_every_odd_team_name():
     assert polymarket_us.glued_code("San Francisco 49ers") == "saners"
     assert polymarket_us.glued_code("Kansas City Chiefs") == "kanchi"
     assert polymarket_us.glued_code("Los Angeles Chargers") == "loscha"
-    assert [polymarket_us.team_suffix(s) for s in ("kanchi", "loscha", "losram", "grepac", "saners", "tambuc", "bufbil", "kc", "gb")] == \
+    assert [polymarket_us.team_suffix(s, "nfl") for s in ("kanchi", "loscha", "losram", "grepac", "saners", "tambuc", "bufbil", "kc", "gb")] == \
         ["KC", "LAC", "LAR", "GB", "SF", "TB", "BUF", "KC", "GB"]
 
 

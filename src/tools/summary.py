@@ -1,10 +1,10 @@
 """
 Print a summary of everything in the database.
 
-Row counts and time ranges for each table, pairs by kind, and for the
-recent window the feed drops, the opportunities found, and the trades
-made, paper and live apart. Reads only, so it is safe to run while the
-live process is writing.
+Row counts and time ranges for each table, pairs by sport and kind, and
+for the recent window the feed drops, the opportunities found, and the
+trades made, paper and live apart. Reads only, so it is safe to run
+while the live process is writing.
 
 This script opens the database file directly rather than importing the
 db package, so it runs from any folder without setting an import path.
@@ -78,9 +78,9 @@ def print_contracts(conn, now):
 
 def print_pairs(conn):
     body = query_rows(conn, """
-        SELECT kind, COUNT(*), SUM(contracts), SUM(game_date IS NOT NULL)
-        FROM pairs WHERE id IN (SELECT pair_id FROM bets WHERE pair_id IS NOT NULL) GROUP BY kind ORDER BY kind""")
-    print_table("pairs", ("kind", "pairs", "contracts", "games"), body)
+        SELECT sport, kind, COUNT(*), SUM(contracts), SUM(game_date IS NOT NULL)
+        FROM pairs WHERE id IN (SELECT pair_id FROM bets WHERE pair_id IS NOT NULL) GROUP BY sport, kind ORDER BY sport, kind""")
+    print_table("pairs", ("sport", "kind", "pairs", "contracts", "games"), body)
     print(f"  total {first_value(conn, 'SELECT COUNT(*) FROM pairs WHERE id IN (SELECT pair_id FROM bets WHERE pair_id IS NOT NULL)'):,}, "
           f"last matched {short_time(first_value(conn, 'SELECT MAX(matched_at) FROM pairs'))}")
 
@@ -111,11 +111,11 @@ def print_opportunities(conn, since, hours):
         return
     # Capital required is the fillable size times the cost of both legs and fees, which is one dollar minus the edge.
     body = query_rows(conn, """
-        SELECT p.kind, COUNT(*), SUM(live), ROUND(100 * MAX(peak_edge), 1), ROUND(MAX(peak_profit), 2),
+        SELECT p.sport, p.kind, COUNT(*), SUM(live), ROUND(100 * MAX(peak_edge), 1), ROUND(MAX(peak_profit), 2),
                ROUND(MAX(peak_size * (1 - peak_edge))), ROUND(MAX(return_pct), 2), ROUND(MAX(annual_pct)),
                ROUND(AVG(days_held), 1), SUM(annual_pct >= 10)
-        FROM opportunities o JOIN pairs p ON p.id = o.pair_id WHERE start_ts >= ? GROUP BY p.kind ORDER BY p.kind""", (since,))
-    print_table(f"by kind, last {hours} hours", ("kind", "episodes", "live", "best edge c", "best profit $", "max capital $",
+        FROM opportunities o JOIN pairs p ON p.id = o.pair_id WHERE start_ts >= ? GROUP BY p.sport, p.kind ORDER BY p.sport, p.kind""", (since,))
+    print_table(f"by kind, last {hours} hours", ("sport", "kind", "episodes", "live", "best edge c", "best profit $", "max capital $",
                             "best return %", "best annual %", "avg days held", "beat 10%/yr"), body)
     best = query_rows(conn, """
         SELECT p.label, trade, ROUND(100 * peak_edge, 1), ROUND(peak_size), ROUND(peak_size * (1 - peak_edge)),
@@ -165,10 +165,11 @@ def print_mode_trades(conn, since, hours, mode):
             FROM trades WHERE mode = ? AND signal_ts >= ? GROUP BY status ORDER BY status""", (mode, since))
         print_table(f"{mode} by outcome, last {hours} hours", ("status", "trades", "wanted", "matched", "locked in $", "hedges $", "net $"), body)
         body = query_rows(conn, """
-            SELECT p.kind, COUNT(*), ROUND(AVG(100 * edge), 1), ROUND(100.0 * SUM(matched) / SUM(quantity), 0), ROUND(SUM(profit + hedge_pnl), 2),
-                   ROUND(AVG(yes_latency_ms)), ROUND(AVG(no_latency_ms))
-            FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ? AND signal_ts >= ? GROUP BY p.kind ORDER BY p.kind""", (mode, since))
-        print_table(f"{mode} by kind, last {hours} hours", ("kind", "trades", "avg edge c", "fill %", "net $", "avg yes ms", "avg no ms"), body)
+            SELECT p.sport, p.kind, COUNT(*), ROUND(AVG(100 * edge), 1), ROUND(100.0 * SUM(matched) / SUM(quantity), 0),
+                   ROUND(SUM(profit + hedge_pnl), 2), ROUND(AVG(yes_latency_ms)), ROUND(AVG(no_latency_ms))
+            FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ? AND signal_ts >= ? GROUP BY p.sport, p.kind ORDER BY p.sport, p.kind""",
+            (mode, since))
+        print_table(f"{mode} by kind, last {hours} hours", ("sport", "kind", "trades", "avg edge c", "fill %", "net $", "avg yes ms", "avg no ms"), body)
         best = query_rows(conn, """
             SELECT p.label, trade, quantity, yes_filled, no_filled, ROUND(profit + hedge_pnl, 2), hedge, substr(signal_ts, 12, 8)
             FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ? AND signal_ts >= ? ORDER BY profit + hedge_pnl DESC LIMIT 5""", (mode, since))

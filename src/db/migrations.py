@@ -163,8 +163,21 @@ def step_5_drop_quotes(conn):
     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")     # So the file shrinks now, not at the next checkpoint.
 
 
+def step_6_pair_sports(conn):
+    """
+    Pairs now say which sport they are, and their labels start with it,
+    since two sports can describe different bets in the same words: the
+    Broncos' and the Nuggets' titles are both 'champion 2027 DEN'. Every
+    pair before this is an NFL one. An older database whose pairs table was
+    rebuilt by an earlier step already has the column, but not the labels.
+    """
+    if "sport" not in [r[1] for r in conn.execute("PRAGMA table_info(pairs)")]:
+        conn.execute("ALTER TABLE pairs ADD COLUMN sport TEXT NOT NULL DEFAULT 'nfl'")
+    conn.execute("UPDATE pairs SET label = 'nfl ' || label WHERE label NOT LIKE 'nfl %'")
+
+
 # Step n brings a database from user_version n - 1 to n. Only ever add to the end.
-STEPS = [step_1_catch_up, step_2_settlements, step_3_opening_balances, step_4_modes, step_5_drop_quotes]
+STEPS = [step_1_catch_up, step_2_settlements, step_3_opening_balances, step_4_modes, step_5_drop_quotes, step_6_pair_sports]
 
 
 def migrate(conn, fresh):

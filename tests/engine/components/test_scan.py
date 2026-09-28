@@ -30,7 +30,7 @@ def make_db(tmp_path, members):
     database.upsert_contracts(conn, contracts, "2026-09-19T00:00:00+00:00")
     bets = [Bet(m["venue"], m["contract_id"], "spread", 2027, "2026-09-20", "CAR", "ATL", "ATL", 4.5, m["polarity"]) for m in members]
     database.replace_bets(conn, "nfl", bets)
-    database.replace_pairs(conn, "nfl", [Pair(LABEL, "spread", 2027, "2026-09-20", "CAR", "ATL", "ATL", 4.5, bets, [])],
+    database.replace_pairs(conn, "nfl", [Pair(LABEL, "spread", 2027, "2026-09-20", "CAR", "ATL", "ATL", 4.5, bets, [], sport="nfl")],
                             "2026-09-19T00:00:00+00:00")
     return conn
 
@@ -49,7 +49,7 @@ def replay(conn, books, drops=()):
     Drive a Scanner with books in time order, the way the recorder drives it live, and return what it stored.
     drops are (ts, venue) pairs at which the venue's books are forgotten.
     """
-    scanner = scan.Scanner(conn, "nfl", lambda m: None)
+    scanner = scan.Scanner(conn, ("nfl",), lambda m: None)
     events = sorted(books, key=lambda b: b.ts)
     held = {}           # The newest book of each contract, as the recorder holds them.
     for b in events:
@@ -91,7 +91,7 @@ def test_scanner_marks_live_and_uses_kickoff_for_payout(tmp_path):
                       Book("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]])])[0]
     assert o.live == 1
     assert o.end_ts == "2026-09-19T12:00:01+00:00"
-    assert o.days_held == pytest.approx((game.payout_hours() - 1) / 24, rel=1e-3)
+    assert o.days_held == pytest.approx((game.payout_hours("nfl") - 1) / 24, rel=1e-3)
 
 
 def test_scanner_holds_until_the_slower_leg_pays(tmp_path):
@@ -144,7 +144,7 @@ def game_db(tmp_path):
 def test_episode_opens_peaks_and_closes_from_book_changes(tmp_path):
     conn = game_db(tmp_path)
     logs = []
-    s = scan.Scanner(conn, "nfl", logs.append)
+    s = scan.Scanner(conn, ("nfl",), logs.append)
     latest = {("kalshi", "k"): book("kalshi", "k", TL % (0, 1), 0.53, 0.54)}
     s.on_book("kalshi", "k", latest, TL % (0, 1))
     assert s.episodes == {}                                     # One book is not a trade.
@@ -165,7 +165,7 @@ def test_episode_opens_peaks_and_closes_from_book_changes(tmp_path):
 
 def test_sweep_closes_an_episode_whose_book_went_stale_or_unseen(tmp_path):
     conn = game_db(tmp_path)
-    s = scan.Scanner(conn, "nfl", lambda m: None)
+    s = scan.Scanner(conn, ("nfl",), lambda m: None)
     latest = {("kalshi", "k"): book("kalshi", "k", TL % (0, 1), 0.53, 0.54),
               ("polymarket_us", "pm"): book("polymarket_us", "pm", TL % (0, 2), 0.44, 0.45)}
     s.on_book("polymarket_us", "pm", latest, TL % (0, 2))
@@ -185,7 +185,7 @@ def test_sweep_closes_an_episode_whose_book_went_stale_or_unseen(tmp_path):
 
 def test_reload_ends_episodes_of_pairs_that_vanished(tmp_path):
     conn = game_db(tmp_path)
-    s = scan.Scanner(conn, "nfl", lambda m: None)
+    s = scan.Scanner(conn, ("nfl",), lambda m: None)
     latest = {("kalshi", "k"): book("kalshi", "k", TL % (0, 1), 0.53, 0.54),
               ("polymarket_us", "pm"): book("polymarket_us", "pm", TL % (0, 2), 0.44, 0.45)}
     s.on_book("polymarket_us", "pm", latest, TL % (0, 2))

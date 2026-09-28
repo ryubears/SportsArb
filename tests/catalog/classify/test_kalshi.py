@@ -9,7 +9,7 @@ def row(series, event, ticker, **fields):
     """
     A Kalshi contract row with the fields the classifier reads.
     """
-    r = {"venue": "kalshi", "series_id": series, "event_id": event, "contract_id": ticker,
+    r = {"venue": "kalshi", "sport": "nfl", "series_id": series, "event_id": event, "contract_id": ticker,
          "title": "", "outcome": "", "market_type": None, "line": None, "start_time": None}
     r.update(fields)
     return r
@@ -23,12 +23,12 @@ def bet_fields(bet):
 
 
 def test_split_codes_handles_two_and_three_letter_codes():
-    assert kalshi.split_codes("CARATL") == ("CAR", "ATL")
-    assert kalshi.split_codes("GBNYJ") == ("GB", "NYJ")
-    assert kalshi.split_codes("LACBUF") == ("LAC", "BUF")
-    assert kalshi.split_codes("LVLAC") == ("LV", "LAC")
-    assert kalshi.split_codes("NEJAC") == ("NE", "JAX")
-    assert kalshi.split_codes("XXYY") == (None, None)
+    assert kalshi.split_codes("CARATL", "nfl") == ("CAR", "ATL")
+    assert kalshi.split_codes("GBNYJ", "nfl") == ("GB", "NYJ")
+    assert kalshi.split_codes("LACBUF", "nfl") == ("LAC", "BUF")
+    assert kalshi.split_codes("LVLAC", "nfl") == ("LV", "LAC")
+    assert kalshi.split_codes("NEJAC", "nfl") == ("NE", "JAX")
+    assert kalshi.split_codes("XXYY", "nfl") == (None, None)
 
 
 def test_game_kinds():

@@ -16,7 +16,6 @@ def test_nothing_is_there_to_trade_before_the_first_reading_and_then_what_the_ve
     assert cash.amounts == {"kalshi": 0.0, "polymarket_us": 0.0}
     asyncio.run(cash.refresh(NOW))
     assert cash.amounts == {"kalshi": 500.0, "polymarket_us": 450.25}
-    assert (cash.largest(), cash.smallest(), cash.average()) == ("kalshi", "polymarket_us", pytest.approx(475.125))
     assert logs == ["live balances read: kalshi 500$, polymarket_us 450$"]
     assert cash.mode == "live"
 

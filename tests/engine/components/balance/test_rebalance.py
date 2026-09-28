@@ -67,29 +67,41 @@ def test_balanced_venues_need_no_transfer(tmp_path):
     assert database.load_transfers(conn) == []
 
 
-def open_trade(conn):
+def open_trade(conn, yes_cost, no_cost, mode="paper"):
     """
-    A filled trade whose contracts have not settled yet.
+    A filled trade whose contracts have not settled yet, holding its yes leg on Polymarket US and its no leg on Kalshi.
     """
-    conn.execute("INSERT INTO pairs (label, kind, venues, contracts, flags, matched_at) VALUES ('p', 'game_winner', '', 2, '[]', 'm')")
-    t = Trade(mode="paper", pair_id=1, trade="t", signal_ts="2026-09-22T00:30:00+00:00", edge=0.05, quantity=5, yes_venue="polymarket_us",
+    conn.execute("INSERT OR IGNORE INTO pairs (id, label, kind, venues, contracts, flags, matched_at) VALUES (1, 'p', 'game_winner', '', 2, '[]', 'm')")
+    t = Trade(mode=mode, pair_id=1, trade="t", signal_ts="2026-09-22T00:30:00+00:00", edge=0.05, quantity=5, yes_venue="polymarket_us",
               yes_contract="pm", yes_polarity="yes", yes_limit=0.45, no_venue="kalshi", no_contract="k", no_polarity="yes",
-              no_limit=0.47, pays_at="2026-09-22T04:15:00+00:00", yes_held=5, no_held=5, status="filled")
+              no_limit=0.47, pays_at="2026-09-22T04:15:00+00:00", yes_held=5, no_held=5, yes_cost=yes_cost, no_cost=no_cost, status="filled")
     database.insert_trade(conn, t)
     return t
 
 
-def test_the_tuesday_check_waits_for_monday_nights_trades_to_settle(tmp_path):
+def test_the_weekly_check_counts_what_open_trades_hold_at_cost(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
     cash = PaperBalances(conn)
-    cash.amounts = {"kalshi": 3000.0, "polymarket_us": 7000.0}
+    cash.amounts = {"kalshi": 3000.0, "polymarket_us": 5000.0}     # 25 percent apart in free cash alone.
     r = rebalance.PaperRebalancer(conn, cash, lambda m: None)
-    t = open_trade(conn)                                            # Monday night's game, still out after midnight UTC.
+    t = open_trade(conn, yes_cost=900.0, no_cost=1100.0)           # Monday night's game, still out after midnight UTC.
     r.rebalance("2026-09-22T01:00:00+00:00")
-    assert database.load_transfers(conn) == []
+    assert database.load_transfers(conn) == []                      # 4,100 against 5,900 counting the trade: 18 percent, under 20.
     database.insert_settlement(conn, Settlement(t.id, "2026-09-22T04:20:00+00:00", mode="paper"))
-    r.rebalance("2026-09-22T04:30:00+00:00")                        # Still Tuesday, and nothing is open now.
-    assert [x.reason for x in database.load_transfers(conn)] == ["drift"]
+    assert rebalance.drift(conn, cash, 500.0).totals == {"kalshi": 3000.0, "polymarket_us": 5000.0}      # Settled, so not held.
+
+
+def test_a_transfer_moves_only_what_is_free_above_the_floor(tmp_path):
+    conn = database.connect(tmp_path / "t.sqlite")
+    cash = PaperBalances(conn)
+    cash.amounts = {"kalshi": 2000.0, "polymarket_us": 1500.0}
+    logs = []
+    r = rebalance.PaperRebalancer(conn, cash, logs.append)
+    open_trade(conn, yes_cost=6500.0, no_cost=0.0)                  # Polymarket US at 8,000 in all, 3,000 above a 5,000 average.
+    r.rebalance("2026-09-22T12:00:00+00:00")
+    (transfer,) = database.load_transfers(conn)
+    assert (transfer.from_venue, transfer.to_venue, transfer.amount) == ("polymarket_us", "kalshi", 1000.0)    # 1,500 free, less the 500 floor.
+    assert logs[0].endswith("with kalshi 2,000$, polymarket_us 8,000$ (6,500$ of it in open trades)")
 
 
 # LIVE
@@ -130,17 +142,26 @@ def test_live_venues_apart_are_emailed_once_a_day_and_nothing_is_moved(tmp_path,
     assert database.load_transfers(conn) == [] and cash.amounts == {"kalshi": 300.0, "polymarket_us": 700.0}
 
 
-def test_live_venues_close_enough_or_with_money_out_are_not_emailed(tmp_path, monkeypatch):
+def test_live_venues_close_enough_or_not_yet_read_are_not_emailed(tmp_path, monkeypatch):
     conn = database.connect(tmp_path / "t.sqlite")
     emails = []
     rebalancer_for(conn, live_money(460.0, 540.0), emails, tmp_path, monkeypatch).check("2026-09-28T00:00:00+00:00")     # 8 percent apart.
-    open_trade(conn)
-    conn.execute("UPDATE trades SET mode = 'live'")
-    rebalancer_for(conn, live_money(300.0, 700.0), emails, tmp_path, monkeypatch).check("2026-09-28T00:00:00+00:00")     # Waits for the trade.
+    open_trade(conn, yes_cost=0.0, no_cost=300.0, mode="live")
+    rebalancer_for(conn, live_money(300.0, 700.0), emails, tmp_path, monkeypatch).check("2026-09-28T00:00:00+00:00")     # 600 against 700.
     unread = LiveBalances(lambda m: None, {})
-    conn.execute("DELETE FROM trades")
     rebalancer_for(conn, unread, emails, tmp_path, monkeypatch).check("2026-09-28T00:00:00+00:00")                      # Nothing read yet.
     assert emails == []
+
+
+def test_live_venues_apart_with_trades_open_are_asked_to_move_only_the_free_cash(tmp_path, monkeypatch):
+    conn = database.connect(tmp_path / "t.sqlite")
+    emails = []
+    open_trade(conn, yes_cost=550.0, no_cost=0.0, mode="live")     # Polymarket US at 700 in all, 200 above a 500 average.
+    rebalancer_for(conn, live_money(300.0, 150.0), emails, tmp_path, monkeypatch).check("2026-09-28T00:00:00+00:00")
+    ((_, subject, body),) = emails
+    assert subject == "SportsArb: move 145$ from polymarket_us to kalshi"      # 150 free, less the 5 floor.
+    assert "kalshi 300$, polymarket_us 700$ (550$ of it in open trades)" in body and "Move 145.00$ from polymarket_us to kalshi" in body
+    assert "The rest of its 200.00$ excess is held in open trades and cannot move until they settle." in body
 
 
 def test_an_alert_without_email_settings_is_still_logged_and_stored(tmp_path, monkeypatch):

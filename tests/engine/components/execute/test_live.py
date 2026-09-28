@@ -124,7 +124,7 @@ def test_a_leg_that_filled_short_is_flattened_no_higher_than_the_books_said(tmp_
     assert venues.orders[-1] == ("kalshi", "buy", "no", 6, 0.47)
     assert (t["yes_held"], t["no_held"], t["matched"], t["status"], t["hedge"]) == (10, 10, 10, "filled", "bought 6 of 6 on kalshi")
     assert [(o["purpose"], o["quantity"], o["limit_price"]) for o in stored(conn, "orders")][-1] == ("flatten", 6, 0.47)
-    assert logs[-1].startswith("live filled: game_winner 2026-09-20 CAR@ATL CAR")
+    assert logs[-1].startswith("live filled: nfl game_winner 2026-09-20 CAR@ATL CAR")
 
 
 def bids_gone(latest):
