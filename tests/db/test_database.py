@@ -62,11 +62,12 @@ def test_game_contracts_stay_targets_through_the_game(tmp_path):
     assert after == {"polymarket_us": []}
 
 
-def test_a_game_contract_left_open_after_its_game_stops_being_recorded_when_the_game_is_over(tmp_path):
+def test_a_game_is_recorded_on_both_venues_until_it_is_over_whatever_the_close_times_say(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
-    # Polymarket US leaves a game's markets open two weeks after it. Kalshi gives no kickoff, so its close time rules.
+    # Polymarket US leaves a game's markets open two weeks after it. Kalshi gives no kickoff, and its close time
+    # is its guess at the final whistle, three hours after kickoff, so Polymarket US's kickoff rules both.
     pm = contract("polymarket_us", "pm", start_time="2026-09-27T17:00:00+00:00", close_time="2026-10-11T17:00:00+00:00")
-    k = contract("kalshi", "k", close_time="2026-09-28T06:20:00+00:00")
+    k = contract("kalshi", "k", close_time="2026-09-27T20:00:00+00:00")
     database.upsert_contracts(conn, [pm, k], "2026-09-20T00:00:00+00:00")
     bets = [Bet(v, cid, "game_winner", 2027, "2026-09-27", "CAR", "ATL", "CAR", None, "yes") for v, cid in (("polymarket_us", "pm"), ("kalshi", "k"))]
     database.replace_bets(conn, "nfl", bets)
@@ -77,9 +78,9 @@ def test_a_game_contract_left_open_after_its_game_stops_being_recorded_when_the_
     def targets(now, game_started_after):
         return database.load_recording_targets(conn, "nfl", now, "2026-10-04T00:00:00+00:00", venues, game_started_after)
 
-    assert targets("2026-09-27T20:00:00+00:00", "2026-09-27T15:00:00+00:00") == {"polymarket_us": ["pm"], "kalshi": ["k"]}   # In play.
-    assert targets("2026-09-28T00:00:00+00:00", "2026-09-27T19:00:00+00:00") == {"polymarket_us": [], "kalshi": ["k"]}       # Over.
-    assert targets("2026-09-28T07:00:00+00:00", "2026-09-28T02:00:00+00:00") == {"polymarket_us": [], "kalshi": []}          # Closed.
+    assert targets("2026-09-27T19:00:00+00:00", "2026-09-27T14:00:00+00:00") == {"polymarket_us": ["pm"], "kalshi": ["k"]}   # In play.
+    assert targets("2026-09-27T20:30:00+00:00", "2026-09-27T15:30:00+00:00") == {"polymarket_us": ["pm"], "kalshi": ["k"]}   # Past Kalshi's guess.
+    assert targets("2026-09-28T00:00:00+00:00", "2026-09-27T19:00:00+00:00") == {"polymarket_us": [], "kalshi": []}          # Over.
 
 
 def test_the_same_matchup_in_two_sports_is_two_games(tmp_path):

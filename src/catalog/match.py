@@ -43,11 +43,10 @@ def label(bet, sport):
     """
     The sport and the identity in words, for example 'nfl spread 2026-09-20
     CAR@ATL ATL 4.5'. The sport keeps it unique across sports, whose bets can
-    read the same: the Broncos' and the Nuggets' titles are both 'champion 2027 DEN'.
+    read the same: Dallas at Denver on one day is 'game_winner 2026-11-01
+    DAL@DEN DAL' in the NFL and the NBA alike.
     """
-    parts = [sport, bet["kind"], str(bet["game_date"] or bet["season"])]
-    if bet["team_a"]:
-        parts.append(f"{bet['team_a']}@{bet['team_b']}")
+    parts = [sport, bet["kind"], bet["game_date"], f"{bet['team_a']}@{bet['team_b']}"]
     if bet["subject"]:
         parts.append(bet["subject"])
     if bet["line"] is not None:

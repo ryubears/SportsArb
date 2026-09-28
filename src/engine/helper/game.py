@@ -3,9 +3,10 @@ Which game a bet is on, when the game is played, and when the bets on it pay out
 
 Every timing assumption about games lives here, so the recorder, the
 scanner, the executor, and the allocator agree on them. How long a game
-lasts depends on the sport, see config.GAME_HOURS. The NFL's comes from
-the first live game, Atlanta at Green Bay: kickoff to final whistle took
-3.05 hours, and both venues settled within half an hour of it.
+lasts depends on the sport, see config.GAME_HOURS, which is set where
+about three quarters of the sport's past games had ended. Both venues
+settled the first live game, Atlanta at Green Bay, within half an hour of
+its final whistle.
 """
 
 from common.timeutil import shift
@@ -43,7 +44,8 @@ def in_play_or_settling(kickoff, now, sport):
 
 def resolution_time(start_time, close_time, sport):
     """
-    When a contract of the sport pays out. Games pay once the venues settle after the final whistle. Futures pay near their close time.
+    When a contract of the sport pays out: once the venues settle after the final whistle, or, for a contract whose
+    venue gives no kickoff, like Kalshi's, at its close time. A pair pays at the latest of its members', so the kickoff rules.
     """
     if start_time:
         return shift(start_time, hours=payout_hours(sport))

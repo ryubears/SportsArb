@@ -3,7 +3,7 @@ Fetch open sports markets from both venues into SQLite.
 
 Run with:
     python3 -m catalog.fetch --sport nfl
-    python3 -m catalog.fetch --sport nfl --venue kalshi
+    python3 -m catalog.fetch --sport ncaaf --venue kalshi
 """
 
 import argparse
@@ -16,14 +16,27 @@ from db import database
 FETCHERS = {"kalshi": kalshi.contracts, "polymarket_us": polymarket_us.contracts}     # Each venue client's catalog call.
 
 # How each of our sport keys maps onto the venues' own categories, as the arguments of each venue's fetcher.
+# Kalshi lists hundreds of series for a sport, so only the ones the Kalshi classifier reads are fetched.
+# Adding a sport means adding it here, to config.GAME_HOURS and polymarket_us.EVENT_PREFIX, an alias file in
+# classify/aliases/, and its Kalshi series to the Kalshi classifier. tests/catalog/test_sports.py fails until the
+# tables agree.
 SPORTS = {
     "nfl": {
         "kalshi": {
-            "prefixes": ["KXNFL"],
-            "tickers": ["KXSB"],     # The Super Bowl winner series does not use the NFL prefix.
+            "tickers": ["KXNFLGAME", "KXNFLSPREAD", "KXNFLTOTAL",
+                        "KXNFLRECYDS", "KXNFLRSHYDS", "KXNFLPASSYDS", "KXNFLREC", "KXNFLPASSTDS", "KXNFLTD", "KXNFLFIRSTTD",
+                        "KXNFLPASSCOMP", "KXNFLPASSATT", "KXNFLPASSINT", "KXNFLRSHATT", "KXNFLRRYDS", "KXNFLLONGREC"],
         },
         "polymarket_us": {
             "tags": ["nfl"],
+        },
+    },
+    "ncaaf": {
+        "kalshi": {
+            "tickers": ["KXNCAAFGAME", "KXNCAAFSPREAD", "KXNCAAFTOTAL"],
+        },
+        "polymarket_us": {
+            "tags": ["cfb"],
         },
     },
 }

@@ -47,7 +47,7 @@ class Bet:
     """
     venue: str
     contract_id: str
-    kind: str               # 'champion', 'game_winner', 'spread', 'total', and so on.
+    kind: str               # 'game_winner', 'spread', 'total', 'player_receiving_yards', and so on.
     season: int | None      # The year the season ends, for example 2027.
     game_date: str | None   # Game date in US Eastern time as YYYY-MM-DD, for game kinds only.
     team_a: str | None      # Away team code for game kinds.

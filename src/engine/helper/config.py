@@ -54,12 +54,16 @@ LIVE_RESULT_HOURS = 6       # The sliding window the loss brake looks at, in hou
 LIVE_MAX_LOSS_SHARE = 0.10  # Net loss of the trades decided in the window, as a share of the live money, over which live trading halts.
 LIVE_ALERT_HOURS = 24       # Between emails asking for the live venues to be rebalanced, while they stay apart.
 
-# GAMES, game.py. Measured on the first live game, Atlanta at Green Bay.
+# GAMES, game.py. Game lengths are from the games Polymarket US has recorded as finished, the settling time from the first
+# live game, Atlanta at Green Bay.
 
-GAME_HOURS = {"nfl": 3.25}  # Kickoff to final whistle in each sport. The NFL's has a little margin over the 3.05 measured.
+GAME_HOURS = {              # Kickoff to final whistle in each sport, set where about three quarters of its games had ended.
+    "nfl": 3.25,            # 168 NFL games: median 3.11 hours, three quarters by 3.24.
+    "ncaaf": 3.75,          # 382 college games: median 3.48 hours, three quarters by 3.71.
+}
 SETTLE_HOURS = 0.5          # Final whistle to the venues settling. A game pays out its GAME_HOURS + SETTLE_HOURS after kickoff.
-RECORD_HOURS = 5            # Kickoff to when a game's contracts stop being recorded, whatever their close time says, where the venue
-                            # gives the kickoff. Polymarket US closes a game's markets two weeks after it. Kalshi gives none.
+RECORD_HOURS = 5            # Kickoff to when a game's contracts stop being recorded, whatever their close time says. The kickoff
+                            # is Polymarket US's, since Kalshi gives none, and holds for both venues' contracts.
 
 # RECORDING, record.py
 

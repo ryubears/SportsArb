@@ -34,30 +34,25 @@ def test_spread_line_is_the_away_handicap():
     assert bet_fields(underdog) == ("spread", 2027, "2026-09-20", "PHI", "TEN", "TEN", 17.5, "no")
 
 
-def test_futures():
-    division = polymarket_us.classify(row("nfl-afceast-2027-01-10-w", "tec-nfl-afceast-2027-01-10-w-buf", "futures", start_time=None))
-    champion = polymarket_us.classify(row("nfl-champ-2027-02-14-w", "tec-nfl-champ-2027-02-14-w-buf", "futures", start_time=None))
-    seed = polymarket_us.classify(row("nfl-afc1seed-2027-01-10", "tec-nfl-afc1seed-2027-01-10-buf", "futures", start_time=None))
-    assert bet_fields(division) == ("division_champion", 2027, None, None, None, "BUF", None, "yes")
-    assert bet_fields(champion) == ("champion", 2027, None, None, None, "BUF", None, "yes")
-    assert bet_fields(seed) == ("conf_top_seed", 2027, None, None, None, "BUF", None, "yes")
+def test_college_games_use_cfb_slugs_and_the_venues_own_codes():
+    def college(event, slug, market_type, line=None):
+        return polymarket_us.classify(row(event, slug, market_type, line, start_time="2026-10-03T19:30:00+00:00") | {"sport": "ncaaf"})
+
+    winner = college("cfb-boscol-smu-2026-10-03", "aec-cfb-boscol-smu-2026-10-03", "football_team_full_game_winner")
+    spread = college("cfb-boscol-smu-2026-10-03", "asc-cfb-boscol-smu-2026-10-03-pos-9pt5", "football_team_full_game_spread", 9.5)
+    total = college("cfb-boscol-smu-2026-10-03", "tsc-cfb-boscol-smu-2026-10-03-total-43pt5", "football_team_full_game_total", 43.5)
+    aztecs = college("cfb-txst-sdst-2026-10-03", "aec-cfb-txst-sdst-2026-10-03", "football_team_full_game_winner")
+    assert bet_fields(winner) == ("game_winner", 2027, "2026-10-03", "BC", "SMU", "BC", None, "yes")
+    assert bet_fields(spread) == ("spread", 2027, "2026-10-03", "BC", "SMU", "SMU", 9.5, "no")      # Kalshi's SMU by over 9.5, as its No.
+    assert bet_fields(total) == ("total", 2027, "2026-10-03", "BC", "SMU", None, 43.5, "yes")
+    assert (aztecs.team_a, aztecs.team_b) == ("TXST", "SDSU")        # sdst is San Diego State here, SDST South Dakota State on Kalshi.
+    assert college("nfl-phi-ten-2026-09-20", "aec-nfl-phi-ten-2026-09-20", "football_team_full_game_winner") is None
 
 
-def test_futures_with_glued_suffixes_and_qualifier():
-    champion = polymarket_us.classify(row("nfl-champ-2027-02-14-w", "tec-nfl-champ-2027-02-14-w-bufbil", "futures", start_time=None))
-    packers = polymarket_us.classify(row("nfl-champ-2027-02-14-w", "tec-nfl-champ-2027-02-14-w-gbpac", "futures", start_time=None))
-    qualifier = polymarket_us.classify(row("nfl-afc-2027-01-24-champq", "tec-nfl-afc-2027-01-24-champq-kc", "futures", start_time=None))
-    assert (champion.kind, champion.subject) == ("champion", "BUF")
-    assert (packers.kind, packers.subject) == ("champion", "GB")
-    assert bet_fields(qualifier) == ("reach_conf_final", 2027, None, None, None, "KC", None, "yes")
-
-
-def test_glued_codes_cover_every_odd_team_name():
-    assert polymarket_us.glued_code("San Francisco 49ers") == "saners"
-    assert polymarket_us.glued_code("Kansas City Chiefs") == "kanchi"
-    assert polymarket_us.glued_code("Los Angeles Chargers") == "loscha"
-    assert [polymarket_us.team_suffix(s, "nfl") for s in ("kanchi", "loscha", "losram", "grepac", "saners", "tambuc", "bufbil", "kc", "gb")] == \
-        ["KC", "LAC", "LAR", "GB", "SF", "TB", "BUF", "KC", "GB"]
+def test_futures_are_left_out():
+    assert polymarket_us.classify(row("nfl-champ-2027-02-14-w", "tec-nfl-champ-2027-02-14-w-buf", "futures", start_time=None)) is None
+    assert polymarket_us.classify(row("nfl-afceast-2027-01-10-w", "tec-nfl-afceast-2027-01-10-w-buf", "futures", start_time=None)) is None
+    assert polymarket_us.classify(row("cfb-champ-2027-01-25-w", "tec-cfb-champ-2027-01-25-w-nd", "futures", start_time=None) | {"sport": "ncaaf"}) is None
 
 
 def test_skips_props_and_awards():

@@ -13,7 +13,7 @@ venue's other connections carry on, and so do their books.
 With a scanner from scan.py, every change at the top of a book is priced
 as it lands, from the same in memory books.
 
-Only futures and games within config.GAME_WINDOW_DAYS of kickoff are recorded.
+Only games within config.GAME_WINDOW_DAYS of kickoff are recorded.
 The process that runs all this is run.py.
 """
 

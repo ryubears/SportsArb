@@ -5,8 +5,8 @@ Tests for pairing up bets across venues.
 from catalog import match
 
 
-def bet(venue, contract_id, kind="champion", subject="BUF", polarity="yes", line=None,
-        game_date=None, team_a=None, team_b=None, close_time="2027-01-25T00:00:00+00:00"):
+def bet(venue, contract_id, kind="game_winner", subject="CAR", polarity="yes", line=None,
+        game_date="2026-09-20", team_a="CAR", team_b="ATL", close_time="2026-09-20T20:00:00+00:00"):
     """
     A bet row as load_bets returns it.
     """
@@ -20,20 +20,22 @@ def test_identity_ignores_venue_contract_and_polarity():
 
 
 def test_label():
-    assert match.label(bet("kalshi", "k"), "nfl") == "nfl champion 2027 BUF"
+    assert match.label(bet("kalshi", "k"), "nfl") == "nfl game_winner 2026-09-20 CAR@ATL CAR"
     assert match.label(bet("kalshi", "k", kind="spread", game_date="2026-09-20", team_a="CAR", team_b="ATL", subject="ATL", line=4.5), "nfl") == "nfl spread 2026-09-20 CAR@ATL ATL 4.5"
 
 
 def test_the_same_bet_in_two_sports_has_two_labels():
-    broncos, nuggets = bet("kalshi", "k", subject="DEN"), bet("kalshi", "k2", subject="DEN")
-    assert (match.label(broncos, "nfl"), match.label(nuggets, "nba")) == ("nfl champion 2027 DEN", "nba champion 2027 DEN")
+    game = dict(game_date="2026-11-01", team_a="DAL", team_b="DEN", subject="DAL")     # Dallas at Denver, the same day in both leagues.
+    cowboys, mavericks = bet("kalshi", "k", **game), bet("kalshi", "k2", **game)
+    assert (match.label(cowboys, "nfl"), match.label(mavericks, "nba")) == ("nfl game_winner 2026-11-01 DAL@DEN DAL",
+                                                                            "nba game_winner 2026-11-01 DAL@DEN DAL")
 
 
 def test_same_bet_on_two_venues_forms_one_pair():
     pairs, unmatched = match.match([bet("polymarket_us", "us"), bet("kalshi", "k")], "nfl")
     assert len(pairs) == 1 and unmatched == []
     g = pairs[0]
-    assert g.label == "nfl champion 2027 BUF" and g.sport == "nfl"
+    assert g.label == "nfl game_winner 2026-09-20 CAR@ATL CAR" and g.sport == "nfl"
     assert g.venues == ["kalshi", "polymarket_us"]
     assert sorted((m.venue, m.contract_id, m.polarity) for m in g.members) == [("kalshi", "k", "yes"), ("polymarket_us", "us", "yes")]
 

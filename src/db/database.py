@@ -156,25 +156,32 @@ def event_ids(conn, venue, contract_ids):
 def load_recording_targets(conn, sport, now, horizon, venues, game_started_after):
     """
     The contracts to record right now, as {venue: [contract_id, ...]}: every
-    contract in a pair that is either a future or a game on or before the
-    horizon's date, for as long as it can trade. A contract whose venue gives
-    its game's kickoff is recorded while the game may still be in play,
-    meaning it kicked off after game_started_after, whatever its close time
-    says: some venues close a game's contracts at kickoff yet trade them
-    through the game, and Polymarket US leaves them open two weeks after
-    it. Any other contract, a future or a Kalshi game contract, is recorded
-    until its close time.
+    contract in a pair on a game no later than the horizon's date, for as
+    long as it can trade. A game's contracts on both venues are recorded
+    while the game may still be in play, meaning it kicked off after
+    game_started_after, whatever their close times say. The kickoff is the
+    latest any of the game's contracts gives, which is Polymarket US's,
+    since Kalshi gives none. Polymarket US leaves a game's contracts open two
+    weeks after it, and Kalshi's close time is its guess at the final
+    whistle, three hours after kickoff, which nearly every college game and
+    most NFL games outlast. A contract with no game, or on a game no
+    contract gives the kickoff of, is recorded until its close time.
     """
     targets = {}
     for venue in venues:
         rows = conn.execute("""
+            WITH kickoffs AS (
+                SELECT p.game_date, p.team_a, p.team_b, MAX(c.start_time) AS kickoff
+                FROM pairs p JOIN bets b ON b.pair_id = p.id JOIN contracts c ON c.venue = b.venue AND c.contract_id = b.contract_id
+                WHERE p.sport = ? AND p.game_date IS NOT NULL GROUP BY 1, 2, 3)
             SELECT c.contract_id FROM contracts c
             JOIN bets b ON b.venue = c.venue AND b.contract_id = c.contract_id
             JOIN pairs p ON p.id = b.pair_id
+            LEFT JOIN kickoffs k ON k.game_date = p.game_date AND k.team_a = p.team_a AND k.team_b = p.team_b
             WHERE c.venue = ? AND c.sport = ?
-              AND (c.start_time > ? OR (c.start_time IS NULL AND (c.close_time IS NULL OR c.close_time > ?)))
+              AND (k.kickoff > ? OR (k.kickoff IS NULL AND (c.close_time IS NULL OR c.close_time > ?)))
               AND (b.game_date IS NULL OR b.game_date <= ?)
-        """, (venue, sport, game_started_after, now, horizon[:10]))
+        """, (sport, venue, sport, game_started_after, now, horizon[:10]))
         targets[venue] = [r[0] for r in rows]
     return targets
 
