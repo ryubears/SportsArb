@@ -329,12 +329,12 @@ Live trading has brakes, in **brakes.py**, sized for a test with about $100
 on each venue. An order whose outcome cannot be known (a timeout, a dropped
 connection, a venue failing on its side, or an answer that cannot be read)
 sets its trade aside (`LiveExecutor.set_trade_aside`): no more orders are
-sent for it, since what it holds is unknown, and an email says which order
-to look up. Trading goes on. It halts, sending no more orders of any kind,
-when the orders themselves fail:
+sent for it, since what it holds is unknown, and the log says which order
+to look up. No email goes out for it. Trading goes on. It halts, sending no
+more orders of any kind, when the orders themselves fail:
 
 - 3 of the last 20 orders had an unknown outcome, three in a row or a
-  steady error rate;
+  steady error rate. The halt names each of those orders, to look up;
 - one venue refused its last 3 orders. A refusal is the venue answering
   that it will not take an order, so nothing traded: not authorized, not
   enough money, a bad price, too many requests, or a market that has
@@ -343,14 +343,8 @@ when the orders themselves fail:
   being slow.
 
 It halts new trades, but goes on flattening what is exposed, when the
-results go wrong:
-
-- the live trades decided in the last 6 hours lost more than 10% of the
-  live money, net;
-- at least 50 trades were decided in those 6 hours with a profit or a
-  loss, and 90% or more of them lost.
-
-If the orders then fail as above, flattening stops as well.
+live trades decided in the last 6 hours lost more than 10% of the live
+money, net. If the orders then fail as above, flattening stops as well.
 
 A trade is decided once its legs hold the same number of contracts, which
 pay a dollar each whichever way the game goes, or once it settles. Each

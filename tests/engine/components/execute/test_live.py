@@ -154,10 +154,9 @@ def test_an_order_of_unknown_outcome_sets_its_trade_aside_and_trading_goes_on(tm
     assert (kalshi_order["status"], kalshi_order["filled"]) == ("error", 0)
     assert (t["yes_held"], t["no_held"]) == (10, 0) and ex.exposed == {}
     assert t["hedge"] == f"10 exposed, set aside, order {kalshi_order['id']} has an unknown outcome, no leg error: TimeoutError('timed out')"
-    ((kind, subject, body),) = notifier.sent
-    assert (kind, subject) == ("set_aside", f"SportsArb live trade {t['id']} set aside")
-    assert kalshi_order["client_id"] in body and "buy 10 no of kalshi k" in body
-    assert any(line.startswith(f"live trade {t['id']} set aside") for line in logs)
+    assert notifier.sent == []                                         # Only a halt is emailed.
+    (line,) = [line for line in logs if line.startswith(f"live trade {t['id']} set aside")]
+    assert f"order {kalshi_order['id']}, buy 10 no of kalshi k" in line and f"client id {kalshi_order['client_id']}" in line
     assert ex.halted is None and trade(ex) == [True]                    # The next trade goes ahead.
     assert stored(conn, "trades")[1]["status"] == "filled"
     assert executor(tmp_path, Venues())[2].exposed == {}                # A restart leaves it to a human too.
@@ -170,9 +169,10 @@ def test_live_trading_halts_at_three_unknown_outcomes_in_twenty_orders(tmp_path)
     assert trade(ex, 2) == [True, True] and ex.halted is None           # One unknown in four orders.
     assert trade(ex, 2) == [True, True] and ex.halted is None           # Two in eight, not in a row.
     assert trade(ex, 1) == [True] and ex.halted.startswith("3 of the last ")      # The third, in the tenth order, halts.
-    assert "orders had an unknown outcome, the last order " in ex.halted and trade(ex) == [False]
+    unknown = ", ".join(str(o["id"]) for o in stored(conn, "orders") if o["status"] == "error")
+    assert f"orders had an unknown outcome, orders {unknown}, the last on " in ex.halted and trade(ex) == [False]
     assert ex.brakes.stopped == ex.halted                               # Flattening stops too.
-    assert [kind for kind, _, _ in notifier.sent] == ["set_aside", "set_aside", "set_aside", "halt"]
+    assert [kind for kind, _, _ in notifier.sent] == ["halt"]           # One email, naming every order to look up.
 
 
 def test_a_venue_refusing_orders_in_a_row_halts_live_trading(tmp_path):

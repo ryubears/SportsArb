@@ -102,8 +102,10 @@ def print_opportunities(conn, since, hours):
     if not total:
         print("\nopportunities: none yet, the live process's scanner writes them")
         return
-    covered = conn.execute("SELECT MIN(start_ts), MAX(end_ts) FROM opportunities").fetchone()
-    print(f"\nopportunities {total:,} episodes in all, covering {short_time(covered[0])} to {short_time(covered[1])} UTC, "
+    # Asked apart, so the first start comes from the index. Episodes are stored as they end, so the newest one ended last.
+    first = first_value(conn, "SELECT MIN(start_ts) FROM opportunities")
+    last = first_value(conn, "SELECT end_ts FROM opportunities ORDER BY id DESC LIMIT 1")
+    print(f"\nopportunities {total:,} episodes in all, covering {short_time(first)} to {short_time(last)} UTC, "
           f"{recent:,} in the last {hours} hours")
     if not recent:
         return
@@ -178,14 +180,18 @@ def print_mode_trades(conn, since, hours, mode):
             ORDER BY profit + hedge_pnl LIMIT 5""", (mode, since))
         print_table(f"{mode} worst", ("bet", "trade", "wanted", "yes", "no", "net $", "hedge", "at"),
                     [(l[:40], t, q, y, n, p, h[:40], a) for l, t, q, y, n, p, h, a in worst])
+    # A settlement's settled_at is its later leg's, so a leg settled in the window is on a settlement that was too,
+    # which is checked first, before its trade is looked up.
     settled = query_rows(conn, """
         SELECT venue, COUNT(*), SUM(held), ROUND(SUM(cost), 2), ROUND(SUM(payout), 2), ROUND(SUM(payout - cost), 2) FROM (
-            SELECT t.yes_venue AS venue, t.yes_held AS held, t.yes_cost AS cost, s.yes_payout AS payout, s.yes_settled_at AS settled_at
-            FROM trades t JOIN settlements s ON s.trade_id = t.id WHERE t.mode = ? AND s.yes_result IS NOT NULL
+            SELECT t.yes_venue AS venue, t.yes_held AS held, t.yes_cost AS cost, s.yes_payout AS payout
+            FROM settlements s JOIN trades t ON t.id = s.trade_id
+            WHERE s.mode = ? AND s.settled_at >= ? AND s.yes_result IS NOT NULL AND s.yes_settled_at >= ?
             UNION ALL
-            SELECT t.no_venue, t.no_held, t.no_cost, s.no_payout, s.no_settled_at
-            FROM trades t JOIN settlements s ON s.trade_id = t.id WHERE t.mode = ? AND s.no_result IS NOT NULL)
-        WHERE settled_at >= ? GROUP BY venue ORDER BY venue""", (mode, mode, since))
+            SELECT t.no_venue, t.no_held, t.no_cost, s.no_payout
+            FROM settlements s JOIN trades t ON t.id = s.trade_id
+            WHERE s.mode = ? AND s.settled_at >= ? AND s.no_result IS NOT NULL AND s.no_settled_at >= ?)
+        GROUP BY venue ORDER BY venue""", (mode, since, since, mode, since, since))
     if settled:
         print_table(f"{mode} settled legs by venue, last {hours} hours", ("venue", "legs", "contracts", "cost $", "payout $", "realized $"), settled)
     open_count = first_value(conn, """
