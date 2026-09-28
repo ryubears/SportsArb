@@ -353,19 +353,21 @@ and starts over after a halt. A halt is logged and emailed, and what is
 held is still settled. It is also written to `data/live_halt.txt`, and
 live trading stays halted across restarts, a crash or a deploy, until a
 human has checked the venues and removed that file. Live trades hold 1 to
-10 contracts until the live results earn more.
+5 contracts until the live results earn more.
 
 **allocate.py** sets how many contracts one trade may hold, so the money
 covers every game in play. The games from kickoff until they settle share
-each venue's pool, its free cash plus what they already hold, equally.
-A game's share becomes a cap at $20 of spending per contract of cap, the
-rate the first live game showed, between 5 and 500 contracts on paper and
-1 and 10 live. A game that has spent its share gets nothing more until
-others settle and fewer games share the pool. Paper and live each size
-from their own money and trades. A live game whose share is too small for
-one contract of cap still gets one contract until it has spent its share,
-so a test with $100 a venue trades a nine game Sunday window, $11 a game,
-rather than nothing.
+each venue's pool, its free cash plus what they already hold, equally. A
+game's share becomes a cap at $10 of spending per contract of cap, a little
+above the median of the 14 games on Sunday, September 27, between 10 and
+1,000 contracts on paper and 1 and 5 live. A game that has spent its share
+gets nothing more until others settle and fewer games share the pool. Paper
+and live each size from their own money and trades. A live game whose share
+is too small for one contract of cap still gets one contract until it has
+spent its share, so a test with $50 a venue trades a nine game Sunday
+window, $6 a game, rather than nothing. The cap only bounds how many
+contracts a trade may hold: whether one is sent at all still depends on the
+edge, the depth of the books, and the cash.
 
 **balance/** and **settle.py** track the money: paper money in
 **balance/paper.py** and live money in **balance/live.py**, with what they

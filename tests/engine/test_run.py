@@ -8,6 +8,7 @@ from engine import run
 from engine.components import notify, streams
 from engine.components.balance import live as live_balance
 from engine.components.execute import brakes
+from engine.helper import config
 
 
 def test_run_survives_a_failing_refresh(tmp_path, monkeypatch, capsys, fake_stream):
@@ -92,7 +93,8 @@ def test_a_session_trading_both_modes_keeps_a_desk_for_each_and_offers_live_the_
     assert s.desks[0].cash.amounts == {"kalshi": 800.0, "polymarket_us": 600.0}
     assert s.desks[1].cash.amounts == {"kalshi": 10000.0, "polymarket_us": 10000.0}         # Paper money is its own.
     out = [line[9:] for line in capsys.readouterr().out.splitlines()]                       # Past the timestamp.
-    assert out[0].startswith("settings: min edge") and out[1].startswith("LIVE TRADING with real money: cap 1 to 10 contracts")
+    live_caps = f"cap {config.LIVE_MIN_CAP} to {config.LIVE_MAX_CAP} contracts"
+    assert out[0].startswith("settings: min edge") and out[1].startswith(f"LIVE TRADING with real money: {live_caps}")
     assert out[2] == f"no email settings in {tmp_path / 'email.json'}, alerts are only logged and stored"
     assert "live balances read: kalshi 800$, polymarket_us 600$" in out
     heads = [line.split(":")[0] for line in out]

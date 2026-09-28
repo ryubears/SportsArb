@@ -42,8 +42,9 @@ TRANSFER_DAYS = 4           # Business days a transfer between venues takes.
 # LIVE, execute/live.py, execute/brakes.py, balance/live.py, and balance/rebalance.py. Real money, so each limit is kept small
 # until the live results earn more. Sized for a test with about 100 dollars on each venue.
 
-LIVE_MIN_CAP = 1            # Contracts per live trade, the least worth sending, and what a game with money left in its share gets.
-LIVE_MAX_CAP = 10           # Contracts per live trade, the most one trade may hold, whatever the allocator would give.
+LIVE_MIN_CAP = 1            # The cap a live game gets when its share is too small for even one contract of cap, until it has spent its
+                            # share. It only keeps the cap from rounding down to nothing: a trade still needs the edge, the depth, and the cash.
+LIVE_MAX_CAP = 5            # Contracts per live trade, the most one trade may hold, whatever the allocator would give.
 LIVE_BALANCE_SECONDS = 30   # Between readings of the venues' balances.
 LIVE_CASH_FLOOR = 5.0       # Dollars new live trades leave untouched on each venue. Flattening may still use them.
 LIVE_ORDER_WINDOW = 20      # The newest orders the unknown outcome brake looks at.

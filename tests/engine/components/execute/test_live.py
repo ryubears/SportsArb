@@ -55,6 +55,11 @@ def halt_file(tmp_path, monkeypatch):
     return brakes.HALT_FILE
 
 
+@pytest.fixture(autouse=True)
+def cap_of_ten(monkeypatch):
+    monkeypatch.setattr(config, "LIVE_MAX_CAP", 10)     # The trades here hold 10 contracts, whatever live trading is tuned to.
+
+
 class FakeNotifier:
     """
     Stands in for the Notifier, keeping what it was asked to send as (kind, subject, body).

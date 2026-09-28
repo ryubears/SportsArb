@@ -97,8 +97,8 @@ def test_live_caps_come_from_the_live_money_and_stay_under_the_live_bounds(tmp_p
     allocator = allocate.Allocator(conn, cash)
     early = EARLY[0]
     assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == config.LIVE_MAX_CAP     # 4,000 over nine games would allow 44.
-    cash.read["polymarket_us"] = 750.0
-    assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == 8                       # 750 over nine games, at 10$ a contract.
+    cash.read["polymarket_us"] = 300.0
+    assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == 3                       # 300 over nine games, at 10$ a contract.
     cash.read["polymarket_us"] = 50.0
     assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == 1                       # 6 a game, under one contract of cap.
     assert allocator.summary(f"{SUNDAY}T17:00:00+00:00") == "live capital: 9 games in play or settling, 6$ a venue each, cap 1"
