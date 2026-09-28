@@ -18,11 +18,12 @@ flat, the bet pays out, or the settler says its contracts have resolved.
 The list is read back from the trades table when the process starts, so a
 restart does not leave a trade exposed. The settler leaves alone a trade
 while an order to flatten it is in flight.
-Only games being played are traded, so capital turns over the same day,
-and an Allocator from allocate.py caps each trade so the money covers every
-game in play. Every trade is stored in the trades table as soon as it is
-sent and updated when it is done, and every dollar moved goes through
-the cash the executor was given. Settling what was bought is settle.py's job.
+Only games being played are traded, as the scoreboard says, so capital
+turns over the same day, and an Allocator from allocate.py caps each trade
+and paces the money through the day. Every trade is stored in the trades
+table as soon as it is sent and updated when it is done, and every dollar
+moved goes through the cash the executor was given. Settling what was
+bought is settle.py's job.
 """
 
 import asyncio
@@ -33,7 +34,7 @@ from common.timeutil import now_iso, seconds_between
 from common.venues import VENUES
 from db import database
 from db.models import Ledger, Trade
-from engine.components.allocate import cap_range
+from engine.components.allocate import cap_range, cash_floor
 from engine.helper import config, game
 from engine.helper.pricing import depth, ladder, reach, sell_ladder, sweep, trade_words
 
@@ -375,13 +376,23 @@ class Executor:
         Dollars new trades leave untouched on each venue, so the money is
         never run down to nothing and flattening, which may use it, still can.
         """
-        return config.CASH_FLOOR
+        return cash_floor(self.mode)
 
     def spendable(self, venue):
         """
         Dollars a new trade may spend on a venue: its free cash less the floor.
         """
         return max(0.0, self.cash[venue] - self.floor())
+
+    def in_play(self, pair, members, now):
+        """
+        Whether the pair's game is being played: as the scoreboard says,
+        through the allocator, or without one by the game's expected length.
+        """
+        if self.allocator:
+            return self.allocator.in_play(pair, now)
+        kickoff = game.kickoff(members)
+        return bool(kickoff) and game.in_play(kickoff, now, pair["sport"])
 
     def quantity_for(self, pair, legs, now):
         """
@@ -390,8 +401,8 @@ class Executor:
         together through the levels that keep config.MIN_EDGE, each limit
         set at the deepest level reached. The quantity is config.FILL_SHARE
         of what those levels show, the share we expect to get, so an
-        unchanged book fills in full, and no more than the cap or what each
-        venue can spend.
+        unchanged book fills in full, and no more than the game's cap, what
+        each venue can spend, or what is left on it of the half hour's budget.
         """
         books = self.books()
         yes_leg, no_leg = legs
@@ -402,7 +413,8 @@ class Executor:
         cap = self.allocator.cap(pair, now) if self.allocator else cap_range(self.mode)[1]
         if not available:
             return 0, cap
-        affordable = min(self.spendable(leg.venue) // leg.limit for leg in legs)
+        budget = self.allocator.budget_left(now) if self.allocator else {}
+        affordable = min(min(self.spendable(leg.venue), budget.get(leg.venue, float("inf"))) // leg.limit for leg in legs)
         return int(min(available * config.FILL_SHARE, cap, affordable)), cap
 
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
@@ -417,8 +429,7 @@ class Executor:
         """
         if edge < config.MIN_EDGE:
             return False
-        kickoff = game.kickoff((yes, no))
-        if not kickoff or not game.in_play(kickoff, now, pair["sport"]):
+        if not self.in_play(pair, (yes, no), now):
             return False
         legs = [Leg(side, member, fee_infos[(member["venue"], member["contract_id"])]) for side, member in (("yes", yes), ("no", no))]
         quantity, cap = self.quantity_for(pair, legs, now)
@@ -429,7 +440,7 @@ class Executor:
             self.cash.reserve(leg.venue, quantity * leg.limit)
         yes_leg, no_leg = legs
         trade = Trade(mode=self.mode, pair_id=pair["id"], label=pair["label"], trade=trade_words(yes, no), signal_ts=now, edge=edge,
-                      quantity=quantity, cap=cap, pays_at=game.pays_at((yes, no), pair["sport"]),
+                      quantity=quantity, cap=cap, pays_at=game.pays_at((yes, no), pair["sport"], now),
                       yes_venue=yes["venue"], yes_contract=yes["contract_id"], yes_polarity=yes["polarity"], yes_limit=yes_leg.limit,
                       no_venue=no["venue"], no_contract=no["contract_id"], no_polarity=no["polarity"], no_limit=no_leg.limit)
         database.insert_trade(self.conn, trade)

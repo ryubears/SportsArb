@@ -6,19 +6,20 @@ winning leg receives the whole dollar and the other receives nothing.
 
 Trades are open most of the time, so the venues are compared as they
 stand, see drift(): each counts its free cash plus what open trades hold
-on it, at cost, which is about what those trades will pay back there. The
-excess is what the larger has above the two venue average, and only the
-part of it that is free cash above the floor can move, since money held
-in trades cannot.
+on it, at cost, which is about what those trades will pay back there, and
+the paper money already on its way to it. The excess is what the larger
+has above the two venue average, and only the part of it that is free
+cash above the floor can move, since money held in trades cannot.
 
-The PaperRebalancer moves the money itself. On config.REBALANCE_WEEKDAY,
-a Tuesday so that Monday night's game has paid out, the venues are
-compared, and when the larger sits more than config.REBALANCE_DRIFT above
-the average, what can move of the excess is sent to the other venue. A
-transfer takes config.TRANSFER_DAYS business days, during which the money
-is on neither venue. A transfer still in flight does not hold up the
-check: the venues are compared as they stand, with the money in transit
-on neither of them. Every transfer is stored.
+The PaperRebalancer moves the money itself. Once a day, from
+config.PAPER_REBALANCE_HOUR UTC, when the night's games have settled and
+the day's have not begun, the venues are compared, and when the larger
+sits more than config.REBALANCE_DRIFT above the average, what can move of
+the excess is sent to the other venue. A transfer takes
+config.PAPER_TRANSFER_DAYS business days. Until it lands the money cannot
+be traded on either venue, but it counts for the venue it is going to, so
+the checks on the days in between do not send it again. Every transfer is
+stored.
 
 Live money is moved by hand, so the LiveRebalancer only emails. It
 compares the venues each minute, and when the larger sits more than
@@ -39,8 +40,9 @@ class Drift(NamedTuple):
     """
     How far apart the venues stand, from drift().
     """
-    totals: dict        # Each venue's free cash plus what open trades hold on it, at cost.
+    totals: dict        # Each venue's free cash, plus what open trades hold on it at cost, plus the money on its way to it.
     held: dict          # What open trades hold on each venue, at cost.
+    incoming: dict      # Paper money on its way to each venue, in transfers that have not landed.
     average: float      # The average of the totals.
     rich: str           # The venue with the largest total.
     poor: str           # The venue with the smallest total.
@@ -55,25 +57,31 @@ class Drift(NamedTuple):
 
     def standing(self):
         """
-        The totals in one phrase, with what each venue has in open trades, for alerts and log lines.
+        The totals in one phrase, with what each venue has in open trades and on its way, for alerts and log lines.
         """
-        return ", ".join(f"{venue} {total:,.0f}$" + (f" ({self.held[venue]:,.0f}$ of it in open trades)" if self.held.get(venue) else "")
-                         for venue, total in self.totals.items())
+        phrases = []
+        for venue, total in self.totals.items():
+            parts = [f"{self.held[venue]:,.0f}$ of it in open trades"] if self.held.get(venue) else []
+            parts += [f"{self.incoming[venue]:,.0f}$ on its way"] if self.incoming.get(venue) else []
+            phrases.append(f"{venue} {total:,.0f}$" + (f" ({', '.join(parts)})" if parts else ""))
+        return ", ".join(phrases)
 
 
-def drift(conn, cash, floor):
+def drift(conn, cash, floor, incoming=None):
     """
     How far apart the venues stand, as a Drift. A leg cost about what it
     will pay back, since its price is about its chance of paying, so each
     venue's free cash plus what open trades hold on it at cost is about
-    what it will have once they settle.
+    what it will have once they settle. incoming is the money on its way
+    to each venue, which it will have once it lands.
     """
     held = database.load_open_cost_by_venue(conn, cash.mode)
-    totals = {venue: cash[venue] + held.get(venue, 0.0) for venue in cash.amounts}
+    incoming = incoming or {}
+    totals = {venue: cash[venue] + held.get(venue, 0.0) + incoming.get(venue, 0.0) for venue in cash.amounts}
     average = sum(totals.values()) / len(totals)
     rich, poor = max(totals, key=totals.get), min(totals, key=totals.get)
     excess = totals[rich] - average
-    return Drift(totals, held, average, rich, poor, excess, max(0.0, min(excess, cash[rich] - floor)))
+    return Drift(totals, held, incoming, average, rich, poor, excess, max(0.0, min(excess, cash[rich] - floor)))
 
 
 class PaperRebalancer:
@@ -85,21 +93,31 @@ class PaperRebalancer:
         self.conn = conn
         self.cash = cash
         self.log = log
-        self.last_check = None      # The date of the last weekly balance check.
+        self.last_check = None      # The date of the last daily check.
+
+    def incoming(self):
+        """
+        Dollars on their way to each venue, in transfers that have not landed, as {venue: dollars}.
+        """
+        coming = {}
+        for t in database.load_transfers(self.conn, pending_only=True):
+            coming[t.to_venue] = coming.get(t.to_venue, 0.0) + t.amount
+        return coming
 
     def rebalance(self, now):
         """
-        Request a transfer from the richer venue to the poorer one when they
-        have drifted apart on the weekly check, of what can move of the excess.
+        Once a day, from config.PAPER_REBALANCE_HOUR UTC, request a transfer
+        from the richer venue to the poorer one when they have drifted apart,
+        of what can move of the excess.
         """
         today = now[:10]
-        if datetime.fromisoformat(now).weekday() != config.REBALANCE_WEEKDAY or self.last_check == today:
+        if datetime.fromisoformat(now).hour < config.PAPER_REBALANCE_HOUR or self.last_check == today:
             return
         self.last_check = today
-        d = drift(self.conn, self.cash, config.CASH_FLOOR)
+        d = drift(self.conn, self.cash, config.PAPER_CASH_FLOOR, self.incoming())
         if not d.apart():
             return
-        transfer = Transfer(d.rich, d.poor, round(d.movable, 2), now, add_business_days(now, config.TRANSFER_DAYS), "drift")
+        transfer = Transfer(d.rich, d.poor, round(d.movable, 2), now, add_business_days(now, config.PAPER_TRANSFER_DAYS), "drift")
         database.insert_transfer(self.conn, transfer)
         self.cash.apply(Ledger(now, d.rich, -transfer.amount, "transfer_out"))
         self.log(f"transfer {transfer.id}: {transfer.amount:.2f}$ from {d.rich} to {d.poor} for drift, expected {transfer.expected_at[:16]}, "

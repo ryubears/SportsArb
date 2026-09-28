@@ -5,7 +5,7 @@ Whatever differs between venues is kept in a table keyed by venue, next to
 the code that uses it: fees.FEES and fees.RATES, fetch.FETCHERS and fetch.SPORTS,
 classify.CLASSIFIERS and classify.REPORT_GROUPS, streams.STREAMS,
 settle.RESULTS and settle.RESULTS_BY_EVENT, the READERS of balance/live.py
-and the PLACE of execute/live.py, and config.LATENCY_MS. Adding a
+and the PLACE of execute/live.py, and config.PAPER_LATENCY_MS. Adding a
 venue means adding it here and to each of those tables, and
 tests/common/test_venues.py fails until every table has it.
 """

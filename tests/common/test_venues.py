@@ -25,7 +25,7 @@ from engine.helper import config, fees
     ("settle.RESULTS_BY_EVENT", settle.RESULTS_BY_EVENT),
     ("balance/live.READERS", balance_live.READERS),
     ("execute/live.PLACE", execute_live.PLACE),
-    ("config.LATENCY_MS", config.LATENCY_MS),
+    ("config.PAPER_LATENCY_MS", config.PAPER_LATENCY_MS),
 ])
 def test_table_covers_every_venue(name, table):
     assert set(table) == set(VENUES), name

@@ -3,8 +3,10 @@ Which game a bet is on, when the game is played, and when the bets on it pay out
 
 Every timing assumption about games lives here, so the recorder, the
 scanner, the executor, and the allocator agree on them. How long a game
-lasts depends on the sport, see config.GAME_HOURS, which is set where
-about three quarters of the sport's past games had ended. Both venues
+is expected to last depends on the sport, see config.GAME_HOURS: three in
+four of the sport's past games had ended by then. The scoreboard in
+scoreboard.py knows when each game under way really ends, and falls back
+on the expected length here when the venue says nothing. Both venues
 settled the first live game, Atlanta at Green Bay, within half an hour of
 its final whistle.
 """
@@ -30,16 +32,9 @@ def payout_hours(sport):
 
 def in_play(kickoff, now, sport):
     """
-    Whether a game of the sport that kicked off at kickoff is being played at now.
+    Whether a game of the sport that kicked off at kickoff is expected to be being played at now, by its expected length.
     """
     return kickoff <= now < shift(kickoff, hours=config.GAME_HOURS[sport])
-
-
-def in_play_or_settling(kickoff, now, sport):
-    """
-    Whether a game of the sport that kicked off at kickoff is being played or waiting on the venues to settle at now.
-    """
-    return kickoff <= now < shift(kickoff, hours=payout_hours(sport))
 
 
 def resolution_time(start_time, close_time, sport):
@@ -59,8 +54,13 @@ def kickoff(members):
     return max((m["start_time"] for m in members if m["start_time"]), default=None)
 
 
-def pays_at(members, sport):
+def pays_at(members, sport, now=None):
     """
     When the slowest of a pair's members pays out, since capital is locked until then. None when none of them says.
+    Given now, a trade's time, it is no sooner than config.SETTLE_HOURS after it: a game still being traded has not
+    ended, even one that runs past its expected length.
     """
-    return max((t for t in (resolution_time(m["start_time"], m["close_time"], sport) for m in members) if t), default=None)
+    times = [t for t in (resolution_time(m["start_time"], m["close_time"], sport) for m in members) if t]
+    if times and now:
+        times.append(shift(now, hours=config.SETTLE_HOURS))
+    return max(times, default=None)

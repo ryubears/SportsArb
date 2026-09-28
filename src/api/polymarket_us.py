@@ -3,7 +3,8 @@ Polymarket US API client.
 
 Three jobs. The query half reads the public events listing on the gateway
 host, filtered by sport tag, turns every open market into a Contract, one
-per market, for the market's long side, and reads the account's balance.
+per market, for the market's long side, reads how each game under way
+stands, and reads the account's balance.
 The streaming half opens the signed markets websocket and keeps a live
 book per market slug, replacing the whole book on every message because
 the feed sends full snapshots. The trading half sends signed orders for
@@ -29,6 +30,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from db.models import Contract
 
 GATEWAY = "https://gateway.polymarket.us/v1"    # Public catalog of events and markets.
+STATE_BATCH = 50        # Game events per call when asking how the games stand.
 API = "https://api.polymarket.us/v1"            # Signed requests for books and trading.
 API_PATH = "/v1"                                # API's path, which a signed request's signature covers.
 WS_URL = "wss://api.polymarket.us/v1/ws/markets"
@@ -132,6 +134,24 @@ def results(event_slugs):
                 long_side = next((s for s in m.get("marketSides", []) if s.get("long")), None)
                 if m.get("status") == "MARKET_STATUS_RESOLVED" and long_side and long_side.get("price") in ("0", "1"):
                     out[m["slug"]] = ("yes" if long_side["price"] == "1" else "no", iso(m.get("endDate")))
+    return out
+
+
+def game_states(event_slugs):
+    """
+    How each game event stands, as {slug: {"live": bool, "ended": bool,
+    "finished": ISO time or None}}: being played, over, and when it ended.
+    One call covers STATE_BATCH events. An event comes back with its
+    markets, hundreds for a game, so only its moneyline is asked for.
+    """
+    out = {}
+    slugs = sorted(set(event_slugs))
+    for i in range(0, len(slugs), STATE_BATCH):
+        batch = slugs[i:i + STATE_BATCH]
+        params = [("slug", slug) for slug in batch] + [("marketTypes", "moneyline"), ("limit", len(batch))]
+        for e in get_json(f"{GATEWAY}/events", params).get("events", []):
+            finished = iso(e.get("finishedTimestamp"))
+            out[e["slug"]] = {"live": bool(e.get("live")), "ended": bool(e.get("ended")) or finished is not None, "finished": finished}
     return out
 
 

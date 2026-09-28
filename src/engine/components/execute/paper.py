@@ -33,7 +33,7 @@ class PaperExecutor(Executor):
         self.rng = rng or random.Random()
 
     def latency(self, venue):
-        median, sigma = config.LATENCY_MS[venue]
+        median, sigma = config.PAPER_LATENCY_MS[venue]
         return int(self.rng.lognormvariate(math.log(median), sigma))
 
     async def arrive(self, venue):
@@ -49,7 +49,7 @@ class PaperExecutor(Executor):
         Send one leg's buy order and fill it against the book as it is when the order arrives.
         """
         ms, ts = await self.arrive(leg.venue)
-        if self.rng.random() < config.REJECT_PROBABILITY:
+        if self.rng.random() < config.PAPER_REJECT_PROBABILITY:
             return Fill(ms=ms, ts=ts, note="rejected")
         book = self.fresh_book(leg.key)
         if book is None:

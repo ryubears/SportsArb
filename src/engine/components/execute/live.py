@@ -35,7 +35,6 @@ from db import database
 from db.models import Order
 from engine.components.execute.brakes import Brakes
 from engine.components.execute.executor import Executor, Fill
-from engine.helper import config
 
 PLACE = {"kalshi": kalshi.place_order, "polymarket_us": polymarket_us.place_order}   # How each venue takes an order.
 ORDER_THREADS = 8       # Orders in flight at once. Two per trade, so a burst of signals is not held back.
@@ -68,12 +67,6 @@ class LiveExecutor(Executor):
         if self.halted:
             return False
         return super().signal(pair, yes, no, edge, size, fee_infos, now)
-
-    def floor(self):
-        """
-        Dollars new live trades leave untouched on each venue.
-        """
-        return config.LIVE_CASH_FLOOR
 
     # ORDERS
 

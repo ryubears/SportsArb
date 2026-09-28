@@ -196,5 +196,5 @@ CREATE TABLE IF NOT EXISTS transfers (
     requested_at TEXT NOT NULL,
     expected_at  TEXT NOT NULL,     -- When the money should land, business days after the request.
     arrived_at   TEXT,              -- Set when the money was credited to the receiving venue.
-    reason       TEXT NOT NULL      -- 'drift' for the weekly check, or 'floor' on transfers from before the any-day top up was dropped.
+    reason       TEXT NOT NULL      -- 'drift' for the daily check, or 'floor' on transfers from before the any-day top up was dropped.
 );

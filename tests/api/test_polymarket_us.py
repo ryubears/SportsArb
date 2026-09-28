@@ -95,6 +95,25 @@ def fake_api(monkeypatch, answers):
     return calls
 
 
+def test_game_states_come_from_one_call_asking_for_each_events_moneyline_only(monkeypatch):
+    calls = []
+
+    def get_json(url, params):
+        calls.append((url, params))
+        return {"events": [{"slug": "cfb-minnst-wash-2026-09-26", "period": "VFT", "live": False, "ended": True,
+                            "finishedTimestamp": "2026-09-27T06:27:42Z"},
+                           {"slug": "nfl-phi-chi-2026-09-28", "period": "Q2", "live": True},
+                           {"slug": "nfl-car-atl-2026-10-04", "period": "NS"}]}
+    monkeypatch.setattr(polymarket_us, "get_json", get_json)
+    states = polymarket_us.game_states(["nfl-phi-chi-2026-09-28", "cfb-minnst-wash-2026-09-26", "nfl-car-atl-2026-10-04"])
+    assert states == {"cfb-minnst-wash-2026-09-26": {"live": False, "ended": True, "finished": "2026-09-27T06:27:42+00:00"},
+                      "nfl-phi-chi-2026-09-28": {"live": True, "ended": False, "finished": None},
+                      "nfl-car-atl-2026-10-04": {"live": False, "ended": False, "finished": None}}
+    [(url, params)] = calls
+    assert url.endswith("/events") and [v for k, v in params if k == "slug"] == sorted(states)
+    assert ("marketTypes", "moneyline") in params and ("limit", 3) in params
+
+
 def test_balance_is_the_buying_power_of_the_dollar_balance(monkeypatch):
     calls = fake_api(monkeypatch, {("GET", "/account/balances"): {"balances": [{"currentBalance": 1500.0, "buyingPower": 1234.5, "currency": "USD"}]}})
     assert polymarket_us.balance() == 1234.5

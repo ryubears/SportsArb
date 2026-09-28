@@ -16,11 +16,11 @@ from trade_setup import FEES, KICKOFF, NO, NO_K_FEES, NO_PM_FEES, NOW, PAIR, YES
 
 @pytest.fixture
 def quick(monkeypatch):
-    monkeypatch.setattr(config, "LATENCY_MS", {"kalshi": (1, 0), "polymarket_us": (1, 0)})
-    monkeypatch.setattr(config, "REJECT_PROBABILITY", 0)
+    monkeypatch.setattr(config, "PAPER_LATENCY_MS", {"kalshi": (1, 0), "polymarket_us": (1, 0)})
+    monkeypatch.setattr(config, "PAPER_REJECT_PROBABILITY", 0)
 
 
-def executor(tmp_path, latest, log=lambda m: None, start=config.START_BALANCE, clock=lambda: NOW):
+def executor(tmp_path, latest, log=lambda m: None, start=config.PAPER_START_BALANCE, clock=lambda: NOW):
     conn = database.connect(tmp_path / "t.sqlite")
     cash = PaperBalances(conn, start)
     return conn, cash, PaperExecutor(conn, cash, lambda: latest, log, random.Random(1), clock=clock)
@@ -194,7 +194,7 @@ def test_a_stale_book_is_not_flattened_against(tmp_path, quick):
 
 
 def test_rejected_orders_fail_without_a_hedge(tmp_path, quick, monkeypatch):
-    monkeypatch.setattr(config, "REJECT_PROBABILITY", 1)
+    monkeypatch.setattr(config, "PAPER_REJECT_PROBABILITY", 1)
     latest = books()
     conn, cash, ex = executor(tmp_path, latest)
     run(ex)
@@ -212,6 +212,41 @@ def test_signal_is_refused_for_thin_edges_and_games_not_in_play(tmp_path, quick)
     assert ex.signal(PAIR, YES, NO, 0.08, 100, FEES, "2026-09-20T16:59:00+00:00") is False        # Before kickoff.
     assert ex.signal(PAIR, YES, NO, 0.08, 100, FEES, "2026-09-20T20:16:00+00:00") is False        # After the final whistle.
     assert ex.tasks == set() and stored(conn) == []
+
+
+class HalfHour:
+    """
+    A stand in for the allocator: whether the game is in play, the cap, and what is left of the half hour's budget.
+    """
+
+    def __init__(self, playing=True, cap=1000, budget=None):
+        self.playing, self.limit, self.left = playing, cap, budget or {}
+
+    def in_play(self, pair, now):
+        return self.playing
+
+    def cap(self, pair, now):
+        return self.limit
+
+    def budget_left(self, now):
+        return self.left
+
+
+def test_a_trade_keeps_to_the_half_hours_budget_and_the_scoreboards_word_on_the_game(tmp_path, quick):
+    latest = books()
+    conn, cash, ex = executor(tmp_path, latest)
+    ex.allocator = HalfHour(budget={"polymarket_us": 9.2, "kalshi": 100.0})
+    assert run(ex) == [True] and stored(conn)[0]["quantity"] == 20            # 9.20 dollars at 0.45 buys 20.
+    ex.allocator = HalfHour(playing=False)
+    assert run(ex) == [False]                                                   # The venue has called the game over.
+
+    # Past its expected end, a game the scoreboard says is still live is traded, and pays no sooner than half an hour on.
+    async def late():
+        sent = ex.signal(PAIR, YES, NO, 0.08, 100, FEES, "2026-09-20T20:40:00+00:00")
+        await asyncio.gather(*ex.tasks)
+        return sent
+    ex.allocator = HalfHour(budget={"polymarket_us": 100.0, "kalshi": 100.0})
+    assert asyncio.run(late()) is True and stored(conn)[-1]["pays_at"] == "2026-09-20T21:10:00+00:00"
 
 
 def test_two_signals_at_once_share_the_balance_instead_of_both_spending_it(tmp_path, quick):

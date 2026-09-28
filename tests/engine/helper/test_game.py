@@ -10,12 +10,10 @@ FUTURE = {"start_time": None, "close_time": "2027-02-14T00:00:00+00:00"}
 UNKNOWN = {"start_time": None, "close_time": None}
 
 
-def test_a_game_is_in_play_until_the_whistle_then_settling():
+def test_a_game_is_expected_in_play_from_kickoff_for_its_expected_length():
     assert not game.in_play(KICKOFF, "2026-09-20T16:59:59+00:00", "nfl")
     assert game.in_play(KICKOFF, KICKOFF, "nfl")
     assert not game.in_play(KICKOFF, "2026-09-20T20:15:00+00:00", "nfl")
-    assert game.in_play_or_settling(KICKOFF, "2026-09-20T20:15:00+00:00", "nfl")
-    assert not game.in_play_or_settling(KICKOFF, "2026-09-20T20:45:00+00:00", "nfl")
 
 
 def test_how_long_a_game_lasts_is_the_sports_own(monkeypatch):
@@ -31,3 +29,9 @@ def test_payout_is_the_slowest_member_and_skips_members_without_times():
     assert game.pays_at([UNKNOWN], "nfl") is None
     assert game.kickoff([FUTURE, GAME]) == KICKOFF
     assert game.kickoff([FUTURE]) is None
+
+
+def test_a_trade_pays_no_sooner_than_the_settling_time_after_it():
+    assert game.pays_at([GAME], "nfl", "2026-09-20T18:00:00+00:00") == "2026-09-20T20:45:00+00:00"      # The expected payout is later.
+    assert game.pays_at([GAME], "nfl", "2026-09-20T20:40:00+00:00") == "2026-09-20T21:10:00+00:00"      # A game running long.
+    assert game.pays_at([UNKNOWN], "nfl", "2026-09-20T20:40:00+00:00") is None
