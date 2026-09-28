@@ -26,8 +26,10 @@ LATENCY_MS = {"kalshi": (50, 0.35), "polymarket_us": (60, 0.35)}
 DOLLARS_PER_CAP = 10        # Dollars a game spends on its busier venue, over the whole game, for every contract of cap. A little above the
                             # median of 8 across the 14 games on Sunday 2026-09-27, which ranged from 2 to 24. The 20 taken from the first live game left most
                             # of each game's share unspent: the busiest moment of that Sunday used 3,808 of 9,516 dollars on Kalshi.
-MIN_CAP = 5                 # Contracts per trade, the least worth sending.
-MAX_CAP = 500               # Contracts per trade, the most one trade may hold.
+MIN_CAP = 10                # The smallest cap a paper game trades with. A game whose share gives a smaller cap sends nothing. A trade can
+                            # still be smaller than this when the book is thin: on Sunday 2026-09-27, 746 of 1,366 trades were under 10.
+MAX_CAP = 1000              # Contracts per trade, the most one trade may hold. Only binds when a game's share tops 10,000 dollars at
+                            # DOLLARS_PER_CAP, which is a game nearly alone in the pool, like a night game.
 
 # MONEY, balance/paper.py, balance/rebalance.py, and execute/executor.py
 
