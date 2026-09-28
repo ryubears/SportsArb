@@ -102,7 +102,7 @@ def trading_settings():
     latency = ", ".join(f"{venue} {median}ms" for venue, (median, _) in c.LATENCY_MS.items())
     return (f"settings: min edge {c.MIN_EDGE:.2f}$, fill share {c.FILL_SHARE}, rejects {c.REJECT_PROBABILITY:.0%}, "
             f"latency {latency}, cap {c.MIN_CAP} to {c.MAX_CAP} at {c.DOLLARS_PER_CAP}$ a contract, "
-            f"game {c.GAME_HOURS}h + settle {c.SETTLE_HOURS}h, start balance {c.START_BALANCE:,.0f}$, floor {c.CASH_FLOOR:,.0f}$, "
+            f"game {', '.join(f'{sport} {hours}h' for sport, hours in c.GAME_HOURS.items())} + settle {c.SETTLE_HOURS}h, start balance {c.START_BALANCE:,.0f}$, floor {c.CASH_FLOOR:,.0f}$, "
             f"rebalance weekly over {c.REBALANCE_DRIFT:.0%}")
 
 

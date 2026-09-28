@@ -43,7 +43,7 @@ class Episode:
         start_time = next((m["start_time"] for m in self.pair["members"] if m["start_time"]), None)
         live = 1 if start_time and self.peak_ts >= start_time else 0
         # Capital is locked until the slower of the two legs pays, so the later resolution counts.
-        pays_at = payout_time((self.peak.yes, self.peak.no))
+        pays_at = payout_time((self.peak.yes, self.peak.no), self.pair["sport"])
         days_held = max(seconds_between(self.peak_ts, pays_at) / 86400, 1 / 24) if pays_at else None
         return_pct = 100 * self.peak.edge / (1 - self.peak.edge)
         return Opportunity(

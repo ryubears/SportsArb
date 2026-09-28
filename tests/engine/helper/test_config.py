@@ -18,10 +18,10 @@ def restore(monkeypatch):
 
 
 def test_override_reads_each_value_as_the_settings_own_type(restore):
-    config.override(["min_edge=0.03", "MAX_CAP=100", " game_hours = 3.5 ", "feed_processes=False"])
-    assert (config.MIN_EDGE, config.MAX_CAP, config.GAME_HOURS, config.FEED_PROCESSES) == (0.03, 100, 3.5, False)
+    config.override(["min_edge=0.03", "MAX_CAP=100", " settle_hours = 1.5 ", "feed_processes=False"])
+    assert (config.MIN_EDGE, config.MAX_CAP, config.SETTLE_HOURS, config.FEED_PROCESSES) == (0.03, 100, 1.5, False)
     assert isinstance(config.MAX_CAP, int)
-    assert game.payout_hours() == 3.5 + config.SETTLE_HOURS          # What depends on a setting follows it.
+    assert game.payout_hours("nfl") == config.GAME_HOURS["nfl"] + 1.5     # What depends on a setting follows it.
 
 
 @pytest.mark.parametrize("assignment, message", [
@@ -30,6 +30,7 @@ def test_override_reads_each_value_as_the_settings_own_type(restore):
     ("override=1", "unknown setting"),
     ("max_cap=1.5", "MAX_CAP needs a whole number"),
     ("latency_ms=5", "not a single number"),
+    ("game_hours=3.5", "not a single number"),                 # One for each sport, so set in config.py.
     ("feed_processes=0", "FEED_PROCESSES needs true or false"),
 ])
 def test_override_refuses_what_it_cannot_set(restore, assignment, message):

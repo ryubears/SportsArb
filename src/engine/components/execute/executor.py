@@ -418,7 +418,7 @@ class Executor:
         if edge < config.MIN_EDGE:
             return False
         kickoff = game.kickoff((yes, no))
-        if not kickoff or not game.in_play(kickoff, now):
+        if not kickoff or not game.in_play(kickoff, now, pair["sport"]):
             return False
         legs = [Leg(side, member, fee_infos[(member["venue"], member["contract_id"])]) for side, member in (("yes", yes), ("no", no))]
         quantity, cap = self.quantity_for(pair, legs, now)
@@ -429,7 +429,7 @@ class Executor:
             self.cash.reserve(leg.venue, quantity * leg.limit)
         yes_leg, no_leg = legs
         trade = Trade(mode=self.mode, pair_id=pair["id"], label=pair["label"], trade=trade_words(yes, no), signal_ts=now, edge=edge,
-                      quantity=quantity, cap=cap, pays_at=game.pays_at((yes, no)),
+                      quantity=quantity, cap=cap, pays_at=game.pays_at((yes, no), pair["sport"]),
                       yes_venue=yes["venue"], yes_contract=yes["contract_id"], yes_polarity=yes["polarity"], yes_limit=yes_leg.limit,
                       no_venue=no["venue"], no_contract=no["contract_id"], no_polarity=no["polarity"], no_limit=no_leg.limit)
         database.insert_trade(self.conn, trade)

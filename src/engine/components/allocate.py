@@ -70,7 +70,7 @@ class Allocator:
         """
         The games whose money is out right now: kicked off and not yet settled.
         """
-        return [key for key, kickoff in self.kickoffs.items() if in_play_or_settling(kickoff, now)]
+        return [key for key, kickoff in self.kickoffs.items() if in_play_or_settling(kickoff, now, key[0])]
 
     def deployed(self):
         """
@@ -108,7 +108,7 @@ class Allocator:
         game is not being played or has spent its share of the pool.
         """
         key = game_key(pair)
-        if key not in self.kickoffs or not in_play(self.kickoffs[key], now):
+        if key not in self.kickoffs or not in_play(self.kickoffs[key], now, key[0]):
             return 0
         active, shares = self.shares(now)
         held = self.deployed().get(key, {})
