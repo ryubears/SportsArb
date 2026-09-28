@@ -45,10 +45,8 @@ LIVE_CASH_FLOOR = 5.0       # Dollars new live trades leave untouched on each ve
 LIVE_ORDER_WINDOW = 20      # The newest orders the unknown outcome brake looks at.
 LIVE_UNKNOWN_LIMIT = 3      # Orders with an unknown outcome among the newest LIVE_ORDER_WINDOW at which live trading halts.
 LIVE_REJECT_LIMIT = 3       # Orders one venue refuses in a row at which live trading halts.
-LIVE_RESULT_HOURS = 6       # The sliding window the loss and losing rate brakes look at, in hours.
+LIVE_RESULT_HOURS = 6       # The sliding window the loss brake looks at, in hours.
 LIVE_MAX_LOSS_SHARE = 0.10  # Net loss of the trades decided in the window, as a share of the live money, over which live trading halts.
-LIVE_MIN_RESULTS = 50       # Trades decided in the window with a profit or a loss before the losing rate counts.
-LIVE_MAX_LOSING_SHARE = 0.9 # Share of those trades that lost at which live trading halts.
 LIVE_ALERT_HOURS = 24       # Between emails asking for the live venues to be rebalanced, while they stay apart.
 
 # GAMES, game.py. Measured on the first live game, Atlanta at Green Bay.

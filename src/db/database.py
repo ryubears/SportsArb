@@ -418,18 +418,18 @@ def update_order(conn, order):
     conn.commit()
 
 
-def recent_order_statuses(conn, count, venue=None, since=None):
+def recent_orders(conn, count, venue=None, since=None):
     """
-    The statuses of the newest answered live orders, newest first, at most
-    count of them, only one venue's when given, and only those sent after
-    since when given.
+    The (id, status) of the newest answered live orders, newest first, at
+    most count of them, only one venue's when given, and only those sent
+    after since when given.
     """
-    sql, params = "SELECT status FROM orders WHERE status != 'sent'", []
+    sql, params = "SELECT id, status FROM orders WHERE status != 'sent'", []
     if venue:
         sql, params = sql + " AND venue = ?", params + [venue]
     if since:
         sql, params = sql + " AND sent_at > ?", params + [since]
-    return [status for status, in conn.execute(sql + " ORDER BY id DESC LIMIT ?", params + [count])]
+    return [tuple(row) for row in conn.execute(sql + " ORDER BY id DESC LIMIT ?", params + [count])]
 
 
 def load_trade_cash(conn, mode, since):

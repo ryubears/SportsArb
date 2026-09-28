@@ -73,25 +73,6 @@ def test_losing_more_than_a_tenth_of_the_live_money_in_the_window_halts(tmp_path
     assert b.stopped is None                                            # Flattening goes on.
 
 
-def test_mostly_losing_trades_halt_only_once_enough_are_decided(tmp_path):
-    conn, b = setup(tmp_path, cash_each=1000.0)
-    at = "2026-09-27T19:00:00+00:00"
-    for _ in range(49):
-        live_trade(conn, 0, 0, [("buy", 4.5, at, "filled"), ("sell", 4.4, at, "filled")])               # Losses of 0.10.
-    b.check_results()
-    assert b.halted is None                                             # All 49 lost, but 49 is too few to judge.
-    live_trade(conn, 0, 0, [("buy", 0, at, "unfilled"), ("buy", 0, at, "unfilled")])        # Nothing filled, so neither.
-    for _ in range(6):
-        live_trade(conn, 10, 10, [("buy", 9.2, at, "filled")])                                          # Wins of 0.80.
-    b.check_results()
-    assert b.halted is None                                             # 49 of 55 lost, under 90%.
-    for _ in range(5):
-        live_trade(conn, 0, 0, [("buy", 4.5, at, "filled"), ("sell", 4.4, at, "filled")])
-    b.check_results()
-    assert b.halted == "54 of the 60 live trades decided in the last 6 hours lost money, at or over the 90% limit"
-    assert b.stopped is None
-
-
 def test_the_brakes_start_over_after_a_halt(tmp_path):
     conn, b = setup(tmp_path)
     at = "2026-09-27T19:00:00+00:00"

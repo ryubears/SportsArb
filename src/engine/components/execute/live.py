@@ -17,9 +17,11 @@ the venues' own, through LiveBalances from balance/live.py.
 An order whose outcome cannot be known, because no answer came, the venue
 failed on its side, or its answer cannot be read, leaves what its trade
 holds unknown. That trade is set aside: no more orders are sent for it,
-and a human is told which order to look up on the venue. The rest of live
-trading goes on. When live trading halts, whether flattening goes on then,
-and what counts as a refusal, is in brakes.py.
+and the log says which order to look up on the venue. No email goes out
+for one, but enough of them halt live trading, and the email about the
+halt names them all. The rest of live trading goes on. When live trading
+halts, whether flattening goes on then, and what counts as a refusal, is
+in brakes.py.
 """
 
 import asyncio
@@ -43,8 +45,8 @@ class LiveExecutor(Executor):
     """
     Sends real orders for the trades the shared Executor decides on.
     place maps a venue to its place_order function. notifier is the Notifier
-    from notify.py that tells a human when a trade is set aside or live
-    trading halts.
+    from notify.py, which the brakes email a human through when live trading
+    halts.
     """
 
     mode = "live"
@@ -52,7 +54,6 @@ class LiveExecutor(Executor):
     def __init__(self, conn, cash, books, log=print, allocator=None, clock=now_iso, place=None, notifier=None):
         super().__init__(conn, cash, books, log, allocator, clock)
         self.place = place or PLACE
-        self.notifier = notifier
         self.threads = ThreadPoolExecutor(ORDER_THREADS, thread_name_prefix="orders")
         self.brakes = Brakes(conn, cash, log, notifier, clock)
 
@@ -78,23 +79,17 @@ class LiveExecutor(Executor):
 
     def set_trade_aside(self, trade, order):
         """
-        Send no more orders for a trade one of whose orders has an unknown outcome, and tell a human which order to look up.
+        Send no more orders for a trade one of whose orders has an unknown
+        outcome, and log which order to look up on the venue, with the ids it
+        is found by there.
         """
         if trade.id in self.set_aside:
             return
         self.set_aside[trade.id] = f"set aside, order {order.id} has an unknown outcome"
+        venue_id = f", venue order id {order.venue_order_id}" if order.venue_order_id else ""
         self.log(f"live trade {trade.id} set aside: order {order.id}, {order.action} {order.quantity} {order.outcome} of {order.venue} "
-                 f"{order.contract_id}, has an unknown outcome: {order.note}")
-        if self.notifier:
-            venue_id = f", venue order id {order.venue_order_id}" if order.venue_order_id else ""
-            self.notifier.send("set_aside", f"SportsArb live trade {trade.id} set aside",
-                               f"Order {order.id} of live trade {trade.id} got no answer that says what happened: {order.note}.\n\n"
-                               f"It was an order to {order.action} {order.quantity} {order.outcome} of {order.venue} {order.contract_id} "
-                               f"at {order.limit_price:.4f}, sent at {order.sent_at[:19]} UTC, client id {order.client_id}{venue_id}.\n\n"
-                               f"No more orders are sent for the trade, since what it holds is unknown. Look the order up on the venue, "
-                               f"and flatten what the trade holds by hand if it traded.\n\n"
-                               f"Live trading goes on, and halts if {config.LIVE_UNKNOWN_LIMIT} of the last {config.LIVE_ORDER_WINDOW} "
-                               f"orders have an unknown outcome.", self.clock())
+                 f"{order.contract_id} at {order.limit_price:.4f}, client id {order.client_id}{venue_id}, has an unknown outcome: "
+                 f"{order.note}. Look it up on the venue and flatten the trade by hand if it traded.")
 
     async def send(self, trade, leg, purpose, action, quantity, price):
         """

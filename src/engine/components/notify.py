@@ -1,10 +1,9 @@
 """
 Tell a human by email.
 
-Live trading asks for a person in three cases: the live venues have
-drifted apart and money should be moved between them by hand, an order's
-outcome is unknown so its trade has been set aside, and live trading has
-halted. Every alert is logged and stored in the alerts table as it is
+Live trading asks for a person in two cases: the live venues have
+drifted apart and money should be moved between them by hand, and live
+trading has halted. Every alert is logged and stored in the alerts table as it is
 raised, and emailed in a background thread, so the loop never waits on the
 mail server. Whether the email went out, or why not, is written back to
 the alert.
