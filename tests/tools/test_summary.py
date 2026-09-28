@@ -25,19 +25,21 @@ def report(tmp_path, monkeypatch, capsys, fill):
     monkeypatch.setattr(summary, "DB_PATH", path)
     ro = sqlite3.connect(f"file:{path}?mode=ro", uri=True)      # As the script opens it.
     summary.print_storage(ro)
+    summary.print_pairs(ro)
     summary.print_opportunities(ro, SINCE, 12)
     summary.print_trades(ro, SINCE, 12)
     return capsys.readouterr().out
 
 
-def venue_rows(out, title):
+def table(out, title):
     """
-    The rows of the table printed under title, one per venue, each split into its cells.
+    The rows of the table printed under title, each split into its cells:
+    the lines after its header with as many cells as the first of them.
     """
     rows = []
     for line in out.split(f"\n{title}\n")[1].splitlines()[1:]:     # The header left out.
         cells = line.split()
-        if not cells or cells[0] not in ("kalshi", "polymarket_us"):
+        if not cells or (rows and len(cells) != len(rows[0])):
             break
         rows.append(cells)
     return rows
@@ -53,6 +55,7 @@ def test_episodes_are_covered_from_the_first_start_to_the_newest_end(tmp_path, m
                         live=1, days_held=0.1, return_pct=5, annual_pct=50) for start, end in episodes])
     out = report(tmp_path, monkeypatch, capsys, fill)
     assert "2 episodes in all, covering 2026-09-27 13:00:00 to 2026-09-27 15:00:00 UTC, 2 in the last 12 hours" in out
+    assert [row[:3] for row in table(out, "by kind, last 12 hours")] == [["nfl", "winner", "2"]]
 
 
 def test_settled_legs_count_by_when_each_leg_settled(tmp_path, monkeypatch, capsys):
@@ -69,4 +72,4 @@ def test_settled_legs_count_by_when_each_leg_settled(tmp_path, monkeypatch, caps
             database.insert_settlement(conn, s)
     out = report(tmp_path, monkeypatch, capsys, fill)
     # Only the first trade's no leg, on Kalshi, settled in the window. Its yes leg settled before it, as did the second trade.
-    assert venue_rows(out, "paper settled legs by venue, last 12 hours") == [["kalshi", "1", "10", "4.7", "0.0", "-4.7"]]
+    assert table(out, "paper settled legs by venue, last 12 hours") == [["kalshi", "1", "10", "4.7", "0.0", "-4.7"]]

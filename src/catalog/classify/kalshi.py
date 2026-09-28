@@ -44,28 +44,28 @@ PLAYER_TITLE = re.compile(r"^(.+?): ")     # 'Bijan Robinson: 100+ receiving yar
 EVENT_TAIL = re.compile(r"^([A-Z]*)(\d{2})([A-Z]*)$")
 
 
-def split_codes(pair):
+def split_codes(pair, sport):
     """
-    Split two glued ticker codes such as 'CARATL' or 'GBNYJ' into two teams.
+    Split two glued ticker codes such as 'CARATL' or 'GBNYJ' into two of the sport's teams.
     Three letter codes are tried first because no valid split is ambiguous that way.
     """
     for i in (3, 2):
-        a, b = team_from_code(pair[:i]), team_from_code(pair[i:])
+        a, b = team_from_code(pair[:i], sport), team_from_code(pair[i:], sport)
         if a and b:
             return a, b
     return None, None
 
 
-def parse_game(tail):
+def parse_game(tail, sport):
     """
-    Parse a game event tail such as '26SEP20CARATL' into (date, away, home).
+    Parse a game event tail such as '26SEP20CARATL' into (date, away, home), the teams being the sport's.
     """
     m = GAME_DATE.match(tail)
     if not m:
         return None, None, None
     yy, mon, dd, pair = m.groups()
     date = datetime.strptime(f"20{yy} {mon} {dd}", "%Y %b %d").strftime("%Y-%m-%d")
-    away, home = split_codes(pair)
+    away, home = split_codes(pair, sport)
     return date, away, home
 
 
@@ -73,26 +73,26 @@ def classify(row):
     """
     The Bet a Kalshi contract row describes, or None when it is not one we trade.
     """
-    series, event, ticker = row["series_id"], row["event_id"], row["contract_id"]
+    series, event, ticker, sport = row["series_id"], row["event_id"], row["contract_id"], row["sport"]
     event_tail = event[len(series) + 1:]
     market_tail = ticker[len(event) + 1:]
     base = dict(venue=row["venue"], contract_id=row["contract_id"])
 
     if series in GAME_SERIES:
-        game_date, away, home = parse_game(event_tail)
+        game_date, away, home = parse_game(event_tail, sport)
         if not game_date or not (away and home):
             return None
         kind = GAME_SERIES[series]
         common = dict(season=season_from_date(game_date), game_date=game_date, team_a=away, team_b=home, **base)
         if kind == "game_winner":
             # Stated as the away team winning, with the home contract as the complement.
-            picked = team_from_code(market_tail)
+            picked = team_from_code(market_tail, sport)
             if picked not in (away, home):
                 return None
             return Bet(kind=kind, subject=away, line=None, polarity="yes" if picked == away else "no", **common)
         if kind == "spread":
             # The market tail is a team code plus a rounded line, for example 'ATL17' for 16.5.
-            subject = team_from_code(market_tail.rstrip("0123456789"))
+            subject = team_from_code(market_tail.rstrip("0123456789"), sport)
             if not subject or row["line"] is None:
                 return None
             return Bet(kind=kind, subject=subject, line=row["line"], polarity="yes", **common)
@@ -100,7 +100,7 @@ def classify(row):
             return Bet(kind=kind, subject=None, line=row["line"], polarity="yes", **common) if row["line"] is not None else None
 
     if series in PLAYER_SERIES:
-        game_date, away, home = parse_game(event_tail)
+        game_date, away, home = parse_game(event_tail, sport)
         m = PLAYER_TITLE.match(row["title"] or "")
         if not game_date or not (away and home) or not m or "D/ST" in m.group(1):
             return None
@@ -122,7 +122,7 @@ def classify(row):
     if series == "KXNFL1SEED":
         # This series names the year the season starts, for example 'AFC26'.
         season += 1
-    subject = team_from_code(suffix) or team_from_code(market_tail.rstrip("0123456789"))
+    subject = team_from_code(suffix, sport) or team_from_code(market_tail.rstrip("0123456789"), sport)
     if not subject:
         return None
     line = row["line"] if kind == "season_wins" else None
