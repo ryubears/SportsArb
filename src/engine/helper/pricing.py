@@ -10,8 +10,9 @@ positive net edge, and the executor, which fills against the same ladders.
 """
 
 from typing import NamedTuple
+from common.timeutil import seconds_between
 from common.venues import SHORT_NAMES
-from engine.helper import fees
+from engine.helper import config, fees
 
 
 class Priced(NamedTuple):
@@ -23,6 +24,17 @@ class Priced(NamedTuple):
     edge: float         # Net dollars per contract at the top of both books.
     size: float         # Contracts fillable at a positive net edge, walking both ladders.
     profit: float       # Net dollars from filling size.
+
+
+def fresh(book, now):
+    """
+    Whether a book can be priced and traded at now: it has changed within
+    config.MAX_BOOK_AGE seconds. A market that has closed may stop changing
+    rather than empty its book, and its last book cannot be traded, so an
+    old book counts as no book. A quiet market that is still open waits for
+    its next change.
+    """
+    return book is not None and seconds_between(book.ts, now) <= config.MAX_BOOK_AGE
 
 
 def ladder(book, polarity, side):

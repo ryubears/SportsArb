@@ -1,28 +1,31 @@
 """
 Run the live process: follow the books, scan them, trade on paper or with real money, settle, and rebalance.
 
-What runs, and where it lives:
+What runs, and where it lives in components/: market/ follows the
+venues, trading/ makes the trades, and money/ keeps the cash.
 
-- The feeds, from streams.py and feeds.py. Each venue's connections and
-  books run in a child process, which passes every changed book on.
-- The recorder, from record.py, holds the newest book of every paired
-  contract in memory. Books are not stored.
-- The scanner, from scan.py, prices each pair a changed book belongs to,
-  stores every episode of positive edge in the opportunities table, and
-  offers each episode to the desks.
-- The scoreboard, from scoreboard.py, asks Polymarket US how the games
-  under way stand, so trading runs to each game's real final whistle.
+- The feeds, from market/streams.py and market/feeds.py. Each venue's
+  connections and books run in a child process, which passes every
+  changed book on.
+- The recorder, from market/record.py, holds the newest book of every
+  paired contract in memory. Books are not stored.
+- The scanner, from market/scan.py, prices each pair a changed book
+  belongs to, stores every episode of positive edge in the opportunities
+  table, and offers each episode to the desks.
+- The scoreboard, from market/scoreboard.py, asks Polymarket US how the
+  games under way stand, so trading runs to each game's real final
+  whistle.
 - A Desk for each mode the run trades in, with its own money, allocator,
   executor, settler, and rebalancer, and its trades stored with its mode,
   so paper and live never mix. Both can run at once on the same signals,
   which shows how far the paper fills are from real ones.
-  - Paper: execute/paper.py fills against the same books with the paper
-    money of balance/paper.py, and a PaperRebalancer moves paper money
+  - Paper: trading/paper.py fills against the same books with the paper
+    money of money/paper.py, and a PaperRebalancer moves paper money
     between the venues.
-  - Live: execute/live.py sends real orders with the money the venues
-    report through balance/live.py, and a LiveRebalancer emails a human,
-    through notify.py, when the venues drift apart, as the executor does
-    when live trading halts.
+  - Live: trading/live.py sends real orders with the money the venues
+    report through money/live.py, and a LiveRebalancer emails a human,
+    through trading/notify.py, when the venues drift apart, as the
+    executor does when live trading halts.
 
 The Session ties them together and ticks once a second. Every
 CATALOG_MINUTES the catalog of each sport is refreshed in a background
@@ -59,15 +62,17 @@ from common.log import log, with_traceback
 from common.paths import ROOT
 from common.timeutil import now_iso
 from db import database
-from engine.components import allocate, notify, scan, settle
-from engine.components.scoreboard import Scoreboard
-from engine.components.balance.live import LiveBalances
-from engine.components.balance.paper import PaperBalances
-from engine.components.balance.rebalance import LiveRebalancer, PaperRebalancer
-from engine.components.execute.live import LiveExecutor
-from engine.components.execute.paper import PaperExecutor
-from engine.components.record import Recorder, load_targets
-from engine.components.streams import Streams
+from engine.components.market import scan
+from engine.components.market.record import Recorder, load_targets
+from engine.components.market.scoreboard import Scoreboard
+from engine.components.market.streams import Streams
+from engine.components.money import settle
+from engine.components.money.live import LiveBalances
+from engine.components.money.paper import PaperBalances
+from engine.components.money.rebalance import LiveRebalancer, PaperRebalancer
+from engine.components.trading import allocate, notify
+from engine.components.trading.live import LiveExecutor
+from engine.components.trading.paper import PaperExecutor
 from engine.helper import config
 
 CATALOG_MINUTES = 60    # How often the catalog is refreshed and subscriptions updated. Zero disables it.

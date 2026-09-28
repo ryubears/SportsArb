@@ -230,14 +230,14 @@ def test_paper_and_live_trades_and_settlements_are_kept_apart(tmp_path):
     held = dict(status="filled", yes_held=5, no_held=5, yes_cost=2.25, no_cost=2.35)
     paper, live = trade("paper", **held), trade("live", **held)
     database.insert_trade(conn, paper)
-    assert database.load_open_cost_by_venue(conn, "live") == {}
+    assert database.load_open_legs(conn, "live") == []
     database.insert_trade(conn, live)
     assert [t.id for t in database.load_open_trades(conn, "paper")] == [paper.id]
     assert [(t.id, t.mode) for t in database.load_open_trades(conn, "live")] == [(live.id, "live")]
-    assert database.load_open_cost_by_venue(conn, "live") == {"polymarket_us": 2.25, "kalshi": 2.35}
-    assert database.load_open_game_costs(conn, "live") == [(("nfl", "2026-09-27", "CAR", "ATL"), [("polymarket_us", 2.25), ("kalshi", 2.35)])]
+    game = ("nfl", "2026-09-27", "CAR", "ATL")
+    assert database.load_open_legs(conn, "live") == [(game, "polymarket_us", 2.25), (game, "kalshi", 2.35)]
     database.insert_settlement(conn, Settlement(live.id, "2026-09-27T20:30:00+00:00", mode="live"))
-    assert database.load_open_trades(conn, "live") == [] and database.load_open_cost_by_venue(conn, "live") == {}
+    assert database.load_open_trades(conn, "live") == [] and database.load_open_legs(conn, "live") == []
     assert [t.id for t in database.load_open_trades(conn, "paper")] == [paper.id]             # Settling the live trade leaves paper alone.
     assert [s.trade_id for s in database.load_settlements(conn, "live")] == [live.id] and database.load_settlements(conn, "paper") == []
 

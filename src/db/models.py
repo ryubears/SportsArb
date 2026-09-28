@@ -7,7 +7,6 @@ the row is stored rather than when the model is made.
 """
 
 from dataclasses import dataclass, field
-from typing import NamedTuple
 
 
 def row_id():
@@ -132,22 +131,36 @@ class Gap:
     end_ts: str | None      # When a new connection was subscribed. None while still down.
 
 
-class Leg(NamedTuple):
+@dataclass
+class Leg:
     """
-    One leg of a Trade as stored, from Trade.leg(). While its orders are out,
-    the executor works with a Leg of its own, see execute/executor.py.
+    One side of a trade: the contract it is held through, the order sent for
+    it, and what it holds after any flattening. The executor makes one for
+    each side when it sends a trade and keeps it up to date as the orders
+    fill, and a stored Trade gives its legs back through Trade.leg().
     """
-    side: str               # 'yes' or 'no', the side of the bet the leg holds.
+    side: str               # 'yes' or 'no', the side of the bet this leg holds.
     venue: str
-    contract: str
+    contract_id: str
     polarity: str           # The side the contract pays on.
-    limit: float
-    held: int               # Contracts still held after any flattening.
-    cost: float             # Dollars paid for what is held, including fees.
+    limit: float = 0.0      # The highest cost per contract the order accepts.
+    quantity: int = 0       # Contracts the order asks for.
+    held: int = 0           # Contracts held after the fill and any flattening.
+    cost: float = 0.0       # Dollars paid for what is held, including fees.
+    fee_info: dict | None = None    # The contract's fee schedule, which the executor prices orders with. Not stored with the trade.
 
     @property
     def key(self):
-        return (self.venue, self.contract)
+        return (self.venue, self.contract_id)
+
+    @property
+    def outcome(self):
+        """
+        The outcome of its contract the leg holds: 'yes' when it holds the side
+        the contract pays on, 'no' when it holds the other. It is what the
+        leg's orders trade, and the leg wins when the contract resolves to it.
+        """
+        return "yes" if self.side == self.polarity else "no"
 
 
 @dataclass
@@ -194,9 +207,10 @@ class Trade:
 
     def leg(self, side):
         """
-        The stored fields of one leg, 'yes' or 'no', as a Leg.
+        One leg, 'yes' or 'no', from the trade's fields for that side, without its fee schedule.
         """
-        return Leg(side, *(getattr(self, f"{side}_{name}") for name in ("venue", "contract", "polarity", "limit", "held", "cost")))
+        venue, contract_id, polarity, limit, held, cost = (getattr(self, f"{side}_{name}") for name in ("venue", "contract", "polarity", "limit", "held", "cost"))
+        return Leg(side, venue, contract_id, polarity, limit, self.quantity, held, cost)
 
     def legs(self):
         """

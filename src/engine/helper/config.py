@@ -12,13 +12,13 @@ Override one for a run with --set, for example:
     python3 -m engine.run --sport nfl --set min_edge=0.03 --set paper_max_cap=100
 """
 
-# TRADING, execute/executor.py
+# TRADING, trading/executor.py
 
 MIN_EDGE = 0.05             # Net dollars per contract at the top before orders are sent, and the floor for the deeper levels they sweep.
                             # In-game, 2 to 3 cent edges lost money after hedging.
 FILL_SHARE = 0.5            # The share of visible size at a level assumed to be ours. Other takers get the rest.
 
-# SIZING, allocate.py. A game's cap is the most contracts one trade on it may hold. The allocator sets every game's cap
+# SIZING, trading/allocate.py. A game's cap is the most contracts one trade on it may hold. The allocator sets every game's cap
 # each half hour, and a budget of dollars the half hour's trades share. The caps' bounds are under PAPER and LIVE.
 
 DOLLARS_PER_CAP_HOUR = {    # What a game is expected to spend on its busier venue, per hour of play, for each contract of its cap.
@@ -28,11 +28,11 @@ DOLLARS_PER_CAP_HOUR = {    # What a game is expected to spend on its busier ven
 BUDGET_MINUTES = 30         # How often the allocator plans again, and the stretch each budget covers.
 PLAN_HOURS = 24             # How far ahead each plan looks: the games in play and those kicking off within this many hours.
 
-# REBALANCING, balance/rebalance.py
+# REBALANCING, money/rebalance.py
 
 REBALANCE_DRIFT = 0.10      # A venue this far above the two venue average sends the excess over: paper on the daily check, live by email.
 
-# PAPER, execute/paper.py, balance/paper.py, and balance/rebalance.py. How paper orders fill, and the paper money.
+# PAPER, trading/paper.py, money/paper.py, and money/rebalance.py. How paper orders fill, and the paper money.
 
 PAPER_REJECT_PROBABILITY = 0.03     # The share of orders a venue rejects outright, for rate limits and errors.
 # Signal to fill latency per venue, as median milliseconds and the sigma of a lognormal draw. From us-east-1 a signed
@@ -48,7 +48,7 @@ PAPER_REBALANCE_HOUR = 10   # The hour, UTC, of the daily paper rebalance: 6 in 
                             # have settled, about 8 at the latest, and before the first kickoff, 13:30 for the NFL's London games.
 PAPER_TRANSFER_DAYS = 4     # Business days a paper transfer between venues takes, as a real one would.
 
-# LIVE, execute/live.py, execute/brakes.py, balance/live.py, and balance/rebalance.py. Real money, so each limit is kept small
+# LIVE, trading/live.py, trading/brakes.py, money/live.py, and money/rebalance.py. Real money, so each limit is kept small
 # until the live results earn more. Sized for a test with about 100 dollars on each venue.
 
 LIVE_MIN_CAP = 1            # The cap a live game gets when its plan gives less than one contract, while the half hour's budget lasts.
@@ -63,8 +63,9 @@ LIVE_RESULT_HOURS = 6       # The sliding window the loss brake looks at, in hou
 LIVE_MAX_LOSS_SHARE = 0.10  # Net loss of the trades decided in the window, as a share of the live money, over which live trading halts.
 LIVE_ALERT_HOURS = 24       # Between emails asking for the live venues to be rebalanced, while they stay apart.
 
-# GAMES, game.py and scoreboard.py. Game lengths are from the games Polymarket US has recorded as finished, the settling time
-# from the first live game, Atlanta at Green Bay.
+# GAMES, game.py, which the recorder, the scoreboard, the scanner, the executor, and the allocator time games by. Game
+# lengths are from the games Polymarket US has recorded as finished, the settling time from the first live game, Atlanta
+# at Green Bay.
 
 GAME_HOURS = {              # How long a game is expected to last, kickoff to final whistle: three in four of the sport's games end
     "nfl": 3.25,            # by then. 168 NFL games had a median of 3.11 hours, three in four by 3.24, and 382 college games a median
@@ -74,19 +75,19 @@ SETTLE_HOURS = 0.5          # Final whistle to the venues settling. A game's mon
 RECORD_HOURS = 5            # Kickoff to when a game's contracts stop being recorded, whatever their close time says. The kickoff
                             # is Polymarket US's, since Kalshi gives none, and holds for both venues' contracts.
 
-# RECORDING, record.py
+# RECORDING, market/record.py
 
 BOOK_LEVELS = 5             # Price levels kept per side.
-FEED_PROCESSES = True       # Run each venue's feed in a process of its own, see feeds.py. False runs every feed in the main process.
+FEED_PROCESSES = True       # Run each venue's feed in a process of its own, see market/feeds.py. False runs every feed in the main process.
 GAME_WINDOW_DAYS = 7        # Games further out than this are not recorded.
 
-# SCANNING, scan.py
+# SCANNING, market/scan.py and pricing.py
 
-MAX_BOOK_AGE = 60           # Seconds. A member whose newest book is older than this is left out, it may be stale.
+MAX_BOOK_AGE = 60           # Seconds. A book older than this is neither priced nor traded, see pricing.fresh(): its market may have closed.
 TARGET_ANNUAL_PCT = 10      # The return an opportunity must beat to be worth the risk.
 LOG_PROFIT_DOLLARS = 10     # Live episodes worth at least this at the peak are logged as they end.
 
-# TIMERS, run.py, settle.py, and scoreboard.py
+# TIMERS, run.py, money/settle.py, and market/scoreboard.py
 
 TICK_SECONDS = 1.0          # How often the session ticks, pricing open episodes again and running each desk.
 STATUS_SECONDS = 60         # How often a status line is logged.

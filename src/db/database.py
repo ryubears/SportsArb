@@ -7,14 +7,14 @@ SQLite browser. The tables follow the pipeline in order.
     contracts      what each venue lists, written by fetch.py
     bets           each contract restated in venue neutral terms, by classify.py
     pairs          the contracts on both venues for one bet, by match.py
-    gaps           stretches when a venue's feed was down, by record.py
-    opportunities  every episode the live scanner saw, by scan.py
-    trades         every trade the executors made, paper or live, by execute/
-    settlements    how each trade's legs paid out, by settle.py
-    orders         every real order the live executor sent, by execute/live.py
-    ledger         every paper cash movement per venue, by balance/paper.py
-    alerts         everything the live process emailed a human, by notify.py
-    transfers      paper rebalancing transfers between venues, by balance/rebalance.py
+    gaps           stretches when a venue's feed was down, by market/record.py
+    opportunities  every episode the live scanner saw, by market/scan.py
+    trades         every trade the executors made, paper or live, by trading/
+    settlements    how each trade's legs paid out, by money/settle.py
+    orders         every real order the live executor sent, by trading/live.py
+    ledger         every paper cash movement per venue, by money/paper.py
+    alerts         everything the live process emailed a human, by trading/notify.py
+    transfers      paper rebalancing transfers between venues, by money/rebalance.py
 
 Trades and settlements carry a mode, 'paper' or 'live', and every read of
 open trades is for one mode, so paper and live trades never mix.
@@ -153,15 +153,23 @@ def event_ids(conn, venue, contract_ids):
         (venue, *contract_ids))} if contract_ids else {}
 
 
+# Every paired game with its kickoff, the latest start time any of its contracts gives, which is Polymarket US's since
+# Kalshi gives none, and the event of the contracts that give one, which is where that venue reports how the game stands.
+GAMES = """
+    SELECT p.sport, p.game_date, p.team_a, p.team_b, MAX(c.start_time) AS kickoff,
+           MAX(CASE WHEN c.start_time IS NOT NULL THEN c.event_id END) AS event_id
+    FROM pairs p JOIN bets b ON b.pair_id = p.id JOIN contracts c ON c.venue = b.venue AND c.contract_id = b.contract_id
+    WHERE p.game_date IS NOT NULL GROUP BY 1, 2, 3, 4"""
+
+
 def load_recording_targets(conn, sport, now, horizon, venues, game_started_after):
     """
     The contracts to record right now, as {venue: [contract_id, ...]}: every
     contract in a pair on a game no later than the horizon's date, for as
     long as it can trade. A game's contracts on both venues are recorded
     while the game may still be in play, meaning it kicked off after
-    game_started_after, whatever their close times say. The kickoff is the
-    latest any of the game's contracts gives, which is Polymarket US's,
-    since Kalshi gives none. Polymarket US leaves a game's contracts open two
+    game_started_after, whatever their close times say, with the kickoff
+    from GAMES. Polymarket US leaves a game's contracts open two
     weeks after it, and Kalshi's close time is its guess at the final
     whistle, three hours after kickoff, which nearly every college game and
     most NFL games outlast. A contract with no game, or on a game no
@@ -169,19 +177,16 @@ def load_recording_targets(conn, sport, now, horizon, venues, game_started_after
     """
     targets = {}
     for venue in venues:
-        rows = conn.execute("""
-            WITH kickoffs AS (
-                SELECT p.game_date, p.team_a, p.team_b, MAX(c.start_time) AS kickoff
-                FROM pairs p JOIN bets b ON b.pair_id = p.id JOIN contracts c ON c.venue = b.venue AND c.contract_id = b.contract_id
-                WHERE p.sport = ? AND p.game_date IS NOT NULL GROUP BY 1, 2, 3)
+        rows = conn.execute(f"""
+            WITH games AS ({GAMES})
             SELECT c.contract_id FROM contracts c
             JOIN bets b ON b.venue = c.venue AND b.contract_id = c.contract_id
             JOIN pairs p ON p.id = b.pair_id
-            LEFT JOIN kickoffs k ON k.game_date = p.game_date AND k.team_a = p.team_a AND k.team_b = p.team_b
+            LEFT JOIN games g ON g.sport = p.sport AND g.game_date = p.game_date AND g.team_a = p.team_a AND g.team_b = p.team_b
             WHERE c.venue = ? AND c.sport = ?
-              AND (k.kickoff > ? OR (k.kickoff IS NULL AND (c.close_time IS NULL OR c.close_time > ?)))
+              AND (g.kickoff > ? OR (g.kickoff IS NULL AND (c.close_time IS NULL OR c.close_time > ?)))
               AND (b.game_date IS NULL OR b.game_date <= ?)
-        """, (sport, venue, sport, game_started_after, now, horizon[:10]))
+        """, (venue, sport, game_started_after, now, horizon[:10]))
         targets[venue] = [r[0] for r in rows]
     return targets
 
@@ -262,14 +267,10 @@ def load_pairs(conn, sport):
 def load_games(conn, sports=None):
     """
     Return {(sport, game_date, team_a, team_b): (kickoff, event_id)} for every
-    game with a current pair, of the sports when given: its contracts' latest
-    start time, and the event of the contracts that give one, which is where
-    that venue reports how the game stands.
+    game with a current pair and a kickoff, of the sports when given, from GAMES.
     """
-    games = {(s, d, a, b): (kickoff, event) for s, d, a, b, kickoff, event in conn.execute("""
-        SELECT p.sport, p.game_date, p.team_a, p.team_b, MAX(c.start_time), MAX(CASE WHEN c.start_time IS NOT NULL THEN c.event_id END)
-        FROM pairs p JOIN bets b ON b.pair_id = p.id JOIN contracts c ON c.venue = b.venue AND c.contract_id = b.contract_id
-        WHERE p.game_date IS NOT NULL GROUP BY 1, 2, 3, 4 HAVING MAX(c.start_time) IS NOT NULL""")}
+    games = {(s, d, a, b): (kickoff, event) for s, d, a, b, kickoff, event in conn.execute(f"""
+        WITH games AS ({GAMES}) SELECT sport, game_date, team_a, team_b, kickoff, event_id FROM games WHERE kickoff IS NOT NULL""")}
     return {key: game for key, game in games.items() if sports is None or key[0] in sports}
 
 
@@ -364,42 +365,22 @@ def load_exposed_trades(conn, mode, now):
     return out
 
 
-def load_open_cost(conn, mode):
+def load_open_legs(conn, mode):
     """
-    Dollars paid for what the unsettled trades of one mode still hold.
+    Every leg of the unsettled trades of one mode that still holds contracts,
+    as [(game key, venue, dollars paid for what it holds)]. The game key is
+    (sport, game_date, team_a, team_b), or None for a bet with no game. The
+    rebalancers sum them by venue, the allocator by game, and the brakes in all.
     """
-    return conn.execute("""
-        SELECT COALESCE(SUM(t.yes_cost + t.no_cost), 0) FROM trades t
-        WHERE t.mode = ? AND t.yes_held + t.no_held > 0
-          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""", (mode,)).fetchone()[0]
-
-
-def load_open_cost_by_venue(conn, mode):
-    """
-    Dollars paid for what the unsettled trades of one mode still hold, on each venue, as {venue: dollars}.
-    """
-    held = {}
-    for venue, cost in conn.execute("""
-        SELECT t.yes_venue, t.yes_cost FROM trades t WHERE t.mode = ? AND t.yes_held > 0
-          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)
+    rows = conn.execute("""
+        SELECT p.sport, p.game_date, p.team_a, p.team_b, t.yes_venue, t.yes_cost
+        FROM trades t LEFT JOIN pairs p ON p.id = t.pair_id
+        WHERE t.mode = ? AND t.yes_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)
         UNION ALL
-        SELECT t.no_venue, t.no_cost FROM trades t WHERE t.mode = ? AND t.no_held > 0
-          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""", (mode, mode)):
-        held[venue] = held.get(venue, 0.0) + cost
-    return held
-
-
-def load_open_game_costs(conn, mode):
-    """
-    What each unsettled trade of one mode on a game still holds, as
-    [((sport, game_date, team_a, team_b), [(venue, dollars), (venue, dollars)])],
-    one entry per trade with its yes leg's cost first.
-    """
-    return [((s, d, a, b), [(yv, yc), (nv, nc)]) for s, d, a, b, yv, yc, nv, nc in conn.execute("""
-        SELECT p.sport, p.game_date, p.team_a, p.team_b, t.yes_venue, t.yes_cost, t.no_venue, t.no_cost
-        FROM trades t JOIN pairs p ON p.id = t.pair_id
-        WHERE t.mode = ? AND t.yes_held + t.no_held > 0 AND p.game_date IS NOT NULL
-          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""", (mode,))]
+        SELECT p.sport, p.game_date, p.team_a, p.team_b, t.no_venue, t.no_cost
+        FROM trades t LEFT JOIN pairs p ON p.id = t.pair_id
+        WHERE t.mode = ? AND t.no_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""", (mode, mode))
+    return [((sport, game_date, team_a, team_b) if game_date else None, venue, cost) for sport, game_date, team_a, team_b, venue, cost in rows]
 
 
 def load_spending(conn, mode, since):
