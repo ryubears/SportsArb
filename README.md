@@ -364,10 +364,12 @@ above the median of the 14 games on Sunday, September 27, between 10 and
 gets nothing more until others settle and fewer games share the pool. Paper
 and live each size from their own money and trades. A live game whose share
 is too small for one contract of cap still gets one contract until it has
-spent its share, so a test with $50 a venue trades a nine game Sunday
-window, $6 a game, rather than nothing. The cap only bounds how many
-contracts a trade may hold: whether one is sent at all still depends on the
-edge, the depth of the books, and the cash.
+spent its share. With $100 a venue that happens once more than ten games
+share the pool, as while Sunday's late games have kicked off and the early
+ones have not yet settled, about $7 a game, and live trading goes on there
+rather than stopping. The cap only bounds how many contracts a trade may
+hold: whether one is sent at all still depends on the edge, the depth of
+the books, and the cash.
 
 **balance/** and **settle.py** track the money: paper money in
 **balance/paper.py** and live money in **balance/live.py**, with what they

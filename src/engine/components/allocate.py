@@ -26,9 +26,11 @@ game not in play gets nothing at all, since trades are only taken live.
 A paper game whose share is too small for config.MIN_CAP gets nothing. A
 live game in the same spot still gets config.LIVE_MIN_CAP, one contract,
 until it has spent its share, since a small live test is thinner than the
-paper rate expects: 50 dollars a venue over a nine game Sunday window is
-6 dollars a game, short of the 10 one contract of cap stands for, and would
-otherwise trade nothing.
+paper rate expects. With 100 dollars a venue that happens once more than
+ten games share the pool, as while Sunday's late games have kicked off and
+the early ones have not yet settled: thirteen games get about 7 dollars
+each, short of the 10 one contract of cap stands for, and would otherwise
+trade nothing.
 """
 
 from common.venues import VENUES
