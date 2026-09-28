@@ -48,24 +48,25 @@ def test_caps_follow_the_active_games(tmp_path):
     allocator = allocate.Allocator(conn, PaperBalances(conn))
     early, late, night = EARLY[0], LATE[0], NIGHT[0]
     # Nine early games share each venue's 10,000, and the cap holds through the game while the same nine are active.
-    assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == int(10000 / 9 / 20)
-    assert allocator.cap(pair_for(*early), f"{SUNDAY}T19:00:00+00:00") == int(10000 / 9 / 20)
+    assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == int(10000 / 9 / config.DOLLARS_PER_CAP)
+    assert allocator.cap(pair_for(*early), f"{SUNDAY}T19:00:00+00:00") == int(10000 / 9 / config.DOLLARS_PER_CAP)
     # A late game kicking off at 20:05 shares with the nine early games still out and the other 20:05 game, eleven in all.
-    assert allocator.cap(pair_for(*late), f"{SUNDAY}T20:05:00+00:00") == int(10000 / 11 / 20)
+    assert allocator.cap(pair_for(*late), f"{SUNDAY}T20:05:00+00:00") == int(10000 / 11 / config.DOLLARS_PER_CAP)
     # Once the early games have settled at 20:45, the four late games have the pool.
-    assert allocator.cap(pair_for(*late), f"{SUNDAY}T21:00:00+00:00") == int(10000 / 4 / 20)
+    assert allocator.cap(pair_for(*late), f"{SUNDAY}T21:00:00+00:00") == int(10000 / 4 / config.DOLLARS_PER_CAP)
     # The night game is alone.
     assert allocator.cap(pair_for(*night), "2026-09-28T01:00:00+00:00") == config.MAX_CAP
     # Nothing before kickoff, after the final whistle, or for a bet with no game.
     assert allocator.cap(pair_for(*early), f"{SUNDAY}T16:59:00+00:00") == 0
     assert allocator.cap(pair_for(*early), f"{SUNDAY}T20:16:00+00:00") == 0
     assert allocator.cap({"game_date": None}, f"{SUNDAY}T17:00:00+00:00") == 0
-    assert allocator.summary(f"{SUNDAY}T18:00:00+00:00") == "paper capital: 9 games in play or settling, 1,111$ a venue each, cap 55"
-    assert allocator.summary(f"{SUNDAY}T23:00:00+00:00") == "paper capital: 4 games in play or settling, 2,500$ a venue each, cap 125"
+    assert allocator.summary(f"{SUNDAY}T18:00:00+00:00") == "paper capital: 9 games in play or settling, 1,111$ a venue each, cap 111"
+    assert allocator.summary(f"{SUNDAY}T23:00:00+00:00") == "paper capital: 4 games in play or settling, 2,500$ a venue each, cap 250"
     assert allocator.summary("2026-09-28T05:00:00+00:00") == "paper capital: no games in play"
 
 
-def test_money_a_game_holds_stays_in_the_pool_and_a_game_past_its_share_stops(tmp_path):
+def test_money_a_game_holds_stays_in_the_pool_and_a_game_past_its_share_stops(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DOLLARS_PER_CAP", 20)            # Keeps both caps under the most a trade may hold, so they can be told apart.
     conn = schedule(tmp_path, EARLY[:2])
     cash = PaperBalances(conn)
     allocator = allocate.Allocator(conn, cash)
@@ -95,12 +96,12 @@ def test_live_caps_come_from_the_live_money_and_stay_under_the_live_bounds(tmp_p
     asyncio.run(cash.refresh(f"{SUNDAY}T17:00:00+00:00"))
     allocator = allocate.Allocator(conn, cash)
     early = EARLY[0]
-    assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == config.LIVE_MAX_CAP     # 4,000 over nine games would allow 22.
-    cash.read["polymarket_us"] = 1500.0
-    assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == 8                       # 1,500 over nine games, at 20$ a contract.
-    cash.read["polymarket_us"] = 100.0
-    assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == 1                       # 11 a game, under one contract of cap.
-    assert allocator.summary(f"{SUNDAY}T17:00:00+00:00") == "live capital: 9 games in play or settling, 11$ a venue each, cap 1"
+    assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == config.LIVE_MAX_CAP     # 4,000 over nine games would allow 44.
+    cash.read["polymarket_us"] = 750.0
+    assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == 8                       # 750 over nine games, at 10$ a contract.
+    cash.read["polymarket_us"] = 50.0
+    assert allocator.cap(pair_for(*early), f"{SUNDAY}T17:00:00+00:00") == 1                       # 6 a game, under one contract of cap.
+    assert allocator.summary(f"{SUNDAY}T17:00:00+00:00") == "live capital: 9 games in play or settling, 6$ a venue each, cap 1"
 
 
 def test_a_small_live_test_trades_one_contract_a_game_until_the_game_has_spent_its_share(tmp_path):

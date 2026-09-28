@@ -7,9 +7,12 @@ any moment are the active games, and they share the pool: the free cash
 on a venue plus what the active games already hold. Each active game's
 share is the pool divided by the number of active games. The cap on one
 trade is that share divided by config.DOLLARS_PER_CAP, which turns a dollar
-budget into a cap: on the first live game, every contract of cap led to
-about 20 dollars of spending on each venue by the final whistle, so a
-budget of 1,000 dollars is spent by a cap of 50. Both venues are sized
+budget into a cap: on the first full Sunday, every contract of cap led to a
+median of about 8 dollars of spending on a game's busier venue by the final
+whistle. The setting is 10, a little above that, so a budget of 1,000
+dollars is spent by a cap of 100 with room for a busier game. Most trades
+are held back by the depth of the books rather than the cap, so spending
+grows more slowly than the cap does. Both venues are sized
 and the smaller cap wins. Paper and live trading each size from their own
 money and trades, and a live cap stays between config.LIVE_MIN_CAP and
 config.LIVE_MAX_CAP rather than the paper bounds.
@@ -23,9 +26,9 @@ game not in play gets nothing at all, since trades are only taken live.
 A paper game whose share is too small for config.MIN_CAP gets nothing. A
 live game in the same spot still gets config.LIVE_MIN_CAP, one contract,
 until it has spent its share, since a small live test is thinner than the
-paper rate expects: 100 dollars a venue over a nine game Sunday window is
-11 dollars a game, short of the 20 one contract of cap stands for, and
-would otherwise trade nothing.
+paper rate expects: 50 dollars a venue over a nine game Sunday window is
+6 dollars a game, short of the 10 one contract of cap stands for, and would
+otherwise trade nothing.
 """
 
 from common.venues import VENUES
