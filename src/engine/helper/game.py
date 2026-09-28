@@ -2,13 +2,15 @@
 Which game a bet is on, when the game is played, and when the bets on it pay out.
 
 Every timing assumption about games lives here, so the recorder, the
-scanner, the executor, and the allocator agree on them. How long a game
+scoreboard, the scanner, the executor, and the allocator agree on them:
+when a game is expected to end, when its money comes back, and how long
+after kickoff it may still be under way. How long a game
 is expected to last depends on the sport, see config.GAME_HOURS: three in
 four of the sport's past games had ended by then. The scoreboard in
-scoreboard.py knows when each game under way really ends, and falls back
-on the expected length here when the venue says nothing. Both venues
-settled the first live game, Atlanta at Green Bay, within half an hour of
-its final whistle.
+market/scoreboard.py knows when each game under way really ends, and
+falls back on the expected length here when the venue says nothing. Both
+venues settled the first live game, Atlanta at Green Bay, within half an
+hour of its final whistle.
 """
 
 from common.timeutil import shift
@@ -23,18 +25,41 @@ def game_key(pair):
     return (pair["sport"], pair["game_date"], pair["team_a"], pair["team_b"]) if pair.get("game_date") else None
 
 
-def payout_hours(sport):
+def game_label(key):
     """
-    Kickoff to payout in the sport, when the money a game holds comes back: the game, then the venues settling.
+    A game key in words, for log lines, for example 'nfl 2026-09-20 CAR@ATL'.
     """
-    return config.GAME_HOURS[sport] + config.SETTLE_HOURS
+    sport, game_date, away, home = key
+    return f"{sport} {game_date} {away}@{home}"
+
+
+def expected_end(kickoff, sport):
+    """
+    When a game of the sport that kicked off at kickoff is expected to end, config.GAME_HOURS later.
+    """
+    return shift(kickoff, hours=config.GAME_HOURS[sport])
+
+
+def money_back(end):
+    """
+    When the money on a game that ends at end comes back: config.SETTLE_HOURS later, once the venues have settled.
+    """
+    return shift(end, hours=config.SETTLE_HOURS)
+
+
+def recorded_since(now):
+    """
+    The kickoff after which a game may still be under way at now, config.RECORD_HOURS earlier. Its books are recorded
+    until then, whatever its contracts' close times say.
+    """
+    return shift(now, hours=-config.RECORD_HOURS)
 
 
 def in_play(kickoff, now, sport):
     """
     Whether a game of the sport that kicked off at kickoff is expected to be being played at now, by its expected length.
     """
-    return kickoff <= now < shift(kickoff, hours=config.GAME_HOURS[sport])
+    return kickoff <= now < expected_end(kickoff, sport)
 
 
 def resolution_time(start_time, close_time, sport):
@@ -43,7 +68,7 @@ def resolution_time(start_time, close_time, sport):
     venue gives no kickoff, like Kalshi's, at its close time. A pair pays at the latest of its members', so the kickoff rules.
     """
     if start_time:
-        return shift(start_time, hours=payout_hours(sport))
+        return money_back(expected_end(start_time, sport))
     return close_time
 
 
@@ -62,5 +87,5 @@ def pays_at(members, sport, now=None):
     """
     times = [t for t in (resolution_time(m["start_time"], m["close_time"], sport) for m in members) if t]
     if times and now:
-        times.append(shift(now, hours=config.SETTLE_HOURS))
+        times.append(money_back(now))
     return max(times, default=None)

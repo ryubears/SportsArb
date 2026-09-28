@@ -56,6 +56,13 @@ def seconds_between(a, b):
     return (datetime.fromisoformat(b) - datetime.fromisoformat(a)).total_seconds()
 
 
+def hours_between(a, b):
+    """
+    Hours from ISO timestamp a to ISO timestamp b, as a float.
+    """
+    return seconds_between(a, b) / 3600
+
+
 def days_between(a, b):
     """
     Days from ISO timestamp a to ISO timestamp b, as a float.

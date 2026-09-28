@@ -4,7 +4,7 @@ Tests for overriding settings for one run.
 
 import pytest
 from engine import run
-from engine.components.balance.paper import PaperBalances
+from engine.components.money.paper import PaperBalances
 from engine.helper import config, game
 
 
@@ -21,7 +21,7 @@ def test_override_reads_each_value_as_the_settings_own_type(restore):
     config.override(["min_edge=0.03", "PAPER_MAX_CAP=100", " settle_hours = 1.5 ", "feed_processes=False"])
     assert (config.MIN_EDGE, config.PAPER_MAX_CAP, config.SETTLE_HOURS, config.FEED_PROCESSES) == (0.03, 100, 1.5, False)
     assert isinstance(config.PAPER_MAX_CAP, int)
-    assert game.payout_hours("nfl") == config.GAME_HOURS["nfl"] + 1.5     # What depends on a setting follows it.
+    assert game.money_back("2026-09-20T20:00:00+00:00") == "2026-09-20T21:30:00+00:00"     # What depends on a setting follows it.
 
 
 @pytest.mark.parametrize("assignment, message", [

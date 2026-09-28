@@ -153,6 +153,15 @@ class Leg:
     def key(self):
         return (self.venue, self.contract_id)
 
+    @property
+    def outcome(self):
+        """
+        The outcome of its contract the leg holds: 'yes' when it holds the side
+        the contract pays on, 'no' when it holds the other. It is what the
+        leg's orders trade, and the leg wins when the contract resolves to it.
+        """
+        return "yes" if self.side == self.polarity else "no"
+
 
 @dataclass
 class Trade:

@@ -18,6 +18,13 @@ def test_a_trade_gives_each_leg_its_own_fields():
     assert yes.fee_info is None                         # Not stored with the trade.
 
 
+def test_a_leg_holds_the_outcome_its_side_and_polarity_give():
+    def leg(side, polarity):
+        return Leg(side, "kalshi", "k", polarity)
+    assert (leg("yes", "yes").outcome, leg("no", "yes").outcome) == ("yes", "no")      # A contract that pays on yes.
+    assert (leg("no", "no").outcome, leg("yes", "no").outcome) == ("yes", "no")        # One that pays on no, such as the other team's.
+
+
 def test_a_settlement_records_one_leg_at_a_time():
     s = Settlement(1, mode="live", settled_at="t")
     s.record("no", "yes", 0.0, "t2")

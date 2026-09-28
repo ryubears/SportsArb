@@ -6,9 +6,10 @@ import pytest
 from catalog import fetch
 from catalog.classify import classify
 from common.venues import SHORT_NAMES, VENUES
-from engine.components import settle, streams
-from engine.components.balance import live as balance_live
-from engine.components.execute import live as execute_live
+from engine.components.market import streams
+from engine.components.money import live as money_live
+from engine.components.money import settle
+from engine.components.trading import live as trading_live
 from engine.helper import config, fees
 
 
@@ -23,8 +24,8 @@ from engine.helper import config, fees
     ("streams.STREAMS", streams.STREAMS),
     ("settle.RESULTS", settle.RESULTS),
     ("settle.RESULTS_BY_EVENT", settle.RESULTS_BY_EVENT),
-    ("balance/live.READERS", balance_live.READERS),
-    ("execute/live.PLACE", execute_live.PLACE),
+    ("money/live.READERS", money_live.READERS),
+    ("trading/live.PLACE", trading_live.PLACE),
     ("config.PAPER_LATENCY_MS", config.PAPER_LATENCY_MS),
 ])
 def test_table_covers_every_venue(name, table):
