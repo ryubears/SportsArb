@@ -10,6 +10,8 @@ What runs, and where it lives:
 - The scanner, from scan.py, prices each pair a changed book belongs to,
   stores every episode of positive edge in the opportunities table, and
   offers each episode to the desks.
+- The scoreboard, from scoreboard.py, asks Polymarket US how the games
+  under way stand, so trading runs to each game's real final whistle.
 - A Desk for each mode the run trades in, with its own money, allocator,
   executor, settler, and rebalancer, and its trades stored with its mode,
   so paper and live never mix. Both can run at once on the same signals,
@@ -58,6 +60,7 @@ from common.paths import ROOT
 from common.timeutil import now_iso
 from db import database
 from engine.components import allocate, notify, scan, settle
+from engine.components.scoreboard import Scoreboard
 from engine.components.balance.live import LiveBalances
 from engine.components.balance.paper import PaperBalances
 from engine.components.balance.rebalance import LiveRebalancer, PaperRebalancer
@@ -102,8 +105,10 @@ def trading_settings():
     c = config
     latency = ", ".join(f"{venue} {median}ms" for venue, (median, _) in c.LATENCY_MS.items())
     return (f"settings: min edge {c.MIN_EDGE:.2f}$, fill share {c.FILL_SHARE}, rejects {c.REJECT_PROBABILITY:.0%}, "
-            f"latency {latency}, cap {c.MIN_CAP} to {c.MAX_CAP} at {c.DOLLARS_PER_CAP}$ a contract, "
-            f"game {', '.join(f'{sport} {hours}h' for sport, hours in c.GAME_HOURS.items())} + settle {c.SETTLE_HOURS}h, start balance {c.START_BALANCE:,.0f}$, floor {c.CASH_FLOOR:,.0f}$, "
+            f"latency {latency}, cap {c.MIN_CAP} to {c.MAX_CAP}, a contract of cap spending "
+            f"{', '.join(f'{sport} {rate}$' for sport, rate in c.DOLLARS_PER_CAP_HOUR.items())} an hour, "
+            f"planned every {c.BUDGET_MINUTES} minutes over {c.PLAN_HOURS}h, expected game "
+            f"{', '.join(f'{sport} {hours}h' for sport, hours in c.GAME_HOURS.items())} + settle {c.SETTLE_HOURS}h, start balance {c.START_BALANCE:,.0f}$, floor {c.CASH_FLOOR:,.0f}$, "
             f"rebalance weekly over {c.REBALANCE_DRIFT:.0%}")
 
 
@@ -124,20 +129,20 @@ class Desk:
     One mode of trading, paper or live: its executor, the money it trades,
     the allocator that sizes its trades, the settler that pays them out, and
     the rebalancer that keeps its venues funded, paper or live.
-    books is a function returning the recorder's newest books, and sports
-    the sports whose games share the money.
+    books is a function returning the recorder's newest books, and
+    scoreboard the Scoreboard of the games that share the money.
     """
 
-    def __init__(self, mode, conn, books, notifier, sports):
+    def __init__(self, mode, conn, books, notifier, scoreboard):
         self.mode = mode
         if mode == "paper":
             self.cash = PaperBalances(conn)
-            self.allocator = allocate.Allocator(conn, self.cash, sports)
+            self.allocator = allocate.Allocator(conn, self.cash, scoreboard)
             self.executor = PaperExecutor(conn, self.cash, books, log, allocator=self.allocator)
             self.rebalancer = PaperRebalancer(conn, self.cash, log)
         elif mode == "live":
             self.cash = LiveBalances(log)
-            self.allocator = allocate.Allocator(conn, self.cash, sports)
+            self.allocator = allocate.Allocator(conn, self.cash, scoreboard)
             self.executor = LiveExecutor(conn, self.cash, books, log, allocator=self.allocator, notifier=notifier)
             self.rebalancer = LiveRebalancer(conn, self.cash, notifier, log)
         else:
@@ -167,17 +172,18 @@ class Desk:
 class Session:
     """
     The recorder and everything that runs on its books, wired together:
-    the venue connections, the scanner, and a Desk for each mode it trades
-    in. Without a scanner only the books are recorded, and without a desk
-    the scanner only stores what it sees.
+    the venue connections, the scanner, the scoreboard, and a Desk for each
+    mode it trades in. Without a scanner only the books are recorded, and
+    without a desk the scanner only stores what it sees.
     """
 
     def __init__(self, conn, sports, with_scanner=True, executors=("paper",)):
         self.conn = conn
         self.sports = sports
         self.notifier = notify.Notifier(conn, log)
+        self.scoreboard = Scoreboard(conn, sports, log) if with_scanner and executors else None
         # The executors trade against the recorder's books, which exist once the recorder does, below.
-        self.desks = [Desk(mode, conn, lambda: self.recorder.books, self.notifier, sports) for mode in executors] if with_scanner else []
+        self.desks = [Desk(mode, conn, lambda: self.recorder.books, self.notifier, self.scoreboard) for mode in executors] if with_scanner else []
         self.scanner = scan.Scanner(conn, sports, log, [d.executor.signal for d in self.desks]) if with_scanner else None
         self.recorder = Recorder(conn, self.scanner)
         self.streams = Streams(self.recorder)
@@ -220,6 +226,8 @@ class Session:
         now = now_iso()
         if self.scanner:
             self.scanner.tick(self.recorder.books, now)
+        if self.scoreboard:
+            self.scoreboard.tick(now, time.time())
         for desk in self.desks:
             desk.tick(now, time.time())
         if self.scanner and time.time() - self.last_summary >= config.SUMMARY_SECONDS:
@@ -231,11 +239,13 @@ class Session:
 
     def refreshed(self):
         """
-        After a catalog refresh, apply the new targets to the connections and the scanner.
+        After a catalog refresh, apply the new targets to the connections, the scanner, and the plans.
         """
         log(f"subscriptions {self.streams.update(load_targets(self.conn, self.sports))}")
         if self.scanner:
             self.scanner.reload()
+        if self.scoreboard:
+            self.scoreboard.reload()
         for desk in self.desks:
             desk.allocator.reload()
             log(desk.allocator.summary(now_iso()))

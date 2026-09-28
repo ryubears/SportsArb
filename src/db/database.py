@@ -259,16 +259,18 @@ def load_pairs(conn, sport):
     return {r["id"]: dict(r, members=members[r["id"]]) for r in conn.execute("SELECT * FROM pairs") if r["id"] in members}
 
 
-def load_kickoffs(conn, sports=None):
+def load_games(conn, sports=None):
     """
-    Return {(sport, game_date, team_a, team_b): kickoff} for every game with
-    a current pair, of the sports when given, from its contracts' latest start time.
+    Return {(sport, game_date, team_a, team_b): (kickoff, event_id)} for every
+    game with a current pair, of the sports when given: its contracts' latest
+    start time, and the event of the contracts that give one, which is where
+    that venue reports how the game stands.
     """
-    kickoffs = {(s, d, a, b): kickoff for s, d, a, b, kickoff in conn.execute("""
-        SELECT p.sport, p.game_date, p.team_a, p.team_b, MAX(c.start_time)
+    games = {(s, d, a, b): (kickoff, event) for s, d, a, b, kickoff, event in conn.execute("""
+        SELECT p.sport, p.game_date, p.team_a, p.team_b, MAX(c.start_time), MAX(CASE WHEN c.start_time IS NOT NULL THEN c.event_id END)
         FROM pairs p JOIN bets b ON b.pair_id = p.id JOIN contracts c ON c.venue = b.venue AND c.contract_id = b.contract_id
         WHERE p.game_date IS NOT NULL GROUP BY 1, 2, 3, 4 HAVING MAX(c.start_time) IS NOT NULL""")}
-    return {key: kickoff for key, kickoff in kickoffs.items() if sports is None or key[0] in sports}
+    return {key: game for key, game in games.items() if sports is None or key[0] in sports}
 
 
 # GAPS
@@ -398,6 +400,23 @@ def load_open_game_costs(conn, mode):
         FROM trades t JOIN pairs p ON p.id = t.pair_id
         WHERE t.mode = ? AND t.yes_held + t.no_held > 0 AND p.game_date IS NOT NULL
           AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""", (mode,))]
+
+
+def load_spending(conn, mode, since):
+    """
+    Dollars the trades of one mode signalled at or after since have put in
+    on each venue, as {venue: dollars}: what each leg paid for what it holds,
+    or for a trade still in flight, what its order may pay.
+    """
+    rows = conn.execute("""
+        SELECT yes_venue, CASE WHEN status = 'sent' THEN quantity * yes_limit ELSE yes_cost END FROM trades WHERE mode = ? AND signal_ts >= ?
+        UNION ALL
+        SELECT no_venue, CASE WHEN status = 'sent' THEN quantity * no_limit ELSE no_cost END FROM trades WHERE mode = ? AND signal_ts >= ?""",
+                        (mode, since, mode, since))
+    spent = {}
+    for venue, dollars in rows:
+        spent[venue] = spent.get(venue, 0.0) + dollars
+    return spent
 
 
 def insert_settlement(conn, settlement):

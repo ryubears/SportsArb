@@ -11,6 +11,7 @@ from engine.helper import config
 
 @pytest.mark.parametrize("name, table", [
     ("config.GAME_HOURS", config.GAME_HOURS),
+    ("config.DOLLARS_PER_CAP_HOUR", config.DOLLARS_PER_CAP_HOUR),
     ("teams.ALIASES, the files in classify/aliases/", teams.ALIASES),
     ("polymarket_us.EVENT_PREFIX", polymarket_us.EVENT_PREFIX),
 ])

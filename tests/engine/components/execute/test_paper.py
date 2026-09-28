@@ -214,6 +214,41 @@ def test_signal_is_refused_for_thin_edges_and_games_not_in_play(tmp_path, quick)
     assert ex.tasks == set() and stored(conn) == []
 
 
+class HalfHour:
+    """
+    A stand in for the allocator: whether the game is in play, the cap, and what is left of the half hour's budget.
+    """
+
+    def __init__(self, playing=True, cap=1000, room=None):
+        self.playing, self.limit, self.left = playing, cap, room or {}
+
+    def in_play(self, pair, now):
+        return self.playing
+
+    def cap(self, pair, now):
+        return self.limit
+
+    def room(self, now):
+        return self.left
+
+
+def test_a_trade_keeps_to_the_half_hours_budget_and_the_scoreboards_word_on_the_game(tmp_path, quick):
+    latest = books()
+    conn, cash, ex = executor(tmp_path, latest)
+    ex.allocator = HalfHour(room={"polymarket_us": 9.2, "kalshi": 100.0})
+    assert run(ex) == [True] and stored(conn)[0]["quantity"] == 20            # 9.20 dollars at 0.45 buys 20.
+    ex.allocator = HalfHour(playing=False)
+    assert run(ex) == [False]                                                   # The venue has called the game over.
+
+    # Past its expected end, a game the scoreboard says is still live is traded, and pays no sooner than half an hour on.
+    async def late():
+        sent = ex.signal(PAIR, YES, NO, 0.08, 100, FEES, "2026-09-20T20:40:00+00:00")
+        await asyncio.gather(*ex.tasks)
+        return sent
+    ex.allocator = HalfHour(room={"polymarket_us": 100.0, "kalshi": 100.0})
+    assert asyncio.run(late()) is True and stored(conn)[-1]["pays_at"] == "2026-09-20T21:10:00+00:00"
+
+
 def test_two_signals_at_once_share_the_balance_instead_of_both_spending_it(tmp_path, quick):
     latest = books()
     conn, cash, ex = executor(tmp_path, latest, start=530.0)     # 30 over the 500 floor: room for 50 contracts at 0.45 once, not twice.
