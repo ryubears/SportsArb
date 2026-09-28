@@ -54,7 +54,7 @@ def test_unchanged_books_fill_both_legs_and_lock_in_the_edge(tmp_path, quick):
     assert cash.amounts == pytest.approx({"polymarket_us": 10000 - 50 * 0.45, "kalshi": 10000 - 50 * 0.47})
     assert [tuple(r) for r in conn.execute("SELECT venue, amount, reason, trade_id FROM ledger ORDER BY id")][2:] == [
         ("polymarket_us", pytest.approx(-22.5), "buy", 1), ("kalshi", pytest.approx(-23.5), "buy", 1)]      # After the two openings.
-    assert logs[0].startswith("paper filled: game_winner 2026-09-20 CAR@ATL CAR")
+    assert logs[0].startswith("paper filled: nfl game_winner 2026-09-20 CAR@ATL CAR")
     assert ex.summary().startswith("paper: 1 trades (1 filled, 0 partial, 0 failed), locked in 4.00$, hedges +0.00$; total 1 trades, 4.00$")
 
 
@@ -129,7 +129,7 @@ def test_exposure_is_flattened_on_a_later_tick_once_a_book_allows_it(tmp_path, q
     assert (t["yes_held"], t["no_held"], t["matched"], t["status"]) == (50, 20, 20, "partial")
     assert t["hedge"] == "50 exposed, no book to flatten, no leg no book, then bought 20 of 50 on kalshi, 30 exposed at 17:31:00"
     assert t["hedge_pnl"] == pytest.approx(20 * (1 - 0.45 - 0.47))
-    assert logs[-1] == "paper flattened game_winner 2026-09-20 CAR@ATL CAR: bought 20 of 50 on kalshi, 30 exposed, 30 still exposed, hedge +1.60$"
+    assert logs[-1] == "paper flattened nfl game_winner 2026-09-20 CAR@ATL CAR: bought 20 of 50 on kalshi, 30 exposed, 30 still exposed, hedge +1.60$"
     assert ex.exposed == {}
     assert cash["kalshi"] == pytest.approx(10000 - 20 * 0.47)
 
@@ -269,7 +269,7 @@ def test_scanner_signals_once_per_episode(tmp_path):
                                               close_time="2026-09-20T21:00:00+00:00", fee_info=f) for v, c, f in members], NOW)
     bets = [Bet(v, c, "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, "yes") for v, c, _ in members]
     database.replace_bets(conn, "nfl", bets)
-    database.replace_pairs(conn, "nfl", [Pair(PAIR["label"], "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, bets, [])], NOW)
+    database.replace_pairs(conn, "nfl", [Pair(PAIR["label"], "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, bets, [], sport="nfl")], NOW)
     calls = []
     s = scan.Scanner(conn, "nfl", lambda m: None,
                      on_signals=[lambda pair, yes, no, edge, size, fee_infos, now: calls.append((pair["label"], round(edge, 2), now)) or True])
@@ -297,7 +297,7 @@ def test_each_executor_is_offered_the_episode_until_it_takes_a_trade(tmp_path):
                                               close_time="2026-09-20T21:00:00+00:00", fee_info=f) for v, c, f in members], NOW)
     bets = [Bet(v, c, "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, "yes") for v, c, _ in members]
     database.replace_bets(conn, "nfl", bets)
-    database.replace_pairs(conn, "nfl", [Pair(PAIR["label"], "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, bets, [])], NOW)
+    database.replace_pairs(conn, "nfl", [Pair(PAIR["label"], "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, bets, [], sport="nfl")], NOW)
     live, paper = [], []
     busy = [True]           # The live executor turns the first moment down, say while its balance has not been read.
     s = scan.Scanner(conn, "nfl", lambda m: None, on_signals=[lambda *args: live.append(args[-1]) or not busy[0],

@@ -30,7 +30,7 @@ def make_db(tmp_path, members):
     database.upsert_contracts(conn, contracts, "2026-09-19T00:00:00+00:00")
     bets = [Bet(m["venue"], m["contract_id"], "spread", 2027, "2026-09-20", "CAR", "ATL", "ATL", 4.5, m["polarity"]) for m in members]
     database.replace_bets(conn, "nfl", bets)
-    database.replace_pairs(conn, "nfl", [Pair(LABEL, "spread", 2027, "2026-09-20", "CAR", "ATL", "ATL", 4.5, bets, [])],
+    database.replace_pairs(conn, "nfl", [Pair(LABEL, "spread", 2027, "2026-09-20", "CAR", "ATL", "ATL", 4.5, bets, [], sport="nfl")],
                             "2026-09-19T00:00:00+00:00")
     return conn
 

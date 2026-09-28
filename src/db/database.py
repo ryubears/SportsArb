@@ -224,12 +224,12 @@ def replace_pairs(conn, sport, pairs, matched_at):
     """, (sport,))
     for p in pairs:
         conn.execute("""
-            INSERT INTO pairs (label, kind, season, game_date, team_a, team_b, subject, line, venues, contracts, flags, matched_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO pairs (sport, label, kind, season, game_date, team_a, team_b, subject, line, venues, contracts, flags, matched_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT (label) DO UPDATE SET kind = excluded.kind, season = excluded.season, game_date = excluded.game_date,
                 team_a = excluded.team_a, team_b = excluded.team_b, subject = excluded.subject, line = excluded.line,
                 venues = excluded.venues, contracts = excluded.contracts, flags = excluded.flags, matched_at = excluded.matched_at
-        """, (p.label, p.kind, p.season, p.game_date, p.team_a, p.team_b, p.subject, p.line,
+        """, (p.sport, p.label, p.kind, p.season, p.game_date, p.team_a, p.team_b, p.subject, p.line,
               ",".join(p.venues), len(p.members), jsonutil.dump(p.flags), matched_at))
         p.id = conn.execute("SELECT id FROM pairs WHERE label = ?", (p.label,)).fetchone()[0]
         for m in p.members:
@@ -254,12 +254,12 @@ def load_pairs(conn, sport):
 
 def load_kickoffs(conn):
     """
-    Return {(game_date, team_a, team_b): kickoff} for every game with a current pair, from its contracts' latest start time.
+    Return {(sport, game_date, team_a, team_b): kickoff} for every game with a current pair, from its contracts' latest start time.
     """
-    return {(d, a, b): kickoff for d, a, b, kickoff in conn.execute("""
-        SELECT p.game_date, p.team_a, p.team_b, MAX(c.start_time)
+    return {(s, d, a, b): kickoff for s, d, a, b, kickoff in conn.execute("""
+        SELECT p.sport, p.game_date, p.team_a, p.team_b, MAX(c.start_time)
         FROM pairs p JOIN bets b ON b.pair_id = p.id JOIN contracts c ON c.venue = b.venue AND c.contract_id = b.contract_id
-        WHERE p.game_date IS NOT NULL GROUP BY 1, 2, 3 HAVING MAX(c.start_time) IS NOT NULL""")}
+        WHERE p.game_date IS NOT NULL GROUP BY 1, 2, 3, 4 HAVING MAX(c.start_time) IS NOT NULL""")}
 
 
 # GAPS
@@ -381,11 +381,11 @@ def load_open_cost_by_venue(conn, mode):
 def load_open_game_costs(conn, mode):
     """
     What each unsettled trade of one mode on a game still holds, as
-    [((game_date, team_a, team_b), [(venue, dollars), (venue, dollars)])],
+    [((sport, game_date, team_a, team_b), [(venue, dollars), (venue, dollars)])],
     one entry per trade with its yes leg's cost first.
     """
-    return [((d, a, b), [(yv, yc), (nv, nc)]) for d, a, b, yv, yc, nv, nc in conn.execute("""
-        SELECT p.game_date, p.team_a, p.team_b, t.yes_venue, t.yes_cost, t.no_venue, t.no_cost
+    return [((s, d, a, b), [(yv, yc), (nv, nc)]) for s, d, a, b, yv, yc, nv, nc in conn.execute("""
+        SELECT p.sport, p.game_date, p.team_a, p.team_b, t.yes_venue, t.yes_cost, t.no_venue, t.no_cost
         FROM trades t JOIN pairs p ON p.id = t.pair_id
         WHERE t.mode = ? AND t.yes_held + t.no_held > 0 AND p.game_date IS NOT NULL
           AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""", (mode,))]

@@ -27,7 +27,7 @@ def refresh(sport, log=print, db_path=None):
         counts = fetch.fetch_and_store(sport, VENUES, conn, log)
         bets, _ = classify.classify_all(database.load_contracts(conn, sport=sport))
         database.replace_bets(conn, sport, bets)
-        pairs, _ = match.match(database.load_bets(conn, sport))
+        pairs, _ = match.match(database.load_bets(conn, sport), sport)
         database.replace_pairs(conn, sport, pairs, now_iso())
     return ", ".join([f"{venue} {n} contracts" for venue, n in counts.items()] + [f"{len(bets)} bets, {len(pairs)} pairs"])
 

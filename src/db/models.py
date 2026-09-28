@@ -67,7 +67,8 @@ class Pair:
     sides of a game as contracts.
     """
     id: int | None = row_id()
-    label: str              # For example 'spread 2026-09-20 CAR@ATL ATL 4.5'.
+    sport: str = field(kw_only=True)    # Our sport key, for example 'nfl'.
+    label: str              # The sport and the bet's identity, for example 'nfl spread 2026-09-20 CAR@ATL ATL 4.5'.
     kind: str
     season: int | None
     game_date: str | None

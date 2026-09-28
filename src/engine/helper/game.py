@@ -14,8 +14,9 @@ from engine.helper import config
 def game_key(pair):
     """
     What identifies a game across its pairs, or None for a bet with no game.
+    The sport is part of it, since team codes repeat across leagues.
     """
-    return (pair["game_date"], pair["team_a"], pair["team_b"]) if pair.get("game_date") else None
+    return (pair["sport"], pair["game_date"], pair["team_a"], pair["team_b"]) if pair.get("game_date") else None
 
 
 def payout_hours():

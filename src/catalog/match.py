@@ -39,11 +39,13 @@ def identity(bet):
     return tuple(bet[f] for f in IDENTITY)
 
 
-def label(bet):
+def label(bet, sport):
     """
-    The identity in words, for example 'spread 2026-09-20 CAR@ATL ATL 4.5'.
+    The sport and the identity in words, for example 'nfl spread 2026-09-20
+    CAR@ATL ATL 4.5'. The sport keeps it unique across sports, whose bets can
+    read the same: the Broncos' and the Nuggets' titles are both 'champion 2027 DEN'.
     """
-    parts = [bet["kind"], str(bet["game_date"] or bet["season"])]
+    parts = [sport, bet["kind"], str(bet["game_date"] or bet["season"])]
     if bet["team_a"]:
         parts.append(f"{bet['team_a']}@{bet['team_b']}")
     if bet["subject"]:
@@ -68,22 +70,22 @@ def flags(rows):
     return found
 
 
-def make_pair(rows):
+def make_pair(rows, sport):
     """
-    Build a Pair from bet rows that share an identity.
+    Build a Pair of the sport from bet rows that share an identity.
     """
     first = rows[0]
     members = [Bet(r["venue"], r["contract_id"], r["kind"], r["season"], r["game_date"], r["team_a"], r["team_b"],
                    r["subject"], r["line"], r["polarity"]) for r in rows]
-    return Pair(label=label(first), kind=first["kind"], season=first["season"], game_date=first["game_date"],
+    return Pair(sport=sport, label=label(first, sport), kind=first["kind"], season=first["season"], game_date=first["game_date"],
                 team_a=first["team_a"], team_b=first["team_b"], subject=first["subject"], line=first["line"],
                 members=members, flags=flags(rows))
 
 
-def match(bets):
+def match(bets, sport):
     """
-    Pair up bet rows by identity. Returns the pairs both venues list, and
-    the bets that were left out because only one venue lists them.
+    Pair up one sport's bet rows by identity. Returns the pairs both venues
+    list, and the bets that were left out because only one venue lists them.
     """
     by_identity = defaultdict(list)
     for bet in bets:
@@ -91,7 +93,7 @@ def match(bets):
     pairs, unmatched = [], []
     for rows in by_identity.values():
         if len({r["venue"] for r in rows}) >= 2:
-            pairs.append(make_pair(rows))
+            pairs.append(make_pair(rows, sport))
         else:
             unmatched.extend(rows)
     return pairs, unmatched
@@ -124,6 +126,6 @@ if __name__ == "__main__":
     args = ap.parse_args()
     with database.connect() as conn:
         bets = database.load_bets(conn, args.sport)
-        pairs, unmatched = match(bets)
+        pairs, unmatched = match(bets, args.sport)
         database.replace_pairs(conn, args.sport, pairs, now_iso())
     report(pairs, unmatched)

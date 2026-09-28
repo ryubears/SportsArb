@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS bets (
 -- so the opportunities and trades that refer to it always resolve. A pair is current when a bet points at it.
 CREATE TABLE IF NOT EXISTS pairs (
     id           INTEGER PRIMARY KEY,
-    label        TEXT NOT NULL UNIQUE,   -- The bet's identity in words, for example 'spread 2026-09-20 CAR@ATL ATL 4.5'.
+    sport        TEXT NOT NULL DEFAULT 'nfl',   -- Our sport key. Pairs from before a second sport are 'nfl'.
+    label        TEXT NOT NULL UNIQUE,   -- The sport and the bet's identity in words, for example 'nfl spread 2026-09-20 CAR@ATL ATL 4.5'.
     kind         TEXT NOT NULL,
     season       INTEGER,
     game_date    TEXT,
