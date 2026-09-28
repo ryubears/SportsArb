@@ -132,9 +132,10 @@ class Gap:
     end_ts: str | None      # When a new connection was subscribed. None while still down.
 
 
-class TradeLeg(NamedTuple):
+class Leg(NamedTuple):
     """
-    One leg of a Trade as stored, from Trade.leg().
+    One leg of a Trade as stored, from Trade.leg(). While its orders are out,
+    the executor works with a Leg of its own, see execute/executor.py.
     """
     side: str               # 'yes' or 'no', the side of the bet the leg holds.
     venue: str
@@ -193,9 +194,9 @@ class Trade:
 
     def leg(self, side):
         """
-        The stored fields of one leg, 'yes' or 'no', as a TradeLeg.
+        The stored fields of one leg, 'yes' or 'no', as a Leg.
         """
-        return TradeLeg(side, *(getattr(self, f"{side}_{name}") for name in ("venue", "contract", "polarity", "limit", "held", "cost")))
+        return Leg(side, *(getattr(self, f"{side}_{name}") for name in ("venue", "contract", "polarity", "limit", "held", "cost")))
 
     def legs(self):
         """

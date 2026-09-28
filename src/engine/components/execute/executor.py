@@ -43,7 +43,8 @@ from engine.helper.pricing import depth, ladder, reach, sell_ladder, sweep, trad
 class Leg:
     """
     One side of a trade: the pair member it is held through, the order sent
-    for it, and what it holds after any flattening.
+    for it, and what it holds after any flattening. Once stored, the trade's
+    legs read back as db.models.Leg, from Trade.leg().
     """
     side: str               # 'yes' or 'no', the side of the bet this leg holds.
     member: dict            # The pair member, with its venue, contract_id, and polarity.
