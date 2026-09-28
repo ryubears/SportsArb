@@ -63,6 +63,10 @@ what.
   one side than the other and is not a sure dollar any more.
 - **Flatten**: fix an exposed trade by selling the excess back or buying
   the missing side.
+- **Cap**: the most contracts one trade on a game may hold. The allocator
+  sets every game's cap each half hour.
+- **Budget**: the dollars all trades together may put in on each venue in
+  the current half hour, also set by the allocator.
 - **Mode**: `paper` or `live`. Paper fills are simulated against the real
   books, live ones are real orders. Every trade is stored with its mode.
 - **Desk**: everything one mode needs: its money, its sizing, its
@@ -132,9 +136,9 @@ level reaches the scanner.
    in play, as the scoreboard says. `quantity_for` walks both ladders
    together through the levels that keep that edge and sets each leg's
    limit at the deepest one. It then asks for `FILL_SHARE` of what those
-   levels show, capped by the allocator, by the cash each venue can spend,
-   and by what is left of the half hour's budget. The cash is reserved and
-   the trade is stored before any order goes out.
+   levels show, but no more than the game's cap, the cash each venue can
+   spend, or what is left of the half hour's budget. The cash is reserved
+   and the trade is stored before any order goes out.
 2. **Fill** (`run_trade`). Both legs go out at once.
    - Paper (`execute/paper.py`): each order waits a latency drawn from
      what was measured, then fills against the book as it is then.
@@ -164,7 +168,8 @@ level reaches the scanner.
   way stand;
 - each desk reads the live balances when due, retries exposed trades,
   starts a settlement pass every 30 seconds, and lets its rebalancer
-  check the balances;
+  check the balances, paper once a day at 10:00 UTC and live every
+  minute;
 - a status line is logged every minute, and each component's summary
   every ten.
 
@@ -186,7 +191,7 @@ place (see the top of `db/database.py`):
 | trades | the executors, paper and live |
 | orders | the live executor, one row per real order |
 | settlements | the settler |
-| ledger, transfers | paper money and its weekly transfers |
+| ledger, transfers | paper money and its transfers between venues |
 | alerts | every email the live process sends |
 
 Trades and settlements carry a `mode`, `paper` or `live`, so the two modes
@@ -390,36 +395,71 @@ venue cannot be reached, ends at the expected length. The executor and the
 allocator both ask it, and the allocator expects a game's money back half
 an hour after its real end once that is known.
 
-**allocate.py** paces the money through the day. A trade's money is out
-until its game settles, half an hour after the final whistle, and then
-comes back to be spent again, so what one game may spend depends on the
-games it overlaps, not on the whole day: the noon games' money pays for the
-evening's. Every half hour the allocator plans the games in play and those
-kicking off within 24 hours. A game is expected to spend its sport's
-`DOLLARS_PER_CAP_HOUR` on its busier venue for every contract of cap, for
-each hour it is played: about $3 in the NFL, which is $10 a game, a little
-above the median of the 14 games on Sunday, September 27. College football
-starts at the NFL's rate until it has trades of its own to measure. Each
-game gets a cap, the most contracts one of its trades may hold, and the
-caps rise together until, at some moment, the money would run out, counting
-what is free on each venue and the money coming back as games settle. A
-game that plays into a crowded stretch gets a smaller cap, and one that is
-over before the crowd arrives a bigger one: Sunday's London game leaves the
-1 PM games enough for the 15 minutes they overlap its settling. The half
-hour's budget on each venue is what the plan expects its games to spend in
-it, and every game in play draws on it, first come, first served, so a busy
-game takes what a quiet one leaves: on that Sunday the quietest game spent
-$2 for every contract of cap and the busiest $24. Once the budget is spent,
-trades wait for the next half hour. Replayed on the kickoffs of the first
-weekend of October, 54 college and 15 NFL games, the plans put about 30%
-more of the money to work than sharing it equally among the games in play
-did, and free cash never went under the floor. Caps run from 10 to 1,000
-contracts on paper and 1 to 5 live, and paper and live each plan their own
-money and trades. A live game whose plan gives less than one contract still
-trades one while the half hour's budget lasts, so a $100 test keeps trading
-on a crowded Saturday. The cap and the budget only bound a trade: whether
-one is sent at all still depends on the edge, the depth of the books, and
-the cash.
+**allocate.py** decides how much money trades may use. It sets two
+limits, and a trade asks for no more than either:
+
+- a **cap** for each game, the most contracts one trade on it may hold;
+- a **budget** for each half hour, the dollars all trades together may
+  put in on each venue until the next half hour.
+
+Money put into a game is tied up until the game settles, half an hour
+after the final whistle, and then comes back to be spent again. So the
+money only has to last through each crowded stretch of the day, not the
+whole day: the noon games' money comes back in time for the evening's.
+Every half hour the allocator makes a plan over the games in play and
+those kicking off within 24 hours:
+
+1. **Expect the spending.** Each game is expected to spend its sport's
+   `DOLLARS_PER_CAP_HOUR` on its busier venue for each contract of its
+   cap, every hour it is played. For the NFL that is $3.10, so a cap of
+   100 spends about $310 an hour, about $1,000 over a game. The rate is
+   measured, since most trades are smaller than the cap: on Sunday,
+   September 27, games spent a median of $8 a game for each contract of
+   cap, the quietest $2 and the busiest $24, and the rate is set a little
+   above that median. College football starts at the NFL's rate until it
+   has trades of its own to measure.
+2. **Check the peaks.** The most money is tied up just before a game's
+   money comes back, so the plan checks each of those moments. What the
+   games still unsettled then will spend from now until then has to fit
+   in the cash free now, plus what comes back before then from the games
+   that settle earlier.
+3. **Raise the caps together.** Every game's cap starts at nothing and
+   all of them rise together. When a moment runs out of money, the games
+   with money tied up at it stop at the cap reached, and the others rise
+   on. Games crowded together share the money, and a game alone gets
+   most of it.
+4. **Set the budget** to what the plan expects its games to spend in the
+   half hour at those caps.
+
+Every game in play draws on the budget, first come, first served, so a
+busy game takes what a quiet one leaves. Once it is spent, trades wait
+for the next half hour, whose plan starts again from what is free then,
+so a game's cap can change from one half hour to the next. A catalog
+refresh plans again at once.
+
+For example, take a Sunday with $9,500 free on each venue: nine games
+kicking off at 1 PM Eastern, four at 4:05 and 4:25, and a night game at
+8:20. The first peak is at 4:45, just before the early games' money comes
+back. By then each early game has spent a whole game's worth, $10 for
+each contract of its cap, and each late game 20 or 40 minutes' worth, $1
+or $2. Together that is $97 for each contract of cap they all get, and
+$9,500 pays for 98, so each of the thirteen gets a cap of 98. From 1:00
+to 1:30 the nine early games share a budget of about $1,370 on each
+venue: 9 games, each with a cap of 98, at $3.10 an hour for half an hour.
+The night game kicks off after everything else has settled, so all
+$9,500 is its own and it gets a cap of about 940. At 5 PM, with the early
+games' money back, the next plan raises the late games' caps to about
+300, or less if they have already spent much.
+
+Replayed on the kickoffs of the first weekend of October, 54 college and
+15 NFL games, the plans put about 30% more of the money to work than
+sharing it equally among the games in play did, and free cash never went
+under the floor. Caps run from 10 to 1,000 contracts on paper and 1 to 5
+live, and paper and live each plan their own money and trades. A live
+game whose plan gives less than one contract still trades one while the
+half hour's budget lasts, so a $100 test keeps trading on a crowded
+Saturday. The cap and the budget only bound a trade: whether one is sent
+at all still depends on the edge, the depth of the books, and the cash.
 
 **balance/** and **settle.py** track the money: paper money in
 **balance/paper.py** and live money in **balance/live.py**, with what they
@@ -443,10 +483,13 @@ stops flattening it. The venue holding a winning leg receives the whole
 dollar, so the balances drift apart. Trades are open most of the time, so
 the venues are compared as they stand: each counts its free cash plus what
 open trades hold on it at cost, which is about what those trades will pay
-back there. On Tuesdays the `PaperRebalancer` compares them and, when one
-sits more than 20% above the average, sends the excess to the other, as
-much of it as is free above the floor, as a `Transfer` that takes four
-business days, during which the money is on neither venue.
+back there. Every day at 10:00 UTC, 6 AM in New York, when the night's
+games have settled and the day's have not begun, the `PaperRebalancer`
+compares them and, when one sits more than 10% above the average, sends
+the excess to the other, as much of it as is free above the floor, as a
+`Transfer` that takes four business days. Until it lands the money cannot
+be traded on either venue, but it counts for the venue it is going to, so
+the checks on the days in between do not send it again.
 
 Live money has no ledger of ours. `LiveBalances` reads each venue's balance
 every 30 seconds, and at once after a payout, and applies what our own
@@ -455,7 +498,7 @@ twice. Nothing is traded before the first reading. The settler settles live
 trades as it does paper ones, storing each as a `live` `Settlement`, while
 the venue pays out on its own. Live money is moved between venues by hand,
 so instead of transferring, the `LiveRebalancer` emails when one venue,
-counted the same way, sits more than 20% above the average, saying how much
+counted the same way, sits more than 10% above the average, saying how much
 of its free cash to move where, and again each day while they stay apart.
 `notify.py` stores every alert in the alerts table and emails it in a
 background thread through the SMTP server in `data/email.json`.
@@ -607,8 +650,10 @@ runs both from one pool of money. `--no-trade` scans without trading,
 `--execute live` trades with real money and `--execute both` trades the
 same signals on paper and for real. The settings a run is tuned by, such as
 the minimum edge, the trade caps, and the starting balance, are in
-`src/engine/helper/config.py`, and `--set NAME=VALUE` overrides one for a
-run, for example `python3 -m engine.run --sport nfl --set min_edge=0.03`.
+`src/engine/helper/config.py`. Those only paper trading reads start with
+`PAPER_`, those only live trading reads with `LIVE_`, and the rest hold
+for both. `--set NAME=VALUE` overrides one for a run, for example
+`python3 -m engine.run --sport nfl --set min_edge=0.03`.
 The run logs every setting when it starts. The streams need venue keys in
 `data/`: `kalshi_key_id.txt` and `kalshi_private_key.pem` for Kalshi,
 `polymarket_us_key_id.txt` and `polymarket_us_secret_key.txt` for

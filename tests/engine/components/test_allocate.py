@@ -49,7 +49,7 @@ def test_a_game_alone_may_spend_all_the_money_over_its_play(tmp_path):
     conn, allocator = plan_for(tmp_path, EARLY[:1])
     now = EARLY[0][2]
     assert allocator.cap(pair_for(*EARLY[0]), now) == int(FREE / GAME)                             # 942.
-    assert allocator.room(now) == pytest.approx({venue: FREE / GAME * RATE * 0.5 for venue in ("kalshi", "polymarket_us")})
+    assert allocator.budget_left(now) == pytest.approx({venue: FREE / GAME * RATE * 0.5 for venue in ("kalshi", "polymarket_us")})
 
 
 def test_the_early_games_leave_room_for_the_games_that_kick_off_before_their_money_is_back(tmp_path):
@@ -88,15 +88,15 @@ def test_the_half_hours_budget_is_shared_by_every_game_and_counts_the_trades_sin
     budget = FREE / (9 * GAME) * 9 * RATE * 0.5
     holding(conn, EARLY[0], 999.0, f"{SUNDAY}T16:59:00+00:00")           # Before the plan, so it does not count.
     now = EARLY[0][2]
-    assert allocator.room(now) == pytest.approx({"kalshi": budget, "polymarket_us": budget})
+    assert allocator.budget_left(now) == pytest.approx({"kalshi": budget, "polymarket_us": budget})
     holding(conn, EARLY[0], 1000.0, f"{SUNDAY}T17:05:00+00:00")
     holding(conn, EARLY[1], 200.0, f"{SUNDAY}T17:06:00+00:00", status="sent")     # In flight, at what its orders may pay.
-    assert allocator.room(f"{SUNDAY}T17:10:00+00:00") == pytest.approx({"kalshi": budget - 1200, "polymarket_us": budget - 1200})
+    assert allocator.budget_left(f"{SUNDAY}T17:10:00+00:00") == pytest.approx({"kalshi": budget - 1200, "polymarket_us": budget - 1200})
     holding(conn, EARLY[2], 500.0, f"{SUNDAY}T17:11:00+00:00")
-    assert allocator.room(f"{SUNDAY}T17:12:00+00:00") == {"kalshi": 0.0, "polymarket_us": 0.0}
+    assert allocator.budget_left(f"{SUNDAY}T17:12:00+00:00") == {"kalshi": 0.0, "polymarket_us": 0.0}
     # The next half hour plans again, from what is free then, with nothing spent against it yet.
     assert allocator.current(f"{SUNDAY}T17:30:00+00:00").made == f"{SUNDAY}T17:30:00+00:00"
-    assert min(allocator.room(f"{SUNDAY}T17:30:00+00:00").values()) > 0
+    assert min(allocator.budget_left(f"{SUNDAY}T17:30:00+00:00").values()) > 0
     assert allocator.summary(f"{SUNDAY}T17:30:00+00:00").startswith("paper capital: 9 games in play and 0 more within 24 hours, ")
 
 
@@ -124,7 +124,7 @@ def test_live_caps_stay_within_the_live_bounds_and_the_budget(tmp_path):
     _, test = plan_for(tmp_path / "test", EARLY, live(50.0))
     share = (50 - config.LIVE_CASH_FLOOR) / (9 * GAME)                     # Half a contract.
     assert test.cap(pair_for(*EARLY[0]), now) == config.LIVE_MIN_CAP        # Raised to one contract,
-    assert test.room(now) == pytest.approx({venue: share * 9 * RATE * 0.5 for venue in ("kalshi", "polymarket_us")})     # while 7 dollars last.
+    assert test.budget_left(now) == pytest.approx({venue: share * 9 * RATE * 0.5 for venue in ("kalshi", "polymarket_us")})     # while 7 dollars last.
     _, paper = plan_for(tmp_path / "paper", EARLY, lambda conn: PaperBalances(conn, start=600.0))
     assert paper.cap(pair_for(*EARLY[0]), now) == 0                        # 100 over the floor gives 1, under paper's least.
 
@@ -132,9 +132,9 @@ def test_live_caps_stay_within_the_live_bounds_and_the_budget(tmp_path):
 def test_a_plan_made_before_the_live_balances_are_read_is_not_kept(tmp_path):
     conn, allocator = plan_for(tmp_path, EARLY, lambda conn: LiveBalances(lambda m: None, {"kalshi": lambda: 100.0, "polymarket_us": lambda: 100.0}))
     now = EARLY[0][2]
-    assert allocator.room(now) == {"kalshi": 0.0, "polymarket_us": 0.0} and allocator.plan is None
+    assert allocator.budget_left(now) == {"kalshi": 0.0, "polymarket_us": 0.0} and allocator.plan is None
     asyncio.run(allocator.cash.refresh(now))
-    assert min(allocator.room(now).values()) > 0 and allocator.plan is not None
+    assert min(allocator.budget_left(now).values()) > 0 and allocator.plan is not None
 
 
 def test_a_catalog_refresh_plans_again_at_once(tmp_path):

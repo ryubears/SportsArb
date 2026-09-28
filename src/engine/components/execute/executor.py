@@ -34,7 +34,7 @@ from common.timeutil import now_iso, seconds_between
 from common.venues import VENUES
 from db import database
 from db.models import Ledger, Trade
-from engine.components.allocate import cap_range
+from engine.components.allocate import cap_range, cash_floor
 from engine.helper import config, game
 from engine.helper.pricing import depth, ladder, reach, sell_ladder, sweep, trade_words
 
@@ -376,7 +376,7 @@ class Executor:
         Dollars new trades leave untouched on each venue, so the money is
         never run down to nothing and flattening, which may use it, still can.
         """
-        return config.CASH_FLOOR
+        return cash_floor(self.mode)
 
     def spendable(self, venue):
         """
@@ -401,8 +401,8 @@ class Executor:
         together through the levels that keep config.MIN_EDGE, each limit
         set at the deepest level reached. The quantity is config.FILL_SHARE
         of what those levels show, the share we expect to get, so an
-        unchanged book fills in full, and no more than the cap, what each
-        venue can spend, or what is left on it of the half hour's budget.
+        unchanged book fills in full, and no more than the game's cap, what
+        each venue can spend, or what is left on it of the half hour's budget.
         """
         books = self.books()
         yes_leg, no_leg = legs
@@ -413,8 +413,8 @@ class Executor:
         cap = self.allocator.cap(pair, now) if self.allocator else cap_range(self.mode)[1]
         if not available:
             return 0, cap
-        room = self.allocator.room(now) if self.allocator else {}
-        affordable = min(min(self.spendable(leg.venue), room.get(leg.venue, float("inf"))) // leg.limit for leg in legs)
+        budget = self.allocator.budget_left(now) if self.allocator else {}
+        affordable = min(min(self.spendable(leg.venue), budget.get(leg.venue, float("inf"))) // leg.limit for leg in legs)
         return int(min(available * config.FILL_SHARE, cap, affordable)), cap
 
     def signal(self, pair, yes, no, edge, size, fee_infos, now):

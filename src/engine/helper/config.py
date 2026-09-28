@@ -4,50 +4,56 @@ The settings that decide what the live process does, in one place.
 Each is read when it is used, as config.NAME, so engine.run's --set can
 change one for a run, and the run logs them all when it starts. What
 belongs here is what a run might be tuned by. What a venue's protocol or
-fee schedule fixes stays with the code for that venue.
+fee schedule fixes stays with the code for that venue. A setting only
+paper trading reads starts with PAPER_, one only live trading reads starts
+with LIVE_, and the rest hold for both.
 
 Override one for a run with --set, for example:
-    python3 -m engine.run --sport nfl --set min_edge=0.03 --set max_cap=100
+    python3 -m engine.run --sport nfl --set min_edge=0.03 --set paper_max_cap=100
 """
 
-# TRADING, execute/executor.py and execute/paper.py
+# TRADING, execute/executor.py
 
 MIN_EDGE = 0.05             # Net dollars per contract at the top before orders are sent, and the floor for the deeper levels they sweep.
                             # In-game, 2 to 3 cent edges lost money after hedging.
 FILL_SHARE = 0.5            # The share of visible size at a level assumed to be ours. Other takers get the rest.
-REJECT_PROBABILITY = 0.03   # The share of orders a venue rejects outright, for rate limits and errors.
+
+# SIZING, allocate.py. A game's cap is the most contracts one trade on it may hold. The allocator sets every game's cap
+# each half hour, and a budget of dollars the half hour's trades share. The caps' bounds are under PAPER and LIVE.
+
+DOLLARS_PER_CAP_HOUR = {    # What a game is expected to spend on its busier venue, per hour of play, for each contract of its cap.
+    "nfl": 3.1,             # A cap of 100 spends about 310 dollars an hour, 1,000 over a game. Measured, since most trades are smaller
+    "ncaaf": 3.1,           # than the cap: 10 dollars a game, a little above the median of 8 across the 14 NFL games on Sunday
+}                           # 2026-09-27, which ranged from 2 to 24. College football starts at the NFL's rate until it has trades.
+BUDGET_MINUTES = 30         # How often the allocator plans again, and the stretch each budget covers.
+PLAN_HOURS = 24             # How far ahead each plan looks: the games in play and those kicking off within this many hours.
+
+# REBALANCING, balance/rebalance.py
+
+REBALANCE_DRIFT = 0.10      # A venue this far above the two venue average sends the excess over: paper on the daily check, live by email.
+
+# PAPER, execute/paper.py, balance/paper.py, and balance/rebalance.py. How paper orders fill, and the paper money.
+
+PAPER_REJECT_PROBABILITY = 0.03     # The share of orders a venue rejects outright, for rate limits and errors.
 # Signal to fill latency per venue, as median milliseconds and the sigma of a lognormal draw. From us-east-1 a signed
 # request round trip is about 35 ms to Kalshi and 30 ms to Polymarket US, and on top of that sit the feed's own lag
 # in showing us the book and the venue's matching, so the medians are set above the round trips.
-LATENCY_MS = {"kalshi": (50, 0.35), "polymarket_us": (60, 0.35)}
-
-# SIZING, allocate.py
-
-DOLLARS_PER_CAP_HOUR = {    # Dollars a game spends on its busier venue for every contract of cap, per hour of play, in each sport.
-    "nfl": 3.1,             # 10 dollars a game over GAME_HOURS: a little above the median of 8 across the 14 games on Sunday 2026-09-27,
-    "ncaaf": 3.1,           # which ranged from 2 to 24. College football has no trades yet, so it starts at the NFL's rate.
-}                           # The 20 a game taken from the first live game left most of the money unspent on that Sunday.
-BUDGET_MINUTES = 30         # Each half hour gets a fresh plan and a budget on each venue that every game in play draws on.
-PLAN_HOURS = 24             # The plan covers the games in play and those kicking off within this many hours.
-MIN_CAP = 10                # The smallest cap a paper game trades with. A game whose plan gives a smaller cap sends nothing. A trade can
+PAPER_LATENCY_MS = {"kalshi": (50, 0.35), "polymarket_us": (60, 0.35)}
+PAPER_MIN_CAP = 10          # The smallest cap a paper game trades with. A game whose plan gives a smaller cap sends nothing. A trade can
                             # still be smaller than this when the book is thin: on Sunday 2026-09-27, 746 of 1,366 trades were under 10.
-MAX_CAP = 1000              # Contracts per trade, the most one trade may hold. Only binds for a game nearly alone in the plan, like a
-                            # night game.
-
-# MONEY, balance/paper.py, balance/rebalance.py, and execute/executor.py
-
-START_BALANCE = 10000.0     # Paper dollars per venue at the start.
-CASH_FLOOR = 500.0          # Paper dollars new trades leave untouched on each venue. Flattening may still use them.
-REBALANCE_WEEKDAY = 1       # Tuesday in UTC, when balances are compared, once Monday night's trades have settled.
-REBALANCE_DRIFT = 0.20      # A venue this far above the two venue average sends the excess over: paper on the weekly check, live by email.
-TRANSFER_DAYS = 4           # Business days a transfer between venues takes.
+PAPER_MAX_CAP = 1000        # The most contracts one paper trade may hold. Only binds for a game nearly alone in the plan, like a night game.
+PAPER_START_BALANCE = 10000.0   # Paper dollars per venue at the start.
+PAPER_CASH_FLOOR = 500.0    # Paper dollars new trades leave untouched on each venue. Flattening may still use them.
+PAPER_REBALANCE_HOUR = 10   # The hour, UTC, of the daily paper rebalance: 6 in the morning in New York, when the night's last games
+                            # have settled, about 8 at the latest, and before the first kickoff, 13:30 for the NFL's London games.
+PAPER_TRANSFER_DAYS = 4     # Business days a paper transfer between venues takes, as a real one would.
 
 # LIVE, execute/live.py, execute/brakes.py, balance/live.py, and balance/rebalance.py. Real money, so each limit is kept small
 # until the live results earn more. Sized for a test with about 100 dollars on each venue.
 
 LIVE_MIN_CAP = 1            # The cap a live game gets when its plan gives less than one contract, while the half hour's budget lasts.
                             # It only keeps the cap from rounding down to nothing: a trade still needs the edge, the depth, and the cash.
-LIVE_MAX_CAP = 5            # Contracts per live trade, the most one trade may hold, whatever the allocator would give.
+LIVE_MAX_CAP = 5            # The most contracts one live trade may hold, whatever the allocator would give.
 LIVE_BALANCE_SECONDS = 30   # Between readings of the venues' balances.
 LIVE_CASH_FLOOR = 5.0       # Dollars new live trades leave untouched on each venue. Flattening may still use them.
 LIVE_ORDER_WINDOW = 20      # The newest orders the unknown outcome brake looks at.

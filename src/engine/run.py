@@ -103,13 +103,14 @@ def trading_settings():
     The settings that decide what the paper trader does, in one line, so each run's log says what it ran with.
     """
     c = config
-    latency = ", ".join(f"{venue} {median}ms" for venue, (median, _) in c.LATENCY_MS.items())
-    return (f"settings: min edge {c.MIN_EDGE:.2f}$, fill share {c.FILL_SHARE}, rejects {c.REJECT_PROBABILITY:.0%}, "
-            f"latency {latency}, cap {c.MIN_CAP} to {c.MAX_CAP}, a contract of cap spending "
+    latency = ", ".join(f"{venue} {median}ms" for venue, (median, _) in c.PAPER_LATENCY_MS.items())
+    return (f"settings: min edge {c.MIN_EDGE:.2f}$, fill share {c.FILL_SHARE}, rejects {c.PAPER_REJECT_PROBABILITY:.0%}, "
+            f"latency {latency}, cap {c.PAPER_MIN_CAP} to {c.PAPER_MAX_CAP}, a contract of cap spending "
             f"{', '.join(f'{sport} {rate}$' for sport, rate in c.DOLLARS_PER_CAP_HOUR.items())} an hour, "
             f"planned every {c.BUDGET_MINUTES} minutes over {c.PLAN_HOURS}h, expected game "
-            f"{', '.join(f'{sport} {hours}h' for sport, hours in c.GAME_HOURS.items())} + settle {c.SETTLE_HOURS}h, start balance {c.START_BALANCE:,.0f}$, floor {c.CASH_FLOOR:,.0f}$, "
-            f"rebalance weekly over {c.REBALANCE_DRIFT:.0%}")
+            f"{', '.join(f'{sport} {hours}h' for sport, hours in c.GAME_HOURS.items())} + settle {c.SETTLE_HOURS}h, "
+            f"start balance {c.PAPER_START_BALANCE:,.0f}$, floor {c.PAPER_CASH_FLOOR:,.0f}$, "
+            f"rebalance daily at {c.PAPER_REBALANCE_HOUR}:00 UTC over {c.REBALANCE_DRIFT:.0%}")
 
 
 def live_settings():

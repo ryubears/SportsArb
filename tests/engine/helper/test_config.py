@@ -18,9 +18,9 @@ def restore(monkeypatch):
 
 
 def test_override_reads_each_value_as_the_settings_own_type(restore):
-    config.override(["min_edge=0.03", "MAX_CAP=100", " settle_hours = 1.5 ", "feed_processes=False"])
-    assert (config.MIN_EDGE, config.MAX_CAP, config.SETTLE_HOURS, config.FEED_PROCESSES) == (0.03, 100, 1.5, False)
-    assert isinstance(config.MAX_CAP, int)
+    config.override(["min_edge=0.03", "PAPER_MAX_CAP=100", " settle_hours = 1.5 ", "feed_processes=False"])
+    assert (config.MIN_EDGE, config.PAPER_MAX_CAP, config.SETTLE_HOURS, config.FEED_PROCESSES) == (0.03, 100, 1.5, False)
+    assert isinstance(config.PAPER_MAX_CAP, int)
     assert game.payout_hours("nfl") == config.GAME_HOURS["nfl"] + 1.5     # What depends on a setting follows it.
 
 
@@ -28,8 +28,9 @@ def test_override_reads_each_value_as_the_settings_own_type(restore):
     ("min_edge", "unknown setting"),
     ("no_such_setting=1", "unknown setting"),
     ("override=1", "unknown setting"),
-    ("max_cap=1.5", "MAX_CAP needs a whole number"),
-    ("latency_ms=5", "not a single number"),
+    ("paper_max_cap=1.5", "PAPER_MAX_CAP needs a whole number"),
+    ("max_cap=100", "unknown setting"),                        # Renamed PAPER_MAX_CAP.
+    ("paper_latency_ms=5", "not a single number"),
     ("game_hours=3.5", "not a single number"),                 # One for each sport, so set in config.py.
     ("feed_processes=0", "FEED_PROCESSES needs true or false"),
 ])
@@ -40,7 +41,7 @@ def test_override_refuses_what_it_cannot_set(restore, assignment, message):
 
 def test_settings_are_read_when_used_not_when_imported(restore, tmp_path):
     from db import database
-    config.override(["start_balance=2500"])
+    config.override(["paper_start_balance=2500"])
     assert PaperBalances(database.connect(tmp_path / "t.sqlite")).amounts == {"kalshi": 2500.0, "polymarket_us": 2500.0}
     assert "min edge 0.05$" in run.trading_settings() and "start balance 2,500$" in run.trading_settings()
 
