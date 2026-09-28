@@ -82,6 +82,21 @@ def test_a_game_contract_left_open_after_its_game_stops_being_recorded_when_the_
     assert targets("2026-09-28T07:00:00+00:00", "2026-09-28T02:00:00+00:00") == {"polymarket_us": [], "kalshi": []}          # Closed.
 
 
+def test_the_same_matchup_in_two_sports_is_two_games(tmp_path):
+    conn = database.connect(tmp_path / "t.sqlite")
+    kickoff = dict(start_time="2026-11-01T18:00:00+00:00", close_time="2026-11-01T18:00:00+00:00")
+    for sport in ("nfl", "nba"):                    # Dallas at Denver, on the same day in both leagues.
+        contracts = [contract(venue, f"{sport}-{venue}", sport=sport, **kickoff) for venue in ("polymarket_us", "kalshi")]
+        database.upsert_contracts(conn, contracts, "2026-10-01T00:00:00+00:00")
+        bets = [Bet(c.venue, c.contract_id, "game_winner", 2027, "2026-11-01", "DAL", "DEN", "DAL", None, "yes") for c in contracts]
+        database.replace_bets(conn, sport, bets)
+        database.replace_pairs(conn, sport, [Pair(f"{sport} game_winner 2026-11-01 DAL@DEN DAL", "game_winner", 2027, "2026-11-01",
+                                                  "DAL", "DEN", "DAL", None, bets, [], sport=sport)], "2026-10-01T00:00:00+00:00")
+    assert set(database.load_kickoffs(conn)) == {("nfl", "2026-11-01", "DAL", "DEN"), ("nba", "2026-11-01", "DAL", "DEN")}
+    assert set(database.load_kickoffs(conn, ("nba",))) == {("nba", "2026-11-01", "DAL", "DEN")}
+    assert [p["sport"] for p in database.load_pairs(conn, "nba").values()] == ["nba"]
+
+
 def test_gaps_are_stored_in_time_order_and_filtered_by_since(tmp_path):
     conn = database.connect(tmp_path / "t.sqlite")
     database.insert_gap(conn, Gap("polymarket_us", "2026-09-20T20:39:07+00:00", "2026-09-20T20:39:12+00:00"))

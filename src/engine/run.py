@@ -23,9 +23,13 @@ What runs, and where it lives:
     when live trading halts.
 
 The Session ties them together and ticks once a second. Every
-CATALOG_MINUTES the catalog is refreshed in a background thread, fetch
-then classify then match, and the new pairs' contracts are added to the
-running feeds and the closed ones removed, without reconnecting.
+CATALOG_MINUTES the catalog of each sport is refreshed in a background
+thread, fetch then classify then match, and the new pairs' contracts are
+added to the running feeds and the closed ones removed, without
+reconnecting.
+
+One run trades every sport given to --sport, comma separated, since the
+money is one pool: a second process would spend the same dollars.
 
 Run with:
     python3 -m engine.run --sport nfl
@@ -47,7 +51,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from catalog import pipeline
+from catalog import fetch, pipeline
 from common.log import log, with_traceback
 from common.paths import ROOT
 from common.timeutil import now_iso
@@ -71,7 +75,7 @@ class RunOptions:
     """
     What one run of the live process does, as the command line sets it.
     """
-    sport: str = "nfl"
+    sports: tuple = ("nfl",)                        # The sports to record and trade, from one pool of money.
     seconds: float = 0                              # Stop after this many seconds, or never when zero.
     catalog_seconds: float = CATALOG_MINUTES * 60   # Between catalog refreshes, or never when zero.
     refresh_at_start: bool = True                   # Refresh the catalog before streaming, when refreshes are on.
@@ -119,19 +123,20 @@ class Desk:
     One mode of trading, paper or live: its executor, the money it trades,
     the allocator that sizes its trades, the settler that pays them out, and
     the rebalancer that keeps its venues funded, paper or live.
-    books is a function returning the recorder's newest books.
+    books is a function returning the recorder's newest books, and sports
+    the sports whose games share the money.
     """
 
-    def __init__(self, mode, conn, books, notifier):
+    def __init__(self, mode, conn, books, notifier, sports):
         self.mode = mode
         if mode == "paper":
             self.cash = PaperBalances(conn)
-            self.allocator = allocate.Allocator(conn, self.cash)
+            self.allocator = allocate.Allocator(conn, self.cash, sports)
             self.executor = PaperExecutor(conn, self.cash, books, log, allocator=self.allocator)
             self.rebalancer = PaperRebalancer(conn, self.cash, log)
         elif mode == "live":
             self.cash = LiveBalances(log)
-            self.allocator = allocate.Allocator(conn, self.cash)
+            self.allocator = allocate.Allocator(conn, self.cash, sports)
             self.executor = LiveExecutor(conn, self.cash, books, log, allocator=self.allocator, notifier=notifier)
             self.rebalancer = LiveRebalancer(conn, self.cash, notifier, log)
         else:
@@ -166,13 +171,13 @@ class Session:
     the scanner only stores what it sees.
     """
 
-    def __init__(self, conn, sport, with_scanner=True, executors=("paper",)):
+    def __init__(self, conn, sports, with_scanner=True, executors=("paper",)):
         self.conn = conn
-        self.sport = sport
+        self.sports = sports
         self.notifier = notify.Notifier(conn, log)
         # The executors trade against the recorder's books, which exist once the recorder does, below.
-        self.desks = [Desk(mode, conn, lambda: self.recorder.books, self.notifier) for mode in executors] if with_scanner else []
-        self.scanner = scan.Scanner(conn, sport, log, [d.executor.signal for d in self.desks]) if with_scanner else None
+        self.desks = [Desk(mode, conn, lambda: self.recorder.books, self.notifier, sports) for mode in executors] if with_scanner else []
+        self.scanner = scan.Scanner(conn, sports, log, [d.executor.signal for d in self.desks]) if with_scanner else None
         self.recorder = Recorder(conn, self.scanner)
         self.streams = Streams(self.recorder)
         self.last_status = self.last_summary = time.time()
@@ -187,7 +192,7 @@ class Session:
             log(live_settings())
             if not notify.EMAIL_FILE.exists():
                 log(f"no email settings in {notify.EMAIL_FILE}, alerts are only logged and stored")
-        targets = load_targets(self.conn, self.sport)
+        targets = load_targets(self.conn, self.sports)
         log("recording " + ", ".join(f"{len(ids)} {venue}" for venue, ids in targets.items()) + " contracts")
         if not any(targets.values()):
             log("nothing to record, run pipeline.py first")
@@ -227,7 +232,7 @@ class Session:
         """
         After a catalog refresh, apply the new targets to the connections and the scanner.
         """
-        log(f"subscriptions {self.streams.update(load_targets(self.conn, self.sport))}")
+        log(f"subscriptions {self.streams.update(load_targets(self.conn, self.sports))}")
         if self.scanner:
             self.scanner.reload()
         for desk in self.desks:
@@ -249,6 +254,22 @@ class Session:
         log(self.recorder.status())
 
 
+def refresh_catalog(sports, log):
+    """
+    Refresh the catalog of each sport in turn and say what came of it, in one
+    line. A sport whose refresh fails is logged and keeps the catalog it had,
+    and the others refresh all the same.
+    """
+    results = []
+    for sport in sports:
+        try:
+            results.append(f"{sport}: {pipeline.refresh(sport, log)}")
+        except Exception as e:
+            log(with_traceback(f"{sport} catalog refresh failed ({e!r}), keeping its stored catalog", e))
+            results.append(f"{sport}: failed")
+    return "; ".join(results)
+
+
 async def run(conn, options):
     """
     Refresh the catalog, start a Session, tick it every config.TICK_SECONDS,
@@ -256,15 +277,15 @@ async def run(conn, options):
     that fails is logged and tried again at the next interval, so a bad
     fetch never stops the recording.
     """
-    sport, seconds, catalog_seconds = options.sport, options.seconds, options.catalog_seconds
-    log(f"starting {sport}, code {code_version()}")
+    sports, seconds, catalog_seconds = options.sports, options.seconds, options.catalog_seconds
+    log(f"starting {', '.join(sports)}, code {code_version()}")
     if catalog_seconds and options.refresh_at_start:
         log("refreshing catalog before starting")
         try:
-            log(await asyncio.to_thread(pipeline.refresh, sport, log))
+            log(await asyncio.to_thread(refresh_catalog, sports, log))
         except Exception as e:
             log(with_traceback(f"catalog refresh failed ({e!r}), starting with the stored catalog", e))
-    session = Session(conn, sport, options.scan, options.executors)
+    session = Session(conn, sports, options.scan, options.executors)
     session.start()
     started = last_catalog = time.time()
     refresh = None      # The background catalog refresh while one is running.
@@ -273,7 +294,7 @@ async def run(conn, options):
             await asyncio.sleep(config.TICK_SECONDS)
             session.tick()
             if catalog_seconds and refresh is None and time.time() - last_catalog >= catalog_seconds:
-                refresh = asyncio.create_task(asyncio.to_thread(pipeline.refresh, sport, log))
+                refresh = asyncio.create_task(asyncio.to_thread(refresh_catalog, sports, log))
             if refresh is not None and refresh.done():
                 if refresh.exception():
                     log(with_traceback(f"catalog refresh failed ({refresh.exception()!r}), keeping current subscriptions", refresh.exception()))
@@ -291,7 +312,7 @@ async def run(conn, options):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Stream the books of paired contracts, scan them, and trade.")
-    ap.add_argument("--sport", default="nfl")
+    ap.add_argument("--sport", default="nfl", help=f"the sports to trade, comma separated, from {', '.join(sorted(fetch.SPORTS))}")
     ap.add_argument("--seconds", type=int, default=0, help="stop after this many seconds, 0 means run forever")
     ap.add_argument("--catalog-minutes", type=int, default=CATALOG_MINUTES,
                     help="minutes between catalog refreshes, 0 means never refresh")
@@ -304,11 +325,14 @@ if __name__ == "__main__":
     ap.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
                     help="override a setting from engine/helper/config.py for this run, for example --set min_edge=0.03, repeatable")
     args = ap.parse_args()
+    sports = tuple(s.strip() for s in args.sport.split(",") if s.strip())
+    if not sports or any(s not in fetch.SPORTS for s in sports):
+        ap.error(f"--sport takes sports from {', '.join(sorted(fetch.SPORTS))}, not {args.sport!r}")
     try:
         config.override(args.set)
     except ValueError as e:
         ap.error(str(e))
-    options = RunOptions(sport=args.sport, seconds=args.seconds, catalog_seconds=args.catalog_minutes * 60,
+    options = RunOptions(sports=sports, seconds=args.seconds, catalog_seconds=args.catalog_minutes * 60,
                          refresh_at_start=not args.skip_refresh, scan=not args.no_scan,
                          executors=() if args.no_trade else EXECUTE[args.execute])
     sys.stdout.reconfigure(line_buffering=True)     # Print immediately even when output goes to a file.

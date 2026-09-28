@@ -48,21 +48,23 @@ def cap_range(mode):
 
 class Allocator:
     """
-    The cap on one trade for a pair, from the games sharing the pool right now.
+    The cap on one trade for a pair, from the games sharing the pool right
+    now. sports are the sports traded from this money, all when None.
     """
 
-    def __init__(self, conn, cash):
+    def __init__(self, conn, cash, sports=None):
         self.conn = conn
         self.cash = cash
+        self.sports = sports
         self.mode = cash.mode   # Only the trades of this mode hold this money.
         self.kickoffs = {}      # game key maps to kickoff.
         self.reload()
 
     def reload(self):
         """
-        Load the kickoff of every game the catalog pairs.
+        Load the kickoff of every game the catalog pairs in the sports traded.
         """
-        self.kickoffs = database.load_kickoffs(self.conn)
+        self.kickoffs = database.load_kickoffs(self.conn, self.sports)
 
     def active(self, now):
         """

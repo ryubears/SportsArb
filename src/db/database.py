@@ -252,14 +252,16 @@ def load_pairs(conn, sport):
     return {r["id"]: dict(r, members=members[r["id"]]) for r in conn.execute("SELECT * FROM pairs") if r["id"] in members}
 
 
-def load_kickoffs(conn):
+def load_kickoffs(conn, sports=None):
     """
-    Return {(sport, game_date, team_a, team_b): kickoff} for every game with a current pair, from its contracts' latest start time.
+    Return {(sport, game_date, team_a, team_b): kickoff} for every game with
+    a current pair, of the sports when given, from its contracts' latest start time.
     """
-    return {(s, d, a, b): kickoff for s, d, a, b, kickoff in conn.execute("""
+    kickoffs = {(s, d, a, b): kickoff for s, d, a, b, kickoff in conn.execute("""
         SELECT p.sport, p.game_date, p.team_a, p.team_b, MAX(c.start_time)
         FROM pairs p JOIN bets b ON b.pair_id = p.id JOIN contracts c ON c.venue = b.venue AND c.contract_id = b.contract_id
         WHERE p.game_date IS NOT NULL GROUP BY 1, 2, 3, 4 HAVING MAX(c.start_time) IS NOT NULL""")}
+    return {key: kickoff for key, kickoff in kickoffs.items() if sports is None or key[0] in sports}
 
 
 # GAPS

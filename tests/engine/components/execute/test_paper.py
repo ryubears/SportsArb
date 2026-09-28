@@ -271,7 +271,7 @@ def test_scanner_signals_once_per_episode(tmp_path):
     database.replace_bets(conn, "nfl", bets)
     database.replace_pairs(conn, "nfl", [Pair(PAIR["label"], "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, bets, [], sport="nfl")], NOW)
     calls = []
-    s = scan.Scanner(conn, "nfl", lambda m: None,
+    s = scan.Scanner(conn, ("nfl",), lambda m: None,
                      on_signals=[lambda pair, yes, no, edge, size, fee_infos, now: calls.append((pair["label"], round(edge, 2), now)) or True])
     latest = books()
     s.on_book("polymarket_us", "pm", latest, NOW)
@@ -300,7 +300,7 @@ def test_each_executor_is_offered_the_episode_until_it_takes_a_trade(tmp_path):
     database.replace_pairs(conn, "nfl", [Pair(PAIR["label"], "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, bets, [], sport="nfl")], NOW)
     live, paper = [], []
     busy = [True]           # The live executor turns the first moment down, say while its balance has not been read.
-    s = scan.Scanner(conn, "nfl", lambda m: None, on_signals=[lambda *args: live.append(args[-1]) or not busy[0],
+    s = scan.Scanner(conn, ("nfl",), lambda m: None, on_signals=[lambda *args: live.append(args[-1]) or not busy[0],
                                                              lambda *args: paper.append(args[-1]) or True])
     latest = books()
     s.on_book("polymarket_us", "pm", latest, NOW)
