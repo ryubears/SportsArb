@@ -68,7 +68,7 @@ class Settler:
         for t in trades:
             for leg in t.legs():
                 if leg.held:
-                    wanted.setdefault(leg.venue, set()).add(leg.contract)
+                    wanted.setdefault(leg.venue, set()).add(leg.contract_id)
         results = {}
         for venue, ids in wanted.items():
             lookup = list(database.event_ids(self.conn, venue, list(ids)).values()) if RESULTS_BY_EVENT[venue] else list(ids)

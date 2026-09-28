@@ -33,42 +33,10 @@ from common.log import on_failure
 from common.timeutil import now_iso, seconds_between
 from common.venues import VENUES
 from db import database
-from db.models import Ledger, Trade
+from db.models import Ledger, Leg, Trade
 from engine.components.allocate import cap_range, cash_floor
 from engine.helper import config, game
 from engine.helper.pricing import depth, ladder, reach, sell_ladder, sweep, trade_words
-
-
-@dataclass
-class Leg:
-    """
-    One side of a trade: the pair member it is held through, the order sent
-    for it, and what it holds after any flattening. Once stored, the trade's
-    legs read back as db.models.Leg, from Trade.leg().
-    """
-    side: str               # 'yes' or 'no', the side of the bet this leg holds.
-    member: dict            # The pair member, with its venue, contract_id, and polarity.
-    fee_info: dict          # The contract's fee schedule.
-    limit: float = 0.0      # The highest cost per contract the order accepts.
-    quantity: int = 0       # Contracts the order asks for.
-    held: int = 0           # Contracts held after the fill and any flattening.
-    cost: float = 0.0       # Dollars paid for what is held, including fees.
-
-    @property
-    def venue(self):
-        return self.member["venue"]
-
-    @property
-    def contract_id(self):
-        return self.member["contract_id"]
-
-    @property
-    def polarity(self):
-        return self.member["polarity"]
-
-    @property
-    def key(self):
-        return (self.member["venue"], self.member["contract_id"])
 
 
 @dataclass
@@ -309,9 +277,7 @@ class Executor:
         with an order of unknown outcome is left to a human.
         """
         for trade, *fee_infos in database.load_exposed_trades(self.conn, self.mode, self.clock()):
-            self.exposed[trade.id] = (trade, [Leg(leg.side, {"venue": leg.venue, "contract_id": leg.contract, "polarity": leg.polarity},
-                                                  fee_info, leg.limit, trade.quantity, leg.held, leg.cost)
-                                              for leg, fee_info in zip(trade.legs(), fee_infos)])
+            self.exposed[trade.id] = (trade, [dataclasses.replace(leg, fee_info=fee_info) for leg, fee_info in zip(trade.legs(), fee_infos)])
         if self.exposed:
             self.log(f"{self.mode} trades left exposed before this start, flattening again: {', '.join(map(str, self.exposed))}")
 
@@ -432,7 +398,8 @@ class Executor:
             return False
         if not self.in_play(pair, (yes, no), now):
             return False
-        legs = [Leg(side, member, fee_infos[(member["venue"], member["contract_id"])]) for side, member in (("yes", yes), ("no", no))]
+        legs = [Leg(side, m["venue"], m["contract_id"], m["polarity"], fee_info=fee_infos[(m["venue"], m["contract_id"])])
+                for side, m in (("yes", yes), ("no", no))]
         quantity, cap = self.quantity_for(pair, legs, now)
         if quantity < 1:
             return False

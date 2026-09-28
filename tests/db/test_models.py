@@ -2,7 +2,7 @@
 Tests for the helpers on the models.
 """
 
-from db.models import Settlement, Trade
+from db.models import Leg, Settlement, Trade
 
 
 def trade():
@@ -13,8 +13,9 @@ def trade():
 
 def test_a_trade_gives_each_leg_its_own_fields():
     yes, no = trade().legs()
-    assert yes == ("yes", "polymarket_us", "pm", "yes", 0.45, 10, 4.5) and yes.key == ("polymarket_us", "pm")
-    assert no == ("no", "kalshi", "k", "yes", 0.47, 0, 0.0) == trade().leg("no")
+    assert yes == Leg("yes", "polymarket_us", "pm", "yes", limit=0.45, quantity=10, held=10, cost=4.5) and yes.key == ("polymarket_us", "pm")
+    assert no == Leg("no", "kalshi", "k", "yes", limit=0.47, quantity=10) == trade().leg("no")
+    assert yes.fee_info is None                         # Not stored with the trade.
 
 
 def test_a_settlement_records_one_leg_at_a_time():

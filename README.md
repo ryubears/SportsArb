@@ -57,8 +57,8 @@ what.
   per contract. Positive edge is the arbitrage.
 - **Episode**: a stretch while a pair's edge stays positive. Each ends up
   as an **Opportunity** in the database.
-- **Leg**: one side of a trade: the member it goes through, the order
-  sent, and what it holds after.
+- **Leg**: one side of a trade: the contract it goes through, the order
+  sent, and what it holds after (`db/models.py`).
 - **Exposed**: a trade whose legs filled unevenly, so it holds more of
   one side than the other and is not a sure dollar any more.
 - **Flatten**: fix an exposed trade by selling the excess back or buying
