@@ -1,10 +1,11 @@
 """
-Every table of sport specific settings covers every sport the catalog fetches, and nothing else.
+Every table of sport specific settings covers every sport the catalog fetches, and nothing else,
+and the Kalshi series fetched are the ones the Kalshi classifier reads.
 """
 
 import pytest
 from catalog import fetch
-from catalog.classify import polymarket_us, teams
+from catalog.classify import kalshi, polymarket_us, teams
 from engine.helper import config
 
 
@@ -15,3 +16,8 @@ from engine.helper import config
 ])
 def test_table_covers_every_sport(name, table):
     assert set(table) == set(fetch.SPORTS), name
+
+
+def test_the_kalshi_series_fetched_are_the_ones_the_kalshi_classifier_reads():
+    fetched = [ticker for venues in fetch.SPORTS.values() for ticker in venues["kalshi"]["tickers"]]
+    assert sorted(fetched) == sorted({**kalshi.GAME_SERIES, **kalshi.PLAYER_SERIES})

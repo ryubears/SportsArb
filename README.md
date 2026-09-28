@@ -196,15 +196,16 @@ and writes.
 ### Catalog (`src/catalog`)
 
 **fetch.py** pulls a sport's open contracts from both venues into the
-`contracts` table: every NFL series, and for college football only Kalshi's
-game winner, spread, and total series, since nothing else there is
-classified. Kalshi is read through its public REST catalog, paged under the
-rate limit. Polymarket US is read through its gateway, one call per tag,
-deduplicated across tags.
+`contracts` table. Of the hundreds of series Kalshi lists for a sport it
+takes only those classified: the game winner, spread, and total, and the
+NFL's player props. Kalshi is read through its public REST catalog, paged
+under the rate limit. Polymarket US is read through its gateway, one call
+per tag, deduplicated across tags.
 
 **classify/** turns each contract into a `Bet`, a venue neutral statement
 of what the contract is about: kind, season, game date, the two teams, a
-subject, and a line. Each venue has its own parser, since the two describe
+subject, and a line. Only games are read, since only games are traded, so
+futures are left out. Each venue has its own parser, since the two describe
 the same thing very differently. Kalshi encodes the game in the ticker,
 `KXNFLGAME-26SEP24ATLGB-GB`, and the prop in a series code and a title like
 *Player: 100+ receiving yards*. Polymarket US encodes it in a slug and a
@@ -452,9 +453,9 @@ venue's feed, which stops with it. That trades the NFL on paper only.
 `--execute both` to the service's command. The venue API keys live in
 `data/`, which is gitignored, and are copied to the instance by `scp` only.
 Deploying is `git pull` on the instance, the tests, and a service restart
-only if they pass, which refreshes the catalog for about 80 seconds and
-then resubscribes. Each run logs the commit it runs and every setting when
-it starts, so the log says what produced its results. The instance was
+only if they pass, which refreshes the catalog for about 10 seconds a sport
+and then resubscribes. Each run logs the commit it runs and every setting
+when it starts, so the log says what produced its results. The instance was
 first placed in Mexico to reach polymarket.com, which was then dropped as a
 venue for legal reasons in favor of Polymarket US, and moved to us-east-1.
 

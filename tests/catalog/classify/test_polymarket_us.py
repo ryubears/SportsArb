@@ -49,30 +49,10 @@ def test_college_games_use_cfb_slugs_and_the_venues_own_codes():
     assert college("nfl-phi-ten-2026-09-20", "aec-nfl-phi-ten-2026-09-20", "football_team_full_game_winner") is None
 
 
-def test_futures():
-    division = polymarket_us.classify(row("nfl-afceast-2027-01-10-w", "tec-nfl-afceast-2027-01-10-w-buf", "futures", start_time=None))
-    champion = polymarket_us.classify(row("nfl-champ-2027-02-14-w", "tec-nfl-champ-2027-02-14-w-buf", "futures", start_time=None))
-    seed = polymarket_us.classify(row("nfl-afc1seed-2027-01-10", "tec-nfl-afc1seed-2027-01-10-buf", "futures", start_time=None))
-    assert bet_fields(division) == ("division_champion", 2027, None, None, None, "BUF", None, "yes")
-    assert bet_fields(champion) == ("champion", 2027, None, None, None, "BUF", None, "yes")
-    assert bet_fields(seed) == ("conf_top_seed", 2027, None, None, None, "BUF", None, "yes")
-
-
-def test_futures_with_glued_suffixes_and_qualifier():
-    champion = polymarket_us.classify(row("nfl-champ-2027-02-14-w", "tec-nfl-champ-2027-02-14-w-bufbil", "futures", start_time=None))
-    packers = polymarket_us.classify(row("nfl-champ-2027-02-14-w", "tec-nfl-champ-2027-02-14-w-gbpac", "futures", start_time=None))
-    qualifier = polymarket_us.classify(row("nfl-afc-2027-01-24-champq", "tec-nfl-afc-2027-01-24-champq-kc", "futures", start_time=None))
-    assert (champion.kind, champion.subject) == ("champion", "BUF")
-    assert (packers.kind, packers.subject) == ("champion", "GB")
-    assert bet_fields(qualifier) == ("reach_conf_final", 2027, None, None, None, "KC", None, "yes")
-
-
-def test_glued_codes_cover_every_odd_team_name():
-    assert polymarket_us.glued_code("San Francisco 49ers") == "saners"
-    assert polymarket_us.glued_code("Kansas City Chiefs") == "kanchi"
-    assert polymarket_us.glued_code("Los Angeles Chargers") == "loscha"
-    assert [polymarket_us.team_suffix(s, "nfl") for s in ("kanchi", "loscha", "losram", "grepac", "saners", "tambuc", "bufbil", "kc", "gb")] == \
-        ["KC", "LAC", "LAR", "GB", "SF", "TB", "BUF", "KC", "GB"]
+def test_futures_are_left_out():
+    assert polymarket_us.classify(row("nfl-champ-2027-02-14-w", "tec-nfl-champ-2027-02-14-w-buf", "futures", start_time=None)) is None
+    assert polymarket_us.classify(row("nfl-afceast-2027-01-10-w", "tec-nfl-afceast-2027-01-10-w-buf", "futures", start_time=None)) is None
+    assert polymarket_us.classify(row("cfb-champ-2027-01-25-w", "tec-cfb-champ-2027-01-25-w-nd", "futures", start_time=None) | {"sport": "ncaaf"}) is None
 
 
 def test_skips_props_and_awards():

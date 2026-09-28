@@ -62,15 +62,10 @@ def test_college_games_read_like_the_nfls():
     assert bet_fields(total) == ("total", 2027, "2026-10-03", "BC", "SMU", None, 43.5, "yes")
 
 
-def test_futures():
-    champion = kalshi.classify(row("KXSB", "KXSB-27", "KXSB-27-BUF"))
-    division = kalshi.classify(row("KXNFLAFCEAST", "KXNFLAFCEAST-27", "KXNFLAFCEAST-27-BUF"))
-    seed = kalshi.classify(row("KXNFL1SEED", "KXNFL1SEED-AFC26", "KXNFL1SEED-AFC26-BUF"))
-    wins = kalshi.classify(row("KXNFLWINS", "KXNFLWINS-27BUF", "KXNFLWINS-27BUF-10", line=9.5))
-    assert bet_fields(champion) == ("champion", 2027, None, None, None, "BUF", None, "yes")
-    assert bet_fields(division) == ("division_champion", 2027, None, None, None, "BUF", None, "yes")
-    assert bet_fields(seed) == ("conf_top_seed", 2027, None, None, None, "BUF", None, "yes")
-    assert bet_fields(wins) == ("season_wins", 2027, None, None, None, "BUF", 9.5, "yes")
+def test_futures_are_left_out():
+    assert kalshi.classify(row("KXSB", "KXSB-27", "KXSB-27-BUF")) is None
+    assert kalshi.classify(row("KXNFLAFCEAST", "KXNFLAFCEAST-27", "KXNFLAFCEAST-27-BUF")) is None
+    assert kalshi.classify(row("KXNFLWINS", "KXNFLWINS-27BUF", "KXNFLWINS-27BUF-10", line=9.5)) is None
 
 
 def test_skips_unknown_series_and_missing_lines():

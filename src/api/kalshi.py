@@ -96,12 +96,12 @@ def paged(path, params, key):
         time.sleep(SLEEP)
 
 
-def fetch_series(prefixes, tickers=()):
+def fetch_series(tickers):
     """
-    Sports series whose ticker starts with one of the prefixes, or is listed exactly in tickers.
+    The sports series with the tickers, with their fee settings.
     """
     all_series = paged("/series", {"category": "Sports", "limit": 200}, "series")
-    return [s for s in all_series if s["ticker"].startswith(tuple(prefixes)) or s["ticker"] in tickers]
+    return [s for s in all_series if s["ticker"] in tickers]
 
 
 def fetch_events(series_ticker):
@@ -117,8 +117,9 @@ def fetch_events(series_ticker):
 def close_time(m):
     """
     When the contract stops trading, or settles if the venue expects that
-    sooner. Kalshi's close_time on futures can be a placeholder years out,
-    while expected_expiration_time carries the real settlement date.
+    sooner. A game's close_time is days after it, while its
+    expected_expiration_time is Kalshi's guess at the final whistle, three
+    hours after kickoff, which many games outlast.
     """
     times = [t for t in (iso(m.get("close_time")), iso(m.get("expected_expiration_time"))) if t]
     return min(times) if times else None
@@ -138,12 +139,12 @@ def strict_line(m):
     return line
 
 
-def contracts(sport, prefixes, tickers=()):
+def contracts(sport, tickers):
     """
-    One Contract per Kalshi market, meaning its Yes side.
+    One Contract per open market of the series with the tickers, meaning its Yes side.
     """
     result = []
-    for series in fetch_series(prefixes, tickers):
+    for series in fetch_series(tickers):
         fee_info = {
             "fee_type": series.get("fee_type"),
             "fee_multiplier": series.get("fee_multiplier"),

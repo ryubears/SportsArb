@@ -1,25 +1,22 @@
 """
 Turn Polymarket US contracts into Bets.
 
-Every contract is a market's long side. The event slug names the game or
-the future, the market slug ends with the team for futures, and the line
-is the away team's handicap for spreads. The venue's titles on positive
-spread lines contradict its own prices, so only the slug and the signed
-line are trusted. Player props name the player in the title and carry an
-'at least N' line, restated as the strict threshold N minus a half. This
-is the only file that knows Polymarket US's slug layout.
+Every contract is a market's long side. The event slug names the game,
+and the line is the away team's handicap for spreads. The venue's titles
+on positive spread lines contradict its own prices, so only the slug and
+the signed line are trusted. Player props name the player in the title
+and carry an 'at least N' line, restated as the strict threshold N minus
+a half. Only games are read, since only games are traded, so futures are
+left out. This is the only file that knows Polymarket US's slug layout.
 """
 
 import re
-from catalog.classify.teams import ALIASES, player_key, team_from_code
+from catalog.classify.teams import player_key, team_from_code
 from common.timeutil import eastern_date, season_from_date
 from db.models import Bet
 
 EVENT_PREFIX = {"nfl": "nfl", "ncaaf": "cfb"}     # How each sport's event slugs start.
 GAME_EVENTS = {sport: re.compile(rf"^{prefix}-([a-z]+)-([a-z]+)-\d{{4}}-\d{{2}}-\d{{2}}$") for sport, prefix in EVENT_PREFIX.items()}
-# The futures are the NFL's.
-FUTURE_EVENT = re.compile(r"^nfl-([a-z0-9]+)-(\d{4})-\d{2}-\d{2}(?:-w)?$")
-QUALIFIER_EVENT = re.compile(r"^nfl-(afc|nfc)-(\d{4})-\d{2}-\d{2}-champq$")
 GAME_KINDS = {
     "football_team_full_game_winner": "game_winner",
     "football_team_full_game_spread": "spread",
@@ -41,13 +38,6 @@ PLAYER_KINDS = {
     "football_player_longest_reception": "player_longest_reception",
 }
 PLAYER_TITLE = re.compile(r"^Will (.+?) (?:record|score|throw) ")     # 'Will Bijan Robinson record 40+ receiving yards?'.
-FUTURE_KINDS = {
-    "champ": "champion",
-    "afcchamp": "conf_champion", "nfcchamp": "conf_champion",
-    "afc1seed": "conf_top_seed", "nfc1seed": "conf_top_seed",
-    "afceast": "division_champion", "afcwest": "division_champion", "afcnorth": "division_champion", "afcsouth": "division_champion",
-    "nfceast": "division_champion", "nfcwest": "division_champion", "nfcnorth": "division_champion", "nfcsouth": "division_champion",
-}
 
 
 def team(code, sport):
@@ -55,37 +45,6 @@ def team(code, sport):
     The sport's team a Polymarket US slug code names, or None.
     """
     return team_from_code(code, sport, "polymarket_us")
-
-
-def glued_code(full_name):
-    """
-    Some slugs glue the first three letters of the city to the first three
-    of the nickname, with digits dropped, so 'San Francisco 49ers' becomes
-    'saners' and 'Kansas City Chiefs' becomes 'kanchi'.
-    """
-    def letters(text):
-        return "".join(ch for ch in text if ch.isalpha()).lower()
-
-    *city, nickname = full_name.split()
-    return letters("".join(city))[:3] + letters(nickname)[:3]
-
-
-GLUED_TO_TEAM = {sport: {glued_code(entry["names"][0]): code for code, entry in teams.items()} for sport, teams in ALIASES.items()}
-
-
-def team_suffix(suffix, sport):
-    """
-    The sport's team a market slug ends with. Some events use the plain code,
-    others the glued form, see glued_code. Three letter codes are tried
-    before two letter ones, which is unambiguous.
-    """
-    if suffix in GLUED_TO_TEAM.get(sport, {}):
-        return GLUED_TO_TEAM[sport][suffix]
-    for candidate in (suffix, suffix[:3], suffix[:2]):
-        found = team(candidate, sport)
-        if found:
-            return found
-    return None
 
 
 def classify(row):
@@ -124,16 +83,4 @@ def classify(row):
                 return Bet(kind=kind, subject=away, line=-row["line"], polarity="yes", **common)
             return Bet(kind=kind, subject=home, line=row["line"], polarity="no", **common)
         return Bet(kind=kind, subject=None, line=row["line"], polarity="yes", **common)
-    m = FUTURE_EVENT.match(row["event_id"])
-    if m and m.group(1) in FUTURE_KINDS:
-        kind = FUTURE_KINDS[m.group(1)]
-    else:
-        m = QUALIFIER_EVENT.match(row["event_id"])
-        if not m:
-            return None
-        kind = "reach_conf_final"
-    subject = team_suffix(row["contract_id"].rsplit("-", 1)[-1], sport)
-    if not subject:
-        return None
-    return Bet(kind=kind, season=int(m.group(2)), game_date=None, team_a=None, team_b=None,
-               subject=subject, line=None, polarity="yes", **base)
+    return None

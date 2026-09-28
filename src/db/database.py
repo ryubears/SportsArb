@@ -156,16 +156,16 @@ def event_ids(conn, venue, contract_ids):
 def load_recording_targets(conn, sport, now, horizon, venues, game_started_after):
     """
     The contracts to record right now, as {venue: [contract_id, ...]}: every
-    contract in a pair that is either a future or a game on or before the
-    horizon's date, for as long as it can trade. A game's contracts on both
-    venues are recorded while the game may still be in play, meaning it
-    kicked off after game_started_after, whatever their close times say.
-    The kickoff is the latest any of the game's contracts gives, which is
-    Polymarket US's, since Kalshi gives none. Polymarket US leaves a game's
-    contracts open two weeks after it, and Kalshi's close time is its guess
-    at the final whistle, three hours after kickoff, which nearly every
-    college game and most NFL games outlast. A future, or a game no contract
-    gives the kickoff of, is recorded until its close time.
+    contract in a pair on a game no later than the horizon's date, for as
+    long as it can trade. A game's contracts on both venues are recorded
+    while the game may still be in play, meaning it kicked off after
+    game_started_after, whatever their close times say. The kickoff is the
+    latest any of the game's contracts gives, which is Polymarket US's,
+    since Kalshi gives none. Polymarket US leaves a game's contracts open two
+    weeks after it, and Kalshi's close time is its guess at the final
+    whistle, three hours after kickoff, which nearly every college game and
+    most NFL games outlast. A contract with no game, or on a game no
+    contract gives the kickoff of, is recorded until its close time.
     """
     targets = {}
     for venue in venues:

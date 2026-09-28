@@ -44,7 +44,8 @@ def in_play_or_settling(kickoff, now, sport):
 
 def resolution_time(start_time, close_time, sport):
     """
-    When a contract of the sport pays out. Games pay once the venues settle after the final whistle. Futures pay near their close time.
+    When a contract of the sport pays out: once the venues settle after the final whistle, or, for a contract whose
+    venue gives no kickoff, like Kalshi's, at its close time. A pair pays at the latest of its members', so the kickoff rules.
     """
     if start_time:
         return shift(start_time, hours=payout_hours(sport))

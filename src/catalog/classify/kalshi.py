@@ -1,11 +1,12 @@
 """
 Turn Kalshi contracts into Bets.
 
-The series ticker says the kind, the event ticker holds the season or the
-game, and the market ticker holds the team. College football's game series
-share the NFL's layout, with team codes of two to five letters. Player
-props name the player in the title, before the colon. This is the only
-file that knows Kalshi's ticker layout.
+The series ticker says the kind, the event ticker holds the game, and the
+market ticker holds the team. College football's game series share the
+NFL's layout, with team codes of two to five letters. Player props name
+the player in the title, before the colon. Only games are read, since
+only games are traded, so futures are left out. This is the only file
+that knows Kalshi's ticker layout.
 """
 
 import re
@@ -15,15 +16,6 @@ from datetime import datetime
 from db.models import Bet
 
 GAME_DATE = re.compile(r"^(\d{2})([A-Z]{3})(\d{2})([A-Z]+)$")
-FUTURE_SERIES = {
-    "KXSB": "champion",
-    "KXNFLAFCCHAMP": "conf_champion",
-    "KXNFLNFCCHAMP": "conf_champion",
-    "KXNFL1SEED": "conf_top_seed",
-    "KXNFLPLAYOFF": "make_playoffs",
-    "KXNFLWINS": "season_wins",
-}
-DIVISION_SERIES = re.compile(r"^KXNFL(AFC|NFC)(EAST|WEST|NORTH|SOUTH)$")
 GAME_SERIES = {
     "KXNFLGAME": "game_winner", "KXNFLSPREAD": "spread", "KXNFLTOTAL": "total",
     "KXNCAAFGAME": "game_winner", "KXNCAAFSPREAD": "spread", "KXNCAAFTOTAL": "total",
@@ -45,7 +37,6 @@ PLAYER_SERIES = {
     "KXNFLLONGREC": "player_longest_reception",
 }
 PLAYER_TITLE = re.compile(r"^(.+?): ")     # 'Bijan Robinson: 100+ receiving yards'.
-EVENT_TAIL = re.compile(r"^([A-Z]*)(\d{2})([A-Z]*)$")
 
 
 def team(code, sport):
@@ -119,23 +110,4 @@ def classify(row):
             return None
         return Bet(kind=kind, season=season_from_date(game_date), game_date=game_date, team_a=away, team_b=home,
                    subject=player_key(m.group(1)), line=line, polarity="yes", **base)
-
-    kind = FUTURE_SERIES.get(series) or ("division_champion" if DIVISION_SERIES.match(series) else None)
-    if not kind:
-        return None
-    m = EVENT_TAIL.match(event_tail)
-    if not m:
-        return None
-    prefix, yy, suffix = m.groups()
-    season = 2000 + int(yy)
-    if series == "KXNFL1SEED":
-        # This series names the year the season starts, for example 'AFC26'.
-        season += 1
-    subject = team(suffix, sport) or team(market_tail.rstrip("0123456789"), sport)
-    if not subject:
-        return None
-    line = row["line"] if kind == "season_wins" else None
-    if kind == "season_wins" and line is None:
-        return None
-    return Bet(kind=kind, season=season, game_date=None, team_a=None, team_b=None,
-               subject=subject, line=line, polarity="yes", **base)
+    return None
