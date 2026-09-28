@@ -156,11 +156,14 @@ def event_ids(conn, venue, contract_ids):
 def load_recording_targets(conn, sport, now, horizon, venues, game_started_after):
     """
     The contracts to record right now, as {venue: [contract_id, ...]}: every
-    contract in a pair that is still open and is either a future or a game
-    on or before the horizon's date. A game's contract also counts as open
-    while its game may still be in play, meaning it kicked off after
-    game_started_after, since some venues close a game's contracts at
-    kickoff yet trade them through the game.
+    contract in a pair that is either a future or a game on or before the
+    horizon's date, for as long as it can trade. A contract whose venue gives
+    its game's kickoff is recorded while the game may still be in play,
+    meaning it kicked off after game_started_after, whatever its close time
+    says: some venues close a game's contracts at kickoff yet trade them
+    through the game, and Polymarket US leaves them open two weeks after
+    it. Any other contract, a future or a Kalshi game contract, is recorded
+    until its close time.
     """
     targets = {}
     for venue in venues:
@@ -169,9 +172,9 @@ def load_recording_targets(conn, sport, now, horizon, venues, game_started_after
             JOIN bets b ON b.venue = c.venue AND b.contract_id = c.contract_id
             JOIN pairs p ON p.id = b.pair_id
             WHERE c.venue = ? AND c.sport = ?
-              AND (c.close_time IS NULL OR c.close_time > ? OR (c.start_time IS NOT NULL AND c.start_time > ?))
+              AND (c.start_time > ? OR (c.start_time IS NULL AND (c.close_time IS NULL OR c.close_time > ?)))
               AND (b.game_date IS NULL OR b.game_date <= ?)
-        """, (venue, sport, now, game_started_after, horizon[:10]))
+        """, (venue, sport, game_started_after, now, horizon[:10]))
         targets[venue] = [r[0] for r in rows]
     return targets
 
