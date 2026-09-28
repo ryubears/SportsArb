@@ -390,24 +390,25 @@ what a tax return needs. A trade still exposed on one side is settled as it
 stands, each leg paid for what it holds. The settler skips a trade while an
 order to flatten it is in flight, and once a trade settles the executor
 stops flattening it. The venue holding a winning leg receives the whole
-dollar, so the balances drift apart. On Tuesdays, once Monday night's
-trades have settled, the `PaperRebalancer` compares the venues and, when
-one sits more than 25% above the average, sends the excess to the other as
-a `Transfer` that takes four business days, during which the money is on
-neither venue.
+dollar, so the balances drift apart. Trades are open most of the time, so
+the venues are compared as they stand: each counts its free cash plus what
+open trades hold on it at cost, which is about what those trades will pay
+back there. On Tuesdays the `PaperRebalancer` compares them and, when one
+sits more than 20% above the average, sends the excess to the other, as
+much of it as is free above the floor, as a `Transfer` that takes four
+business days, during which the money is on neither venue.
 
 Live money has no ledger of ours. `LiveBalances` reads each venue's balance
 every 30 seconds, and at once after a payout, and applies what our own
-fills move in between, so a burst of trades does not spend the same
-dollars twice. Nothing is traded before the first reading. The settler
-settles live trades as it does paper ones, storing each as a `live`
-`Settlement`, while the venue pays out on its own. Live money is moved
-between venues by hand, so instead of transferring, the `LiveRebalancer`
-emails when, with no live trade open, one venue sits more
-than 25% above the average, saying how much to move where, and again each
-day while they stay apart. `notify.py` stores every alert in the alerts
-table and emails it in a background thread through the SMTP server in
-`data/email.json`.
+fills move in between, so a burst of trades does not spend the same dollars
+twice. Nothing is traded before the first reading. The settler settles live
+trades as it does paper ones, storing each as a `live` `Settlement`, while
+the venue pays out on its own. Live money is moved between venues by hand,
+so instead of transferring, the `LiveRebalancer` emails when one venue,
+counted the same way, sits more than 20% above the average, saying how much
+of its free cash to move where, and again each day while they stay apart.
+`notify.py` stores every alert in the alerts table and emails it in a
+background thread through the SMTP server in `data/email.json`.
 
 ### Tools
 

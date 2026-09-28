@@ -353,15 +353,6 @@ def load_exposed_trades(conn, mode, now):
     return out
 
 
-def has_open_trades(conn, mode):
-    """
-    Whether any trade of one mode is still in flight or holds contracts that have not settled.
-    """
-    return conn.execute("""
-        SELECT 1 FROM trades t WHERE t.mode = ? AND (t.status = 'sent' OR t.yes_held + t.no_held > 0)
-          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id) LIMIT 1""", (mode,)).fetchone() is not None
-
-
 def load_open_cost(conn, mode):
     """
     Dollars paid for what the unsettled trades of one mode still hold.
@@ -370,6 +361,21 @@ def load_open_cost(conn, mode):
         SELECT COALESCE(SUM(t.yes_cost + t.no_cost), 0) FROM trades t
         WHERE t.mode = ? AND t.yes_held + t.no_held > 0
           AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""", (mode,)).fetchone()[0]
+
+
+def load_open_cost_by_venue(conn, mode):
+    """
+    Dollars paid for what the unsettled trades of one mode still hold, on each venue, as {venue: dollars}.
+    """
+    held = {}
+    for venue, cost in conn.execute("""
+        SELECT t.yes_venue, t.yes_cost FROM trades t WHERE t.mode = ? AND t.yes_held > 0
+          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)
+        UNION ALL
+        SELECT t.no_venue, t.no_cost FROM trades t WHERE t.mode = ? AND t.no_held > 0
+          AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""", (mode, mode)):
+        held[venue] = held.get(venue, 0.0) + cost
+    return held
 
 
 def load_open_game_costs(conn, mode):

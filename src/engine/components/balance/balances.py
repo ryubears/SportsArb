@@ -43,15 +43,6 @@ class Balances:
         """
         raise NotImplementedError
 
-    def largest(self):
-        return max(self.amounts, key=self.amounts.get)
-
-    def smallest(self):
-        return min(self.amounts, key=self.amounts.get)
-
-    def average(self):
-        return sum(self.amounts.values()) / len(self.amounts)
-
     def summary(self):
         """
         The balances in one phrase, for log lines.
