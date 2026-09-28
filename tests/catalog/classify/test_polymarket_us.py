@@ -34,6 +34,21 @@ def test_spread_line_is_the_away_handicap():
     assert bet_fields(underdog) == ("spread", 2027, "2026-09-20", "PHI", "TEN", "TEN", 17.5, "no")
 
 
+def test_college_games_use_cfb_slugs_and_the_venues_own_codes():
+    def college(event, slug, market_type, line=None):
+        return polymarket_us.classify(row(event, slug, market_type, line, start_time="2026-10-03T19:30:00+00:00") | {"sport": "ncaaf"})
+
+    winner = college("cfb-boscol-smu-2026-10-03", "aec-cfb-boscol-smu-2026-10-03", "football_team_full_game_winner")
+    spread = college("cfb-boscol-smu-2026-10-03", "asc-cfb-boscol-smu-2026-10-03-pos-9pt5", "football_team_full_game_spread", 9.5)
+    total = college("cfb-boscol-smu-2026-10-03", "tsc-cfb-boscol-smu-2026-10-03-total-43pt5", "football_team_full_game_total", 43.5)
+    aztecs = college("cfb-txst-sdst-2026-10-03", "aec-cfb-txst-sdst-2026-10-03", "football_team_full_game_winner")
+    assert bet_fields(winner) == ("game_winner", 2027, "2026-10-03", "BC", "SMU", "BC", None, "yes")
+    assert bet_fields(spread) == ("spread", 2027, "2026-10-03", "BC", "SMU", "SMU", 9.5, "no")      # Kalshi's SMU by over 9.5, as its No.
+    assert bet_fields(total) == ("total", 2027, "2026-10-03", "BC", "SMU", None, 43.5, "yes")
+    assert (aztecs.team_a, aztecs.team_b) == ("TXST", "SDSU")        # sdst is San Diego State here, SDST South Dakota State on Kalshi.
+    assert college("nfl-phi-ten-2026-09-20", "aec-nfl-phi-ten-2026-09-20", "football_team_full_game_winner") is None
+
+
 def test_futures():
     division = polymarket_us.classify(row("nfl-afceast-2027-01-10-w", "tec-nfl-afceast-2027-01-10-w-buf", "futures", start_time=None))
     champion = polymarket_us.classify(row("nfl-champ-2027-02-14-w", "tec-nfl-champ-2027-02-14-w-buf", "futures", start_time=None))

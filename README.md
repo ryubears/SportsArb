@@ -1,11 +1,11 @@
 # SportsArb
 
 A bot that looks for cross-venue arbitrage between the two US prediction
-markets that list NFL contracts, Kalshi and Polymarket US, and trades what
-it finds, on paper, with real money, or both at once. When the cheapest
-way to hold *yes* on one venue and the cheapest way to hold *no* on the
-other add up to less than a dollar after fees, buying both locks in the
-difference whatever the game does.
+markets that list NFL and college football contracts, Kalshi and Polymarket
+US, and trades what it finds, on paper, with real money, or both at once.
+When the cheapest way to hold *yes* on one venue and the cheapest way to
+hold *no* on the other add up to less than a dollar after fees, buying both
+locks in the difference whatever the game does.
 
 The whole thing runs on an EC2 instance in us-east-1, as one process with
 each venue's feed in a child process of its own: it follows every order
@@ -20,10 +20,10 @@ venues funded. By default the orders are paper. With `--execute live` or
 Everything lives in `src/`, in two programs.
 
 **The catalog** (`src/catalog`) works out what can be traded. It fetches
-every open NFL market from both venues, restates each one as a `Bet` in
-venue neutral terms, and pairs up the bets both venues list. The pairs go
-into the database. You can run it on its own (`python3 -m
-catalog.pipeline`), and the live process reruns it every hour.
+every open NFL and college football market from both venues, restates each
+one as a `Bet` in venue neutral terms, and pairs up the bets both venues
+list. The pairs go into the database. You can run it on its own
+(`python3 -m catalog.pipeline`), and the live process reruns it every hour.
 
 **The live process** (`src/engine/run.py`) trades the pairs. It follows
 every paired contract's order book, prices each pair as its books change,
@@ -195,10 +195,12 @@ and writes.
 
 ### Catalog (`src/catalog`)
 
-**fetch.py** pulls every open NFL contract from both venues into the
-`contracts` table. Kalshi is read through its public REST catalog, paged
-under the rate limit. Polymarket US is read through its gateway, one
-call per tag, deduplicated across tags.
+**fetch.py** pulls a sport's open contracts from both venues into the
+`contracts` table: every NFL series, and for college football only Kalshi's
+game winner, spread, and total series, since nothing else there is
+classified. Kalshi is read through its public REST catalog, paged under the
+rate limit. Polymarket US is read through its gateway, one call per tag,
+deduplicated across tags.
 
 **classify/** turns each contract into a `Bet`, a venue neutral statement
 of what the contract is about: kind, season, game date, the two teams, a
@@ -209,10 +211,14 @@ the same thing very differently. Kalshi encodes the game in the ticker,
 title like *Will Bijan Robinson record 100+ rushing yards?*. Team aliases
 are resolved through `teams.py` and `aliases/`, which has a file for each
 sport, since leagues reuse codes (DAL is the Cowboys and the Mavericks).
-Player names are normalized to a key that ignores punctuation and suffixes,
-and lines are made strict, so *100+* on one venue and *over 99.5* on the
-other become the same bet. Contracts no parser understands are counted and
-left out.
+College football's file lists each venue's codes apart, since the venues
+give some codes to different schools: SDST is South Dakota State on Kalshi
+and San Diego State on Polymarket US. Its Kalshi codes run from two letters
+to five, so a ticker's two glued codes are split every way, and one that
+splits into two teams more than one way is left out. Player names are
+normalized to a key that ignores punctuation and suffixes, and lines are
+made strict, so *100+* on one venue and *over 99.5* on the other become the
+same bet. Contracts no parser understands are counted and left out.
 
 **match.py** groups a sport's bets whose identity agrees into a `Pair`,
 whose label starts with the sport, for example
@@ -267,16 +273,19 @@ keeps its venues funded. `--execute` picks the desks: `paper`, the default,
 so measures how far the paper fills are from real ones. The same loop
 starts the hourly catalog refresh in a background thread and applies the
 result to the live connections. One run trades every sport given to
-`--sport`, comma separated, since the money is one pool and a second
-process would spend the same dollars. How long a game lasts, which decides
-when it is traded and when it pays out, is set for each sport in
-`GAME_HOURS`. The pieces it wires together are in `engine/components/`, and
-what they share is in `engine/helper/`: the settings, game timing, pricing,
-and fees.
+`--sport`, comma separated as in `--sport nfl,ncaaf`, since the money is
+one pool and a second process would spend the same dollars. How long a game
+lasts, which decides when it is traded and when it pays out, is set for
+each sport in `GAME_HOURS`. The pieces it wires together are in
+`engine/components/`, and what they share is in `engine/helper/`: the
+settings, game timing, pricing, and fees.
 
 **record.py** holds the newest book for every paired contract in memory,
 five levels a side, which the scanner prices and the executors trade
 against. Books are not stored, only the gaps when a venue's feed was down.
+A game's contracts on both venues are followed until five hours after
+kickoff, whatever their close times say, since Kalshi's close is its guess
+at the final whistle, three hours in, which most games outlast.
 **feeds.py** holds a venue's connections, one, or several when the venue
 caps how much one connection may carry, and applies catalog changes to them
 in place, each new contract going to a connection with room. Each venue's
@@ -438,16 +447,16 @@ matching engine runs in, where a signed round trip is about 35 ms to
 Kalshi and 30 ms to Polymarket US. A systemd service, `sportsarb-recorder`,
 starts `python3 -m engine.run --sport nfl` from `~/SportsArb/src` on boot
 and restarts it on any exit, and the process starts a child for each
-venue's feed, which stops with it. That trades on paper only. Going live
-means adding `--execute both` to the service's command. The venue API keys
-live in `data/`, which is gitignored, and are copied to the instance by
-`scp` only. Deploying is `git pull` on the instance, the tests, and a
-service restart only if they pass, which refreshes the catalog for about
-80 seconds and then resubscribes. Each run logs the commit it runs and
-every setting when it starts, so the log says what produced its results.
-The instance was first placed in Mexico to reach polymarket.com, which was
-then dropped as a venue for legal reasons in favor of Polymarket US, and
-moved to us-east-1.
+venue's feed, which stops with it. That trades the NFL on paper only.
+`--sport nfl,ncaaf` adds college football, and going live means adding
+`--execute both` to the service's command. The venue API keys live in
+`data/`, which is gitignored, and are copied to the instance by `scp` only.
+Deploying is `git pull` on the instance, the tests, and a service restart
+only if they pass, which refreshes the catalog for about 80 seconds and
+then resubscribes. Each run logs the commit it runs and every setting when
+it starts, so the log says what produced its results. The instance was
+first placed in Mexico to reach polymarket.com, which was then dropped as a
+venue for legal reasons in favor of Polymarket US, and moved to us-east-1.
 
 `commands.txt` holds the commands used to check the data, deploy, and
 operate the instance, with the instance's address, key, and ids written
@@ -559,18 +568,19 @@ python3 -m catalog.pipeline --sport nfl
 python3 -m engine.run --sport nfl
 ```
 
-`--no-trade` scans without trading, `--no-scan` only records, and
-`--seconds 120` runs a short test. `--execute live` trades with real money
-and `--execute both` trades the same signals on paper and for real. The
-settings a run is tuned by, such as the minimum edge, the trade caps, and
-the starting balance, are in `src/engine/helper/config.py`, and `--set
-NAME=VALUE` overrides one for a run, for example `python3 -m engine.run
---sport nfl --set min_edge=0.03`. The run logs every setting when it
-starts. The streams need venue keys in `data/`: `kalshi_key_id.txt` and
-`kalshi_private_key.pem` for Kalshi, `polymarket_us_key_id.txt` and
-`polymarket_us_secret_key.txt` for Polymarket US. Live trading uses the
-same keys, which need trading permission, and emails its alerts through
-`data/email.json`:
+`--sport ncaaf` builds or runs college football, and `--sport nfl,ncaaf`
+runs both from one pool of money. `--no-trade` scans without trading,
+`--no-scan` only records, and `--seconds 120` runs a short test.
+`--execute live` trades with real money and `--execute both` trades the
+same signals on paper and for real. The settings a run is tuned by, such as
+the minimum edge, the trade caps, and the starting balance, are in
+`src/engine/helper/config.py`, and `--set NAME=VALUE` overrides one for a
+run, for example `python3 -m engine.run --sport nfl --set min_edge=0.03`.
+The run logs every setting when it starts. The streams need venue keys in
+`data/`: `kalshi_key_id.txt` and `kalshi_private_key.pem` for Kalshi,
+`polymarket_us_key_id.txt` and `polymarket_us_secret_key.txt` for
+Polymarket US. Live trading uses the same keys, which need trading
+permission, and emails its alerts through `data/email.json`:
 
 ```json
 {"host": "smtp.gmail.com", "port": 587, "user": "me@gmail.com",

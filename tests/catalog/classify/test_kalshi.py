@@ -31,6 +31,14 @@ def test_split_codes_handles_two_and_three_letter_codes():
     assert kalshi.split_codes("XXYY", "nfl") == (None, None)
 
 
+def test_split_codes_takes_college_codes_of_any_length_and_refuses_to_guess():
+    assert kalshi.split_codes("WKUNMSU", "ncaaf") == ("WKU", "NMSU")
+    assert kalshi.split_codes("BCSMU", "ncaaf") == ("BC", "SMU")
+    assert kalshi.split_codes("UTRGVETAM", "ncaaf") == ("UTRGV", "ETAM")
+    assert kalshi.split_codes("TCUND", "ncaaf") == (None, None)     # TCU and Notre Dame, or Tusculum and North Dakota.
+    assert kalshi.split_codes("CARATL", "ncaaf") == (None, None)    # NFL codes mean nothing in college football.
+
+
 def test_game_kinds():
     winner = kalshi.classify(row("KXNFLGAME", "KXNFLGAME-26SEP20CARATL", "KXNFLGAME-26SEP20CARATL-ATL"))
     spread = kalshi.classify(row("KXNFLSPREAD", "KXNFLSPREAD-26SEP20CARATL", "KXNFLSPREAD-26SEP20CARATL-ATL5", line=4.5))
@@ -43,6 +51,15 @@ def test_game_kinds():
 def test_game_with_two_letter_codes():
     bet = kalshi.classify(row("KXNFLGAME", "KXNFLGAME-26SEP24ATLGB", "KXNFLGAME-26SEP24ATLGB-GB"))
     assert (bet.game_date, bet.team_a, bet.team_b, bet.subject, bet.polarity) == ("2026-09-24", "ATL", "GB", "ATL", "no")
+
+
+def test_college_games_read_like_the_nfls():
+    winner = kalshi.classify(row("KXNCAAFGAME", "KXNCAAFGAME-26OCT01WKUNMSU", "KXNCAAFGAME-26OCT01WKUNMSU-NMSU", sport="ncaaf"))
+    spread = kalshi.classify(row("KXNCAAFSPREAD", "KXNCAAFSPREAD-26OCT03BCSMU", "KXNCAAFSPREAD-26OCT03BCSMU-SMU10", sport="ncaaf", line=9.5))
+    total = kalshi.classify(row("KXNCAAFTOTAL", "KXNCAAFTOTAL-26OCT03BCSMU", "KXNCAAFTOTAL-26OCT03BCSMU-44", sport="ncaaf", line=43.5))
+    assert bet_fields(winner) == ("game_winner", 2027, "2026-10-01", "WKU", "NMSU", "WKU", None, "no")
+    assert bet_fields(spread) == ("spread", 2027, "2026-10-03", "BC", "SMU", "SMU", 9.5, "yes")
+    assert bet_fields(total) == ("total", 2027, "2026-10-03", "BC", "SMU", None, 43.5, "yes")
 
 
 def test_futures():

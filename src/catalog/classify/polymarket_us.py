@@ -15,7 +15,7 @@ from catalog.classify.teams import ALIASES, player_key, team_from_code
 from common.timeutil import eastern_date, season_from_date
 from db.models import Bet
 
-EVENT_PREFIX = {"nfl": "nfl"}     # How each sport's event slugs start.
+EVENT_PREFIX = {"nfl": "nfl", "ncaaf": "cfb"}     # How each sport's event slugs start.
 GAME_EVENTS = {sport: re.compile(rf"^{prefix}-([a-z]+)-([a-z]+)-\d{{4}}-\d{{2}}-\d{{2}}$") for sport, prefix in EVENT_PREFIX.items()}
 # The futures are the NFL's.
 FUTURE_EVENT = re.compile(r"^nfl-([a-z0-9]+)-(\d{4})-\d{2}-\d{2}(?:-w)?$")
@@ -50,6 +50,13 @@ FUTURE_KINDS = {
 }
 
 
+def team(code, sport):
+    """
+    The sport's team a Polymarket US slug code names, or None.
+    """
+    return team_from_code(code, sport, "polymarket_us")
+
+
 def glued_code(full_name):
     """
     Some slugs glue the first three letters of the city to the first three
@@ -63,7 +70,7 @@ def glued_code(full_name):
     return letters("".join(city))[:3] + letters(nickname)[:3]
 
 
-GLUED_TO_TEAM = {sport: {glued_code(entry["names"][0]): team for team, entry in teams.items()} for sport, teams in ALIASES.items()}
+GLUED_TO_TEAM = {sport: {glued_code(entry["names"][0]): code for code, entry in teams.items()} for sport, teams in ALIASES.items()}
 
 
 def team_suffix(suffix, sport):
@@ -75,9 +82,9 @@ def team_suffix(suffix, sport):
     if suffix in GLUED_TO_TEAM.get(sport, {}):
         return GLUED_TO_TEAM[sport][suffix]
     for candidate in (suffix, suffix[:3], suffix[:2]):
-        team = team_from_code(candidate, sport)
-        if team:
-            return team
+        found = team(candidate, sport)
+        if found:
+            return found
     return None
 
 
@@ -89,7 +96,7 @@ def classify(row):
     sport = row["sport"]
     m = GAME_EVENTS[sport].match(row["event_id"]) if sport in GAME_EVENTS else None
     if m:
-        away, home = team_from_code(m.group(1), sport), team_from_code(m.group(2), sport)
+        away, home = team(m.group(1), sport), team(m.group(2), sport)
         kind = GAME_KINDS.get(row["market_type"]) or PLAYER_KINDS.get(row["market_type"])
         if not (away and home and kind and row["start_time"]):
             return None
@@ -125,8 +132,8 @@ def classify(row):
         if not m:
             return None
         kind = "reach_conf_final"
-    team = team_suffix(row["contract_id"].rsplit("-", 1)[-1], sport)
-    if not team:
+    subject = team_suffix(row["contract_id"].rsplit("-", 1)[-1], sport)
+    if not subject:
         return None
     return Bet(kind=kind, season=int(m.group(2)), game_date=None, team_a=None, team_b=None,
-               subject=team, line=None, polarity="yes", **base)
+               subject=subject, line=None, polarity="yes", **base)

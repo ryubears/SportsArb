@@ -33,6 +33,7 @@ money is one pool: a second process would spend the same dollars.
 
 Run with:
     python3 -m engine.run --sport nfl
+    python3 -m engine.run --sport nfl,ncaaf
     python3 -m engine.run --sport nfl --seconds 120 --catalog-minutes 0
     python3 -m engine.run --sport nfl --skip-refresh
     python3 -m engine.run --sport nfl --no-scan

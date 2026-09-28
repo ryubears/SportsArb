@@ -2,9 +2,10 @@
 Turn Kalshi contracts into Bets.
 
 The series ticker says the kind, the event ticker holds the season or the
-game, and the market ticker holds the team. Player props name the player
-in the title, before the colon. This is the only file that knows Kalshi's
-ticker layout.
+game, and the market ticker holds the team. College football's game series
+share the NFL's layout, with team codes of two to five letters. Player
+props name the player in the title, before the colon. This is the only
+file that knows Kalshi's ticker layout.
 """
 
 import re
@@ -23,7 +24,10 @@ FUTURE_SERIES = {
     "KXNFLWINS": "season_wins",
 }
 DIVISION_SERIES = re.compile(r"^KXNFL(AFC|NFC)(EAST|WEST|NORTH|SOUTH)$")
-GAME_SERIES = {"KXNFLGAME": "game_winner", "KXNFLSPREAD": "spread", "KXNFLTOTAL": "total"}
+GAME_SERIES = {
+    "KXNFLGAME": "game_winner", "KXNFLSPREAD": "spread", "KXNFLTOTAL": "total",
+    "KXNCAAFGAME": "game_winner", "KXNCAAFSPREAD": "spread", "KXNCAAFTOTAL": "total",
+}
 # Player props on one game. Every one but the first touchdown carries a line, stored as the strict threshold.
 PLAYER_SERIES = {
     "KXNFLRECYDS": "player_receiving_yards",
@@ -44,16 +48,21 @@ PLAYER_TITLE = re.compile(r"^(.+?): ")     # 'Bijan Robinson: 100+ receiving yar
 EVENT_TAIL = re.compile(r"^([A-Z]*)(\d{2})([A-Z]*)$")
 
 
+def team(code, sport):
+    """
+    The sport's team a Kalshi ticker code names, or None.
+    """
+    return team_from_code(code, sport, "kalshi")
+
+
 def split_codes(pair, sport):
     """
-    Split two glued ticker codes such as 'CARATL' or 'GBNYJ' into two of the sport's teams.
-    Three letter codes are tried first because no valid split is ambiguous that way.
+    Split two glued ticker codes such as 'CARATL' or 'WKUNMSU' into two of
+    the sport's teams. Codes differ in length, so every split is tried, and
+    one that is not the only split into two teams is refused, not guessed.
     """
-    for i in (3, 2):
-        a, b = team_from_code(pair[:i], sport), team_from_code(pair[i:], sport)
-        if a and b:
-            return a, b
-    return None, None
+    splits = [(a, b) for a, b in ((team(pair[:i], sport), team(pair[i:], sport)) for i in range(1, len(pair))) if a and b]
+    return splits[0] if len(splits) == 1 else (None, None)
 
 
 def parse_game(tail, sport):
@@ -86,13 +95,13 @@ def classify(row):
         common = dict(season=season_from_date(game_date), game_date=game_date, team_a=away, team_b=home, **base)
         if kind == "game_winner":
             # Stated as the away team winning, with the home contract as the complement.
-            picked = team_from_code(market_tail, sport)
+            picked = team(market_tail, sport)
             if picked not in (away, home):
                 return None
             return Bet(kind=kind, subject=away, line=None, polarity="yes" if picked == away else "no", **common)
         if kind == "spread":
             # The market tail is a team code plus a rounded line, for example 'ATL17' for 16.5.
-            subject = team_from_code(market_tail.rstrip("0123456789"), sport)
+            subject = team(market_tail.rstrip("0123456789"), sport)
             if not subject or row["line"] is None:
                 return None
             return Bet(kind=kind, subject=subject, line=row["line"], polarity="yes", **common)
@@ -122,7 +131,7 @@ def classify(row):
     if series == "KXNFL1SEED":
         # This series names the year the season starts, for example 'AFC26'.
         season += 1
-    subject = team_from_code(suffix, sport) or team_from_code(market_tail.rstrip("0123456789"), sport)
+    subject = team(suffix, sport) or team(market_tail.rstrip("0123456789"), sport)
     if not subject:
         return None
     line = row["line"] if kind == "season_wins" else None

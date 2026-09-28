@@ -3,9 +3,10 @@ Which game a bet is on, when the game is played, and when the bets on it pay out
 
 Every timing assumption about games lives here, so the recorder, the
 scanner, the executor, and the allocator agree on them. How long a game
-lasts depends on the sport, see config.GAME_HOURS. The NFL's comes from
-the first live game, Atlanta at Green Bay: kickoff to final whistle took
-3.05 hours, and both venues settled within half an hour of it.
+lasts depends on the sport, see config.GAME_HOURS, which is set where
+about three quarters of the sport's past games had ended. Both venues
+settled the first live game, Atlanta at Green Bay, within half an hour of
+its final whistle.
 """
 
 from common.timeutil import shift
