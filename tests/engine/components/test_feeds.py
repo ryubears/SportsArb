@@ -3,10 +3,13 @@ Tests for a venue's feed, run here or in a process of its own.
 """
 
 import asyncio
+import json
 import time
 import scripted_feed
+from api import polymarket_us
 from db import database
 from engine.components import feeds, record, streams
+from fake_socket import Socket
 
 
 class Pipe:
@@ -51,6 +54,36 @@ def test_the_outbox_thread_sends_everything_before_it_closes():
     assert sum(entry[4] for _, entries in pipe.sent for entry in entries) == 1000       # Each book counted once, sent or replaced.
 
 
+class OfflinePolymarket(polymarket_us.PolymarketUSBookStream):
+    """
+    The Polymarket US stream without a connection. A test subscribes it by hand.
+    """
+
+    async def run(self):
+        await asyncio.sleep(3600)
+
+
+def test_contracts_a_connection_refuses_go_to_another_with_room():
+    logs = []
+
+    async def scenario():
+        feed = feeds.VenueFeed(OfflinePolymarket, lambda *args: None, lambda *args: None, logs.append)
+        feed.start([f"s{i:04}" for i in range(1100)])
+        for stream in feed.streams:
+            await stream.subscribe(Socket())
+        first, second = feed.streams
+        # The first's last request refused, as if the venue counted one more than it did.
+        first.handle(json.dumps({"requestId": "md-10", "error": polymarket_us.WS_FULL}))
+        feed.add(["new"])
+        await feed.stop()
+        return feed.streams
+    first, second = asyncio.run(scenario())
+    assert logs == ["polymarket_us refused md-10 as one subscription too many, moving its 100 contracts to another connection"]
+    assert (len(first.wanted), first.room()) == (900, 0)            # It takes nothing more.
+    assert (len(second.wanted), second.room()) == (201, 700)        # Its own request, then one for the 100 moved and one for new.
+    assert {f"s{i:04}" for i in range(900, 1000)} | {"new"} <= second.wanted
+
+
 async def until(condition, seconds=30):
     """
     Wait for condition() to hold, failing after seconds.
@@ -69,7 +102,7 @@ def test_a_feed_in_its_own_process_follows_the_catalog_and_comes_back_with_a_gap
     monkeypatch.setattr(streams, "log", logs.append)
 
     def held():
-        return {contract_id for venue, contract_id in r.latest if venue == "polymarket_us"}
+        return {contract_id for venue, contract_id in r.books if venue == "polymarket_us"}
 
     async def scenario():
         s = streams.Streams(r, {"polymarket_us": scripted_feed.ScriptedStream, "kalshi": scripted_feed.ScriptedStream}, processes=True)

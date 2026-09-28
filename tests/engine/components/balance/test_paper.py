@@ -15,8 +15,8 @@ def test_balances_follow_reservations_and_ledger_entries_and_survive_a_restart(t
     cash.reserve("kalshi", 100)
     assert cash["kalshi"] == 9900
     cash.release("kalshi", 100)
-    cash.book(Ledger("2026-09-20T17:30:00+00:00", "kalshi", -23.5, "buy", 1))
-    cash.book(Ledger("2026-09-20T21:00:00+00:00", "polymarket_us", 50.0, "payout", 1))
+    cash.apply(Ledger("2026-09-20T17:30:00+00:00", "kalshi", -23.5, "buy", 1))
+    cash.apply(Ledger("2026-09-20T21:00:00+00:00", "polymarket_us", 50.0, "payout", 1))
     assert cash.amounts == pytest.approx({"kalshi": 9976.5, "polymarket_us": 10050.0})
     assert (cash.largest(), cash.smallest(), cash.average()) == ("polymarket_us", "kalshi", pytest.approx(10013.25))
     assert cash.summary() == "kalshi 9,976$, polymarket_us 10,050$"

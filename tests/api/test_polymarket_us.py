@@ -2,7 +2,9 @@
 Tests for the Polymarket US client's book handling that need no network.
 """
 
+import asyncio
 from api import polymarket_us
+from fake_socket import Socket
 
 
 def test_stream_replaces_the_book_from_each_message():
@@ -25,10 +27,48 @@ def test_levels_drop_empty_sizes_and_sort_best_first():
 def test_error_frames_are_logged_and_do_not_count_as_data():
     logs = []
     stream = polymarket_us.PolymarketUSBookStream(["s"], lambda *args: None, log=logs.append)
-    stream.reset()
-    assert stream.handle('{"requestId": "md-11", "error": "max subscriptions per connection reached"}') is False
-    assert logs == ["polymarket_us stream error max subscriptions per connection reached on md-11"]
+    asyncio.run(stream.subscribe(Socket()))
+    assert stream.handle('{"requestId": "md-1", "error": "unknown market"}') is False
+    assert stream.handle('{"requestId": "md-11", "error": "max subscriptions per connection reached"}') is False     # Never sent.
+    assert logs == ["polymarket_us stream error unknown market on md-1",
+                    "polymarket_us stream error max subscriptions per connection reached on md-11"]
+    assert stream.wanted == {"s"}
+
+
+def test_room_counts_the_subscription_requests_left_rather_than_the_slugs():
+    stream = polymarket_us.PolymarketUSBookStream([f"s{i:03}" for i in range(950)], lambda *args: None)
     assert polymarket_us.PolymarketUSBookStream.capacity == 1000
+    assert stream.room() == 50                          # Before it subscribes, only the slug capacity bounds it.
+    ws = Socket()
+    asyncio.run(stream.subscribe(ws))
+    assert len(ws.sent) == 10 and stream.room() == 0    # Ten requests, the last carrying 50 slugs, leave none for an add.
+
+
+def test_every_add_spends_a_request_however_few_slugs_it_brings():
+    stream = polymarket_us.PolymarketUSBookStream([f"s{i:03}" for i in range(420)], lambda *args: None)
+    asyncio.run(stream.subscribe(Socket()))
+    assert stream.room() == 500                         # Five requests spent, five left.
+    for refresh in range(5):
+        stream.add([f"r{refresh}-{i}" for i in range(28)])
+    assert len(stream.wanted) == 560 and stream.room() == 0     # Counting slugs, it would take 440 more.
+    stream.remove(["s000"])
+    assert stream.room() == 0                           # With no unsubscribe, a removal gives no request back.
+
+
+def test_a_refused_subscription_fills_the_connection_and_hands_back_its_slugs():
+    logs, handed = [], []
+    stream = polymarket_us.PolymarketUSBookStream(["a", "b"], lambda *args: None, log=logs.append)
+    stream.on_refused = handed.append
+    ws = Socket()
+    asyncio.run(stream.subscribe(ws))
+    stream.add(["c", "d", "e"])
+    asyncio.run(stream.send_command(ws, *stream.commands.get_nowait()))
+    stream.remove(["e"])
+    assert [frame["subscribe"]["requestId"] for frame in ws.sent] == ["md-1", "md-2"]
+    assert stream.handle('{"requestId": "md-2", "error": "max subscriptions per connection reached"}') is False
+    assert handed == [["c", "d"]]                       # e was removed since, so it needs no other connection.
+    assert stream.wanted == {"a", "b"} and stream.room() == 0
+    assert logs == ["polymarket_us refused md-2 as one subscription too many, moving its 2 contracts to another connection"]
 
 
 # TRADING

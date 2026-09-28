@@ -12,6 +12,7 @@ class FakeStream:
     A stand in for a venue BookStream that records what it was asked to do and never connects.
     """
     instances = []
+    capacity = None
 
     def __init__(self, contract_ids, on_book, on_gap=None, log=print):
         self.wanted = set(contract_ids)
@@ -19,6 +20,9 @@ class FakeStream:
         self.on_gap = on_gap
         self.added, self.removed = [], []
         FakeStream.instances.append(self)
+
+    def room(self):
+        return None if self.capacity is None else max(self.capacity - len(self.wanted), 0)
 
     def add(self, contract_ids):
         self.wanted |= set(contract_ids)

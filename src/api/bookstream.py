@@ -48,6 +48,7 @@ class BookStream:
     """
 
     name = "venue"                  # Used in log lines.
+    capacity = None                 # Most contracts one connection may carry, or None for no limit.
     stale_seconds = STALE_SECONDS
     depth = 5                       # Levels a side passed to on_book. Streams sets it to what the recorder keeps.
 
@@ -56,10 +57,20 @@ class BookStream:
         self.on_book = on_book
         self.log = log
         self.on_gap = on_gap or (lambda start_ts, end_ts, contract_ids: None)  # Called with the gap's times and this connection's contracts.
+        # Called with contracts the venue refused to add, already removed here, so the feed can put them on another connection.
+        self.on_refused = lambda contract_ids: None
         self.down_since = None      # When the current gap began, or None while connected.
         self.num_failures = 0       # Failures in a row, reset once a connection is subscribed.
         self.books = {}
         self.commands = asyncio.Queue()     # Pending ("add" or "remove", [contract ids]) changes.
+
+    def room(self):
+        """
+        How many more contracts one add may bring to this connection, or None
+        when there is no limit. A venue whose limit is not a contract count
+        says so by overriding this.
+        """
+        return None if self.capacity is None else max(self.capacity - len(self.wanted), 0)
 
     def add(self, contract_ids):
         """
@@ -148,18 +159,20 @@ class BookStream:
     async def run(self):
         """
         Connect, subscribe to every wanted contract, and process messages until
-        the connection fails, then reconnect. Pending changes are dropped on
-        connect because the fresh subscription already covers the wanted set.
+        the connection fails, then reconnect. Changes queued before the
+        subscription, during the handshake too, are dropped, because the fresh
+        subscription covers the whole wanted set and sending them again would
+        subscribe to their contracts twice.
         """
         while True:
             while not self.wanted:
                 await asyncio.sleep(1)
             self.books = {}
             self.reset()
-            while not self.commands.empty():
-                self.commands.get_nowait()
             try:
                 async with self.connect() as ws:
+                    while not self.commands.empty():
+                        self.commands.get_nowait()
                     await self.subscribe(ws)
                     if self.down_since:
                         self.on_gap(self.down_since, now_iso(), sorted(self.wanted))

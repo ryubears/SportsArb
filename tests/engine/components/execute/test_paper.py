@@ -6,7 +6,7 @@ import asyncio
 import random
 import pytest
 from db import database
-from db.models import Quote
+from db.models import Book
 from engine.components import scan, settle
 from engine.components.balance.paper import PaperBalances
 from engine.components.execute.paper import PaperExecutor
@@ -60,7 +60,7 @@ def test_unchanged_books_fill_both_legs_and_lock_in_the_edge(tmp_path, quick):
 
 def test_an_order_sweeps_the_levels_that_keep_the_edge_floor_and_skips_a_one_lot_top(tmp_path, quick):
     latest = books()
-    latest[("polymarket_us", "pm")] = Quote("polymarket_us", "pm", NOW, [[0.44, 100]], [[0.45, 1], [0.46, 100], [0.50, 100]])
+    latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [[0.44, 100]], [[0.45, 1], [0.46, 100], [0.50, 100]])
     conn, cash, ex = executor(tmp_path, latest)
     assert run(ex) == [True]
     t = stored(conn)[0]
@@ -76,7 +76,7 @@ def test_a_shrunken_leg_is_completed_on_the_other_venue_when_that_is_cheaper(tmp
     conn, cash, ex = executor(tmp_path, latest)
 
     def kalshi_thins_out():
-        latest[("kalshi", "k")] = Quote("kalshi", "k", NOW, [[0.53, 40]], [[0.54, 100]])
+        latest[("kalshi", "k")] = Book("kalshi", "k", NOW, [[0.53, 40]], [[0.54, 100]])
 
     run(ex, kalshi_thins_out)
     t = stored(conn)[0]
@@ -109,7 +109,7 @@ def test_exposure_is_flattened_on_a_later_tick_once_a_book_allows_it(tmp_path, q
 
     def kalshi_vanishes_and_polymarket_loses_its_bids():
         latest.pop(("kalshi", "k"))
-        latest[("polymarket_us", "pm")] = Quote("polymarket_us", "pm", NOW, [], [[0.45, 100]])
+        latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [], [[0.45, 100]])
 
     run(ex, kalshi_vanishes_and_polymarket_loses_its_bids)
     t = stored(conn)[0]
@@ -145,7 +145,7 @@ def test_a_settled_trade_is_not_flattened_any_more(tmp_path, quick):
 
     def kalshi_vanishes_and_polymarket_loses_its_bids():
         latest.pop(("kalshi", "k"))
-        latest[("polymarket_us", "pm")] = Quote("polymarket_us", "pm", NOW, [], [[0.45, 100]])
+        latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [], [[0.45, 100]])
 
     run(ex, kalshi_vanishes_and_polymarket_loses_its_bids)
     assert list(ex.exposed) == [stored(conn)[0]["id"]]                  # 50 yes held, with nothing to flatten against.
@@ -172,7 +172,7 @@ def test_a_stale_book_is_not_flattened_against(tmp_path, quick):
 
     def kalshi_vanishes_and_polymarket_loses_its_bids():
         latest.pop(("kalshi", "k"))
-        latest[("polymarket_us", "pm")] = Quote("polymarket_us", "pm", NOW, [], [[0.45, 100]])
+        latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [], [[0.45, 100]])
 
     run(ex, kalshi_vanishes_and_polymarket_loses_its_bids)
     assert list(ex.exposed) == [stored(conn)[0]["id"]]              # 50 yes held, no book to flatten against.
@@ -187,7 +187,7 @@ def test_a_stale_book_is_not_flattened_against(tmp_path, quick):
     asyncio.run(at("2026-09-20T17:32:00+00:00"))
     assert stored(conn)[0]["no_held"] == 0 and list(ex.exposed) == [stored(conn)[0]["id"]]
     # Once the book changes again it is fresh, and the rest is flattened against it.
-    latest[("kalshi", "k")] = Quote("kalshi", "k", "2026-09-20T17:32:00+00:00", [[0.53, 100]], [[0.54, 100]])
+    latest[("kalshi", "k")] = Book("kalshi", "k", "2026-09-20T17:32:00+00:00", [[0.53, 100]], [[0.54, 100]])
     asyncio.run(at("2026-09-20T17:32:00+00:00"))
     t = stored(conn)[0]
     assert (t["yes_held"], t["no_held"], t["matched"]) == (50, 50, 50) and ex.exposed == {}
@@ -275,7 +275,7 @@ def test_scanner_signals_once_per_episode(tmp_path):
                      on_signals=[lambda pair, yes, no, edge, size, fee_infos, now: calls.append((pair["label"], round(edge, 2), now)) or True])
     latest = books()
     s.on_book("polymarket_us", "pm", latest, NOW)
-    latest[("polymarket_us", "pm")] = Quote("polymarket_us", "pm", NOW, [[0.40, 100]], [[0.41, 100]])
+    latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [[0.40, 100]], [[0.41, 100]])
     s.on_book("polymarket_us", "pm", latest, "2026-09-20T17:30:01+00:00")     # A bigger edge in the same episode brings no second signal.
     assert calls == [(PAIR["label"], 0.08, NOW)]
 

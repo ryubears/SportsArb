@@ -14,10 +14,10 @@ SQLite browser. The tables follow the pipeline in order.
     orders         every real order the live executor sent, by execute/live.py
     ledger         every paper cash movement per venue, by balance/paper.py
     alerts         everything the live process emailed a human, by notify.py
-    transfers      paper rebalancing transfers between venues, by balance/bookkeep.py
+    transfers      paper rebalancing transfers between venues, by balance/rebalance.py
 
 Trades and settlements carry a mode, 'paper' or 'live', and every read of
-open trades is for one mode, so the paper and live books never mix.
+open trades is for one mode, so paper and live trades never mix.
 
 The tables themselves are in schema.sql, and the steps that bring older
 databases up to them in migrations.py. This file holds the reads and writes.
@@ -155,12 +155,12 @@ def event_ids(conn, venue, contract_ids):
 
 def load_recording_targets(conn, sport, now, horizon, venues, game_started_after):
     """
-    Return {venue: [contract_id, ...]} for every contract in a pair that
-    is still open and is either a future or a game starting before the
-    horizon. A game contract also counts as open
-    while its game may still be in play, meaning it started after
-    game_started_after, in case a venue's close time is the kickoff even
-    though its markets trade through the game.
+    The contracts to record right now, as {venue: [contract_id, ...]}: every
+    contract in a pair that is still open and is either a future or a game
+    on or before the horizon's date. A game's contract also counts as open
+    while its game may still be in play, meaning it kicked off after
+    game_started_after, since some venues close a game's contracts at
+    kickoff yet trade them through the game.
     """
     targets = {}
     for venue in venues:

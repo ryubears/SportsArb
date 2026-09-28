@@ -1,25 +1,31 @@
 """
-Run the live process: record, scan, trade on paper or with real money, settle, and rebalance.
+Run the live process: follow the books, scan them, trade on paper or with real money, settle, and rebalance.
 
-The recorder from record.py holds the newest book for every paired
-contract in memory, fed by the venue connections from streams.py. Books
-are not stored. The scanner from scan.py prices pairs
-from the same in memory books as they change and stores every episode it
-finds in the opportunities table. Its signals go to one Desk per mode the
-run trades in. The paper desk's executor from execute/paper.py fills
-against the same books with paper money from balance/paper.py, and its
-PaperBookKeeper from balance/bookkeep.py moves paper money between the
-venues. The live desk's executor from execute/live.py sends real orders
-with the money the venues report through balance/live.py, and its
-LiveBookKeeper emails a human, through notify.py, when the venues drift
-apart, as the executor does when live trading halts. Each desk has its own
-allocator and settler, and its trades are stored with its mode, so paper
-and live never mix. Both can run at once on the same signals, which shows
-how far the paper fills are from real ones.
+What runs, and where it lives:
 
-Every CATALOG_MINUTES the catalog is refreshed in a background thread,
-fetch then classify then match, and the new pairs' contracts are added to
-the live connections and the closed ones removed, without reconnecting.
+- The feeds, from streams.py and feeds.py. Each venue's connections and
+  books run in a child process, which passes every changed book on.
+- The recorder, from record.py, holds the newest book of every paired
+  contract in memory. Books are not stored.
+- The scanner, from scan.py, prices each pair a changed book belongs to,
+  stores every episode of positive edge in the opportunities table, and
+  offers each episode to the desks.
+- A Desk for each mode the run trades in, with its own money, allocator,
+  executor, settler, and rebalancer, and its trades stored with its mode,
+  so paper and live never mix. Both can run at once on the same signals,
+  which shows how far the paper fills are from real ones.
+  - Paper: execute/paper.py fills against the same books with the paper
+    money of balance/paper.py, and a PaperRebalancer moves paper money
+    between the venues.
+  - Live: execute/live.py sends real orders with the money the venues
+    report through balance/live.py, and a LiveRebalancer emails a human,
+    through notify.py, when the venues drift apart, as the executor does
+    when live trading halts.
+
+The Session ties them together and ticks once a second. Every
+CATALOG_MINUTES the catalog is refreshed in a background thread, fetch
+then classify then match, and the new pairs' contracts are added to the
+running feeds and the closed ones removed, without reconnecting.
 
 Run with:
     python3 -m engine.run --sport nfl
@@ -47,9 +53,9 @@ from common.paths import ROOT
 from common.timeutil import now_iso
 from db import database
 from engine.components import allocate, notify, scan, settle
-from engine.components.balance.bookkeep import LiveBookKeeper, PaperBookKeeper
 from engine.components.balance.live import LiveBalances
 from engine.components.balance.paper import PaperBalances
+from engine.components.balance.rebalance import LiveRebalancer, PaperRebalancer
 from engine.components.execute.live import LiveExecutor
 from engine.components.execute.paper import PaperExecutor
 from engine.components.record import Recorder, load_targets
@@ -112,7 +118,7 @@ class Desk:
     """
     One mode of trading, paper or live: its executor, the money it trades,
     the allocator that sizes its trades, the settler that pays them out, and
-    the book keeper that keeps its venues funded, paper or live.
+    the rebalancer that keeps its venues funded, paper or live.
     books is a function returning the recorder's newest books.
     """
 
@@ -122,12 +128,12 @@ class Desk:
             self.cash = PaperBalances(conn)
             self.allocator = allocate.Allocator(conn, self.cash)
             self.executor = PaperExecutor(conn, self.cash, books, log, allocator=self.allocator)
-            self.keeper = PaperBookKeeper(conn, self.cash, log)
+            self.rebalancer = PaperRebalancer(conn, self.cash, log)
         elif mode == "live":
             self.cash = LiveBalances(log)
             self.allocator = allocate.Allocator(conn, self.cash)
             self.executor = LiveExecutor(conn, self.cash, books, log, allocator=self.allocator, notifier=notifier)
-            self.keeper = LiveBookKeeper(conn, self.cash, notifier, log)
+            self.rebalancer = LiveRebalancer(conn, self.cash, notifier, log)
         else:
             raise ValueError(f"unknown mode {mode!r}")
         self.settler = settle.Settler(conn, self.cash, log, executor=self.executor)
@@ -140,15 +146,15 @@ class Desk:
             self.cash.tick(now, clock)
         self.executor.tick(now)
         self.settler.tick(now, clock)
-        self.keeper.tick(now)
+        self.rebalancer.tick(now)
 
     def summaries(self, now):
         """
         One line per component about what it did since the last summary.
         """
         lines = [self.executor.summary(), self.settler.summary(), self.allocator.summary(now)]
-        if self.mode == "paper" and self.keeper.summary():
-            lines.append(self.keeper.summary())
+        if self.mode == "paper" and self.rebalancer.summary():
+            lines.append(self.rebalancer.summary())
         return lines
 
 
@@ -165,7 +171,7 @@ class Session:
         self.sport = sport
         self.notifier = notify.Notifier(conn, log)
         # The executors trade against the recorder's books, which exist once the recorder does, below.
-        self.desks = [Desk(mode, conn, lambda: self.recorder.latest, self.notifier) for mode in executors] if with_scanner else []
+        self.desks = [Desk(mode, conn, lambda: self.recorder.books, self.notifier) for mode in executors] if with_scanner else []
         self.scanner = scan.Scanner(conn, sport, log, [d.executor.signal for d in self.desks]) if with_scanner else None
         self.recorder = Recorder(conn, self.scanner)
         self.streams = Streams(self.recorder)
@@ -207,7 +213,7 @@ class Session:
         """
         now = now_iso()
         if self.scanner:
-            self.scanner.tick(self.recorder.latest, now)
+            self.scanner.tick(self.recorder.books, now)
         for desk in self.desks:
             desk.tick(now, time.time())
         if self.scanner and time.time() - self.last_summary >= config.SUMMARY_SECONDS:

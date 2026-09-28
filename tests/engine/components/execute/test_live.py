@@ -6,7 +6,7 @@ import asyncio
 import pytest
 from api import orders
 from db import database
-from db.models import Quote
+from db.models import Book
 from engine.components.balance.live import LiveBalances
 from engine.components.balance.paper import PaperBalances
 from engine.components.execute import brakes
@@ -127,7 +127,7 @@ def bids_gone(latest):
     A scripted Kalshi answer: its bids were taken before our order arrived, so nothing filled and the book shows none.
     """
     def answer(quantity, price):
-        latest[("kalshi", "k")] = Quote("kalshi", "k", NOW, [], [[0.54, 100]])
+        latest[("kalshi", "k")] = Book("kalshi", "k", NOW, [], [[0.54, 100]])
         return fills(0)(quantity, price)
     return answer
 

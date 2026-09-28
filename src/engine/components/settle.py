@@ -58,17 +58,14 @@ class Settler:
         self.running = None         # The settlement check while one runs.
         self.last_check = 0.0       # Wall clock seconds of the last settlement check.
 
-    async def settle(self, now):
+    async def ask_venues(self, trades):
         """
-        Ask the venues how the contracts of open trades whose game has
-        started resolved, pay the winning legs, and store each leg's result
-        and payout as the trade's Settlement once every held leg has one.
+        How the contracts the trades hold resolved, as {(venue, contract_id):
+        (result, settled_at)} for those that have. A venue whose lookup fails
+        is logged and asked again on the next pass.
         """
-        due = [t for t in database.load_open_trades(self.conn, self.mode) if (t.starts_at or t.pays_at) <= now]
-        if not due:
-            return
         wanted = {}
-        for t in due:
+        for t in trades:
             for leg in t.legs():
                 if leg.held:
                     wanted.setdefault(leg.venue, set()).add(leg.contract)
@@ -81,32 +78,49 @@ class Settler:
                 self.log(with_traceback(f"settlement lookup failed for {venue} ({e!r}), will retry", e))
                 continue
             results.update({(venue, cid): r for cid, r in found.items()})
+        return results
+
+    def pay_out(self, t, results, now):
+        """
+        Settle a trade once every leg it holds has a result: pay each winning
+        leg a dollar a contract, store the Settlement, and tell the executor.
+        """
+        held = [leg for leg in t.legs() if leg.held]
+        if any(leg.key not in results for leg in held):
+            return
+        settlement = Settlement(t.id, mode=t.mode, settled_at=max(results[leg.key][1] or now for leg in held))
+        paid = []
+        for leg in held:
+            result, settled_at = results[leg.key]
+            won = leg_won(leg.side, leg.polarity, result)
+            payout = float(leg.held) if won else 0.0
+            settlement.record(leg.side, result, payout, settled_at or now)
+            if won:
+                self.cash.apply(Ledger(settlement.settled_at, leg.venue, payout, "payout", t.id))
+            paid.append((leg, result, payout))
+        database.insert_settlement(self.conn, settlement)
+        if self.executor:
+            self.executor.settled(t.id)
+        realized = sum(payout - leg.cost for leg, _, payout in paid)
+        self.settled.append((t, realized))
+        self.log(f"{self.mode} settled {t.label}: " + ", ".join(
+            f"{leg.venue} {leg.side} {result} pays {payout:.0f}$" for leg, result, payout in paid) + f", realized {realized:+.2f}$")
+
+    async def settle(self, now):
+        """
+        One pass: ask the venues how the contracts of open trades whose game
+        has started resolved, and pay out each trade whose held legs all have.
+        """
+        due = [t for t in database.load_open_trades(self.conn, self.mode) if (t.starts_at or t.pays_at) <= now]
+        if not due:
+            return
+        results = await self.ask_venues(due)
         # The executor may have flattened some of these while the venues were asked, so pay out what the trades hold now.
         current = {t.id: t for t in database.load_open_trades(self.conn, self.mode)}
         flattening = self.executor.flattening if self.executor else set()
         for t in (current.get(t.id) for t in due):
-            if t is None or t.id in flattening:
-                continue
-            held = [leg for leg in t.legs() if leg.held]
-            if any(leg.key not in results for leg in held):
-                continue
-            settlement = Settlement(t.id, mode=t.mode, settled_at=max(results[leg.key][1] or now for leg in held))
-            paid = []
-            for leg in held:
-                result, settled_at = results[leg.key]
-                won = leg_won(leg.side, leg.polarity, result)
-                payout = float(leg.held) if won else 0.0
-                settlement.record(leg.side, result, payout, settled_at or now)
-                if won:
-                    self.cash.book(Ledger(settlement.settled_at, leg.venue, payout, "payout", t.id))
-                paid.append((leg, result, payout))
-            database.insert_settlement(self.conn, settlement)
-            if self.executor:
-                self.executor.settled(t.id)
-            realized = sum(payout - leg.cost for leg, _, payout in paid)
-            self.settled.append((t, realized))
-            self.log(f"{self.mode} settled {t.label}: " + ", ".join(
-                f"{leg.venue} {leg.side} {result} pays {payout:.0f}$" for leg, result, payout in paid) + f", realized {realized:+.2f}$")
+            if t is not None and t.id not in flattening:
+                self.pay_out(t, results, now)
 
     def tick(self, now, clock):
         """

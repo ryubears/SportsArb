@@ -21,7 +21,7 @@ import time
 from common.timeutil import now_iso, shift
 from common.venues import VENUES
 from db import database
-from db.models import Quote, Gap
+from db.models import Book, Gap
 from engine.helper import config
 
 
@@ -34,13 +34,13 @@ def load_targets(conn, sport):
                                            shift(now, hours=-config.RECORD_HOURS))
 
 
-def top(quote):
+def top(book):
     """
     The best bid and the best ask, each a [price, size] level, or None for a
     side with no orders. A side can be empty, so the first level is not
     always there to index.
     """
-    return (quote.bids[0] if quote.bids else None, quote.asks[0] if quote.asks else None)
+    return (book.bids[0] if book.bids else None, book.asks[0] if book.asks else None)
 
 
 class Recorder:
@@ -52,7 +52,7 @@ class Recorder:
     def __init__(self, conn, scanner=None):
         self.conn = conn
         self.scanner = scanner
-        self.latest = {}        # (venue, contract_id) maps to the newest Quote seen.
+        self.books = {}         # (venue, contract_id) maps to the contract's newest Book.
         self.updates = {venue: 0 for venue in VENUES}
         self.last_update = {venue: None for venue in VENUES}       # Wall clock seconds of the newest update per venue.
         self.gaps = {venue: 0 for venue in VENUES}
@@ -66,17 +66,17 @@ class Recorder:
         self.updates[venue] += books
         self.last_update[venue] = time.time()
         key = (venue, contract_id)
-        before = self.latest.get(key)
-        quote = self.latest[key] = Quote(venue, contract_id, ts or now_iso(), bids[:config.BOOK_LEVELS], asks[:config.BOOK_LEVELS])
-        if self.scanner and (before is None or top(before) != top(quote)):
-            self.scanner.on_book(venue, contract_id, self.latest, quote.ts)
+        before = self.books.get(key)
+        book = self.books[key] = Book(venue, contract_id, ts or now_iso(), bids[:config.BOOK_LEVELS], asks[:config.BOOK_LEVELS])
+        if self.scanner and (before is None or top(before) != top(book)):
+            self.scanner.on_book(venue, contract_id, self.books, book.ts)
 
     def forget(self, venue, contract_ids):
         """
         Drop the books of contracts that are no longer recorded, or not seen for a while.
         """
         for contract_id in contract_ids:
-            self.latest.pop((venue, contract_id), None)
+            self.books.pop((venue, contract_id), None)
 
     def on_gap(self, venue, start_ts, end_ts, contract_ids):
         """
@@ -96,4 +96,4 @@ class Recorder:
         for venue, n in self.updates.items():
             t = self.last_update[venue]
             parts.append(f"{venue} {n} (last {f'{time.time() - t:.0f}s ago' if t else 'never'}, {self.gaps[venue]} gaps)")
-        return f"tracking {len(self.latest)} books, updates {', '.join(parts)}"
+        return f"tracking {len(self.books)} books, updates {', '.join(parts)}"

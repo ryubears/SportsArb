@@ -25,7 +25,7 @@ class Priced(NamedTuple):
     profit: float       # Net dollars from filling size.
 
 
-def ladder(quote, polarity, side):
+def ladder(book, polarity, side):
     """
     Cost per contract and size for each level of holding one side of the
     bet through this contract, cheapest first. Holding the side the contract
@@ -33,11 +33,11 @@ def ladder(quote, polarity, side):
     the opposite outcome, which costs one minus the bid.
     """
     if side == polarity:
-        return [(price, size) for price, size in quote.asks]
-    return [(round(1 - price, 4), size) for price, size in quote.bids]
+        return [(price, size) for price, size in book.asks]
+    return [(round(1 - price, 4), size) for price, size in book.bids]
 
 
-def sell_ladder(quote, polarity, side):
+def sell_ladder(book, polarity, side):
     """
     Proceeds per contract and size for selling back one side of the bet held
     through this contract, best first. Holding the side the contract pays
@@ -45,8 +45,8 @@ def sell_ladder(quote, polarity, side):
     opposite outcome, which fetches one minus the ask.
     """
     if side == polarity:
-        return [(price, size) for price, size in quote.bids]
-    return [(round(1 - price, 4), size) for price, size in quote.asks]
+        return [(price, size) for price, size in book.bids]
+    return [(round(1 - price, 4), size) for price, size in book.asks]
 
 
 def takes(levels, quantity, share=1.0, limit=None):
@@ -158,14 +158,14 @@ def depth(leg_a, leg_b, fee_a, fee_b, min_edge):
     return limit_a, limit_b, total
 
 
-def cheapest(members, quotes, side, fee_infos):
+def cheapest(members, books, side, fee_infos):
     """
     The member offering the lowest fee inclusive cost at the top of book to
     hold one side of the bet. Returns (member, cost) or (None, None).
     """
     best, best_cost = None, None
     for m in members:
-        levels = ladder(quotes[(m["venue"], m["contract_id"])], m["polarity"], side)
+        levels = ladder(books[(m["venue"], m["contract_id"])], m["polarity"], side)
         if not levels:
             continue
         cost = levels[0][0] + fees.fee_per_contract(m["venue"], levels[0][0], fee_infos[(m["venue"], m["contract_id"])])
@@ -174,39 +174,39 @@ def cheapest(members, quotes, side, fee_infos):
     return best, best_cost
 
 
-def price_pair(yes, no, quotes, fee_infos):
+def price_pair(yes, no, books, fee_infos):
     """
     Price buying the yes leg and the no leg together.
     """
     yes_key, no_key = (yes["venue"], yes["contract_id"]), (no["venue"], no["contract_id"])
-    edge, size, profit = positive_depth(ladder(quotes[yes_key], yes["polarity"], "yes"), ladder(quotes[no_key], no["polarity"], "no"),
+    edge, size, profit = positive_depth(ladder(books[yes_key], yes["polarity"], "yes"), ladder(books[no_key], no["polarity"], "no"),
                                         (yes["venue"], fee_infos[yes_key]), (no["venue"], fee_infos[no_key]))
     return Priced(yes, no, edge, size, profit)
 
 
-def best_trade(members, quotes, fee_infos):
+def best_trade(members, books, fee_infos):
     """
-    The cheapest yes leg and the cheapest no leg across a group's members,
+    The cheapest yes leg and the cheapest no leg across a pair's members,
     priced together. The two legs are never the same contract, since buying
     both sides of one book is not a trade between venues and a crossed book
     would look like free money. Returns a Priced, or None when a side has
-    no quotes on another contract.
+    no book on another contract.
     """
-    yes, _ = cheapest(members, quotes, "yes", fee_infos)
-    no, _ = cheapest(members, quotes, "no", fee_infos)
+    yes, _ = cheapest(members, books, "yes", fee_infos)
+    no, _ = cheapest(members, books, "no", fee_infos)
     if yes is None or no is None:
         return None
     if yes is not no:
-        return price_pair(yes, no, quotes, fee_infos)
+        return price_pair(yes, no, books, fee_infos)
     # One contract is cheapest on both sides. Try the best partner for each side and keep the better pair.
     others = [m for m in members if m is not yes]
     candidates = []
-    other_no, _ = cheapest(others, quotes, "no", fee_infos)
+    other_no, _ = cheapest(others, books, "no", fee_infos)
     if other_no is not None:
-        candidates.append(price_pair(yes, other_no, quotes, fee_infos))
-    other_yes, _ = cheapest(others, quotes, "yes", fee_infos)
+        candidates.append(price_pair(yes, other_no, books, fee_infos))
+    other_yes, _ = cheapest(others, books, "yes", fee_infos)
     if other_yes is not None:
-        candidates.append(price_pair(other_yes, no, quotes, fee_infos))
+        candidates.append(price_pair(other_yes, no, books, fee_infos))
     return max(candidates, key=lambda c: c.edge) if candidates else None
 
 

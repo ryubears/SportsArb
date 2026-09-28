@@ -19,7 +19,7 @@ def test_streams_change_subscriptions_in_place(tmp_path, fake_stream):
         pm.on_book("b", [[0.5, 1]], [[0.6, 1]])    # A late update for the removed contract.
         pm.on_book("a", [[0.5, 1]], [[0.6, 1]])
         await s.stop_all()
-        return summary, pm, r.latest
+        return summary, pm, r.books
     summary, pm, latest = asyncio.run(scenario())
     assert summary == "polymarket_us +1 -1"
     assert len(fake_stream.instances) == 2                 # No connection was replaced.
@@ -64,6 +64,6 @@ def test_a_drop_on_one_connection_leaves_the_books_of_the_others(tmp_path, fake_
             stream.on_book(contract_id, [[0.5, 1]], [[0.6, 1]])
         second.on_gap("2026-09-27T17:00:00+00:00", "2026-09-27T17:00:05+00:00", sorted(second.wanted))
         await s.stop_all()
-        return r.latest
+        return r.books
     latest = asyncio.run(scenario())
     assert sorted(latest) == [("polymarket_us", "a"), ("polymarket_us", "b")]     # Only c waits for its connection to send it again.

@@ -84,7 +84,7 @@ class Pair:
 
 
 @dataclass
-class Quote:
+class Book:
     """
     One contract's order book at one moment, seen from the Yes side.
     """
@@ -109,7 +109,7 @@ class Opportunity:
     no_venue: str           # Where the no exposure was cheapest at the peak.
     no_contract: str
     start_ts: str           # When the net edge first went positive.
-    end_ts: str             # When it went back to zero, or the last quote seen.
+    end_ts: str             # When it went back to zero, or the last book seen.
     seconds: float
     peak_ts: str
     peak_edge: float        # Net dollars per contract at the top of book, at the peak.
@@ -211,7 +211,7 @@ class Settlement:
     """
     trade_id: int           # The trade settled, see trades. A trade has at most one settlement.
     mode: str = field(kw_only=True)     # 'paper' or 'live', the trade's mode.
-    settled_at: str         # When both legs had resolved and the payouts were booked: the later leg's settlement.
+    settled_at: str         # When both legs had resolved and the payouts were paid in: the later leg's settlement.
     yes_result: str | None = None       # How the yes leg's contract resolved, 'yes' or 'no'.
     yes_payout: float | None = None     # Dollars received on the yes leg, one per contract held when its side won.
     yes_settled_at: str | None = None   # The venue's settlement time for the yes leg.

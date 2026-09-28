@@ -27,7 +27,7 @@ DOLLARS_PER_CAP = 20        # Dollars a game spends on each venue, over the whol
 MIN_CAP = 5                 # Contracts per trade, the least worth sending.
 MAX_CAP = 500               # Contracts per trade, the most one trade may hold.
 
-# MONEY, balance/paper.py, balance/bookkeep.py, and execute/executor.py
+# MONEY, balance/paper.py, balance/rebalance.py, and execute/executor.py
 
 START_BALANCE = 10000.0     # Paper dollars per venue at the start.
 CASH_FLOOR = 500.0          # Paper dollars new trades leave untouched on each venue. Flattening may still use them.
@@ -35,7 +35,7 @@ REBALANCE_WEEKDAY = 1       # Tuesday in UTC, when balances are compared, once M
 REBALANCE_DRIFT = 0.25      # A venue this far above the two venue average on the weekly check sends the excess over.
 TRANSFER_DAYS = 4           # Business days a transfer between venues takes.
 
-# LIVE, execute/live.py, execute/brakes.py, balance/live.py, and balance/bookkeep.py. Real money, so each limit is kept small
+# LIVE, execute/live.py, execute/brakes.py, balance/live.py, and balance/rebalance.py. Real money, so each limit is kept small
 # until the live results earn more. Sized for a test with about 100 dollars on each venue.
 
 LIVE_MIN_CAP = 1            # Contracts per live trade, the least worth sending, and what a game with money left in its share gets.
@@ -65,7 +65,7 @@ GAME_WINDOW_DAYS = 7        # Games further out than this are not recorded.
 
 # SCANNING, scan.py
 
-MAX_QUOTE_AGE = 60          # Seconds. A member whose newest book is older than this is left out, it may be stale.
+MAX_BOOK_AGE = 60           # Seconds. A member whose newest book is older than this is left out, it may be stale.
 TARGET_ANNUAL_PCT = 10      # The return an opportunity must beat to be worth the risk.
 LOG_PROFIT_DOLLARS = 10     # Live episodes worth at least this at the peak are logged as they end.
 

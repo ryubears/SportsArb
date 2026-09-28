@@ -4,7 +4,7 @@ Tests for the scanner's episode detection over the recorder's in memory books.
 
 import pytest
 from db import database
-from db.models import Bet, Pair, Contract, Opportunity, Quote
+from db.models import Bet, Pair, Contract, Opportunity, Book
 from engine.components import record, scan
 from engine.helper import game
 
@@ -35,10 +35,6 @@ def make_db(tmp_path, members):
     return conn
 
 
-def quote(venue, contract_id, ts, bids, asks):
-    return Quote(venue, contract_id, ts, bids, asks)
-
-
 def stored(conn):
     """
     The Opportunities in the database, oldest first.
@@ -48,21 +44,21 @@ def stored(conn):
                peak_edge, peak_size, peak_profit, live, days_held, return_pct, annual_pct FROM opportunities ORDER BY start_ts""")]
 
 
-def replay(conn, quotes, drops=()):
+def replay(conn, books, drops=()):
     """
-    Drive a Scanner with quotes in time order, the way the recorder drives it live, and return what it stored.
+    Drive a Scanner with books in time order, the way the recorder drives it live, and return what it stored.
     drops are (ts, venue) pairs at which the venue's books are forgotten.
     """
     scanner = scan.Scanner(conn, "nfl", lambda m: None)
-    events = sorted(quotes, key=lambda q: q.ts)
-    latest = {}
-    for q in events:
+    events = sorted(books, key=lambda b: b.ts)
+    held = {}           # The newest book of each contract, as the recorder holds them.
+    for b in events:
         for ts, venue in drops:
-            if ts <= q.ts and not any(x.ts >= ts for k, x in latest.items() if k[0] == venue):
-                latest = {k: x for k, x in latest.items() if k[0] != venue}
-        latest[(q.venue, q.contract_id)] = q
-        scanner.on_book(q.venue, q.contract_id, latest, q.ts)
-        scanner.tick(latest, q.ts)
+            if ts <= b.ts and not any(x.ts >= ts for k, x in held.items() if k[0] == venue):
+                held = {k: x for k, x in held.items() if k[0] != venue}
+        held[(b.venue, b.contract_id)] = b
+        scanner.on_book(b.venue, b.contract_id, held, b.ts)
+        scanner.tick(held, b.ts)
     if events:
         scanner.tick({}, events[-1].ts)
     return stored(conn)
@@ -72,9 +68,9 @@ def replay(conn, quotes, drops=()):
 
 def test_scanner_finds_one_episode_with_duration_and_return(tmp_path):
     conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket_us", "pm")])
-    episodes = replay(conn, [quote("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]]),
-                             quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]]),
-                             quote("kalshi", "k", "2026-09-19T12:01:01+00:00", [[0.49, 100]], [[0.50, 100]])])
+    episodes = replay(conn, [Book("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]]),
+                             Book("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]]),
+                             Book("kalshi", "k", "2026-09-19T12:01:01+00:00", [[0.49, 100]], [[0.50, 100]])])
     assert len(episodes) == 1
     o = episodes[0]
     assert (o.start_ts, o.end_ts, o.seconds) == ("2026-09-19T12:00:01+00:00", "2026-09-19T12:01:01+00:00", 60)
@@ -91,8 +87,8 @@ def test_scanner_finds_one_episode_with_duration_and_return(tmp_path):
 def test_scanner_marks_live_and_uses_kickoff_for_payout(tmp_path):
     kickoff = "2026-09-19T11:00:00+00:00"
     conn = make_db(tmp_path, [member("kalshi", "k", start_time=kickoff), member("polymarket_us", "pm", start_time=kickoff)])
-    o = replay(conn, [quote("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]]),
-                      quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]])])[0]
+    o = replay(conn, [Book("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]]),
+                      Book("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]])])[0]
     assert o.live == 1
     assert o.end_ts == "2026-09-19T12:00:01+00:00"
     assert o.days_held == pytest.approx((game.payout_hours() - 1) / 24, rel=1e-3)
@@ -101,33 +97,33 @@ def test_scanner_marks_live_and_uses_kickoff_for_payout(tmp_path):
 def test_scanner_holds_until_the_slower_leg_pays(tmp_path):
     conn = make_db(tmp_path, [member("kalshi", "k", close_time="2026-10-19T12:00:00+00:00"),
                               member("polymarket_us", "pm", close_time="2026-09-29T12:00:00+00:00")])
-    o = replay(conn, [quote("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]]),
-                      quote("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]])])[0]
+    o = replay(conn, [Book("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]]),
+                      Book("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]])])[0]
     assert o.days_held == pytest.approx(30, rel=1e-4)
 
 
 def test_scanner_ignores_a_member_whose_book_went_stale(tmp_path):
     conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket_us", "pm")])
     # Polymarket US quoted once, then went quiet. Two minutes later Kalshi reprices and would appear to cross it.
-    assert replay(conn, [quote("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]]),
-                         quote("kalshi", "k", "2026-09-19T12:02:01+00:00", [[0.53, 100]], [[0.54, 100]])]) == []
+    assert replay(conn, [Book("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]]),
+                         Book("kalshi", "k", "2026-09-19T12:02:01+00:00", [[0.53, 100]], [[0.54, 100]])]) == []
 
 
 def test_scanner_ignores_a_book_from_before_its_venue_dropped(tmp_path):
     conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket_us", "pm")])
     # Polymarket US quoted at 12:00:00, dropped at 12:00:30, and requoted the same book at 12:01:30. Kalshi crosses it at 12:01:00.
-    quotes = [quote("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]]),
-              quote("polymarket_us", "pm", "2026-09-19T12:01:30+00:00", [[0.48, 100]], [[0.49, 100]]),
-              quote("kalshi", "k", "2026-09-19T12:01:00+00:00", [[0.53, 100]], [[0.54, 100]])]
-    assert len(replay(conn, quotes)) == 1
+    books = [Book("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]]),
+              Book("polymarket_us", "pm", "2026-09-19T12:01:30+00:00", [[0.48, 100]], [[0.49, 100]]),
+              Book("kalshi", "k", "2026-09-19T12:01:00+00:00", [[0.53, 100]], [[0.54, 100]])]
+    assert len(replay(conn, books)) == 1
     conn.execute("DELETE FROM opportunities")
-    episodes = replay(conn, quotes, drops=[("2026-09-19T12:00:30+00:00", "polymarket_us")])
+    episodes = replay(conn, books, drops=[("2026-09-19T12:00:30+00:00", "polymarket_us")])
     assert [o.start_ts for o in episodes] == ["2026-09-19T12:01:30+00:00"]     # Only once Polymarket is seen again.
 
 
 def test_scanner_ignores_time_before_two_members_have_books(tmp_path):
     conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket_us", "pm")])
-    assert replay(conn, [quote("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]])]) == []
+    assert replay(conn, [Book("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]])]) == []
 
 
 # LIVE
@@ -137,7 +133,7 @@ KICKOFF = "2026-09-20T17:00:00+00:00"
 
 
 def book(venue, cid, ts, bid, ask, size=100):
-    return Quote(venue, cid, ts, [[bid, size]], [[ask, size]])
+    return Book(venue, cid, ts, [[bid, size]], [[ask, size]])
 
 
 def game_db(tmp_path):
