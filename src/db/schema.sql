@@ -1,6 +1,6 @@
 -- The current schema of every table, in pipeline order. database.connect() runs it on every
--- connection, so a new table appears on its own. Changes to a table that already exists go in
--- migrations.py as a new step.
+-- connection, so a new table or index appears on its own. Changes to a table that already exists
+-- go in migrations.py as a new step.
 
 CREATE TABLE IF NOT EXISTS contracts (
     venue        TEXT NOT NULL,   -- 'kalshi' or 'polymarket_us'.
@@ -86,6 +86,9 @@ CREATE TABLE IF NOT EXISTS opportunities (
     annual_pct     REAL             -- return_pct scaled to a year over days_held, without compounding.
 );
 
+-- Reports read the episodes of a recent window, see tools/summary.py, and this spares them reading every one.
+CREATE INDEX IF NOT EXISTS idx_opportunities_start ON opportunities (start_ts);
+
 CREATE TABLE IF NOT EXISTS trades (
     id             INTEGER PRIMARY KEY,
     mode           TEXT NOT NULL DEFAULT 'paper',   -- 'paper' or 'live', the executor that made the trade. Rows from before live trading are paper.
@@ -120,6 +123,9 @@ CREATE TABLE IF NOT EXISTS trades (
     status         TEXT NOT NULL,   -- 'sent' while in flight, then 'filled', 'partial', or 'failed'.
     pays_at        TEXT NOT NULL    -- When the slower leg pays out.
 );
+
+-- The same for the trades of a recent window.
+CREATE INDEX IF NOT EXISTS idx_trades_signal ON trades (signal_ts);
 
 -- How each trade's legs paid out, one row per trade once both of its held legs have resolved, by settle.py.
 -- A trade with no row here is still open. A leg that held nothing has no result.
