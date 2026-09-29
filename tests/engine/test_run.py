@@ -3,6 +3,10 @@ Tests for the live process's refresh loop.
 """
 
 import asyncio
+import multiprocessing
+import os
+import pytest
+import scripted_refresh
 from db import database
 from engine import run
 from engine.components.market import streams
@@ -15,6 +19,8 @@ def test_run_survives_a_failing_refresh(tmp_path, monkeypatch, capsys, fake_stre
     def broken_refresh(sport, log=print, db_path=None):
         raise RuntimeError("kalshi is down")
     monkeypatch.setattr(run.pipeline, "refresh", broken_refresh)
+    # In this process, where the broken refresh is patched in. A child would import the real one.
+    monkeypatch.setattr(run, "refresh_in_child", lambda sports: asyncio.to_thread(run.refresh_catalog, sports, run.log))
     for venue in streams.STREAMS:
         monkeypatch.setitem(streams.STREAMS, venue, fake_stream)
     conn = database.connect(tmp_path / "test.sqlite")
@@ -36,6 +42,30 @@ def test_a_sport_whose_refresh_fails_leaves_the_others_to_refresh(monkeypatch):
     logs = []
     assert run.refresh_catalog(("nfl", "ncaaf"), logs.append) == "nfl: 1 pairs; ncaaf: failed"
     assert logs[0].startswith("ncaaf catalog refresh failed (RuntimeError('cfb tag gone')), keeping its stored catalog")
+
+
+def test_the_refresh_runs_in_a_child_process_that_is_gone_once_it_answers():
+    line = asyncio.run(run.refresh_in_child(("nfl", "ncaaf"), scripted_refresh.refresh))
+    assert line.startswith("refreshed nfl, ncaaf in process ")
+    assert int(line.split()[-1]) != os.getpid()
+    assert multiprocessing.active_children() == []
+
+
+def test_a_refresh_cancelled_as_the_run_stops_takes_its_child_down():
+    async def stop_midway():
+        refresh = asyncio.create_task(run.refresh_in_child(("nfl",), scripted_refresh.slow))
+        await asyncio.sleep(0.5)
+        refresh.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await refresh
+    asyncio.run(stop_midway())
+    assert multiprocessing.active_children() == []
+
+
+def test_a_refresh_process_that_dies_without_answering_fails_the_refresh():
+    with pytest.raises(RuntimeError, match="the refresh process ended without an answer, exit code 3"):
+        asyncio.run(run.refresh_in_child(("nfl",), scripted_refresh.crash))
+    assert multiprocessing.active_children() == []
 
 
 def session(tmp_path, monkeypatch, fake_stream, **kwargs):

@@ -28,10 +28,9 @@ venues, trading/ makes the trades, and money/ keeps the cash.
     executor does when live trading halts.
 
 The Session ties them together and ticks once a second. Every
-CATALOG_MINUTES the catalog of each sport is refreshed in a background
-thread, fetch then classify then match, and the new pairs' contracts are
-added to the running feeds and the closed ones removed, without
-reconnecting.
+CATALOG_MINUTES the catalog of each sport is refreshed in a child process,
+fetch then classify then match, and the new pairs' contracts are added to
+the running feeds and the closed ones removed, without reconnecting.
 
 One run trades every sport given to --sport, comma separated, since the
 money is one pool: a second process would spend the same dollars.
@@ -53,6 +52,8 @@ For a long run on a laptop, stop the Mac from sleeping while it runs:
 
 import argparse
 import asyncio
+import multiprocessing
+import signal
 import subprocess
 import sys
 import time
@@ -77,6 +78,7 @@ from engine.helper import config
 
 CATALOG_MINUTES = 60    # How often the catalog is refreshed and subscriptions updated. Zero disables it.
 EXECUTE = {"paper": ("paper",), "live": ("live",), "both": ("live", "paper")}     # What --execute trades in. Live first, so its orders go out first.
+CONTEXT = multiprocessing.get_context("spawn")      # A refresh child starts afresh, not as a copy of a process with a running loop and threads.
 
 
 @dataclass(frozen=True)
@@ -287,19 +289,60 @@ def refresh_catalog(sports, log):
     return "; ".join(results)
 
 
+def refresh_child(refresh, sports, answer):
+    """
+    Where a refresh child starts: run refresh(sports, log) and send its line back over answer.
+    """
+    signal.signal(signal.SIGINT, signal.SIG_IGN)    # The main process stops its children, Ctrl-C included.
+    sys.stdout.reconfigure(line_buffering=True)     # Log lines go out as they are written, as the main process's do.
+    answer.send(refresh(sports, log))
+
+
+async def refresh_in_child(sports, refresh=refresh_catalog):
+    """
+    Run refresh(sports, log) in a child process and return its line. A
+    refresh briefly holds some 300 MB, all freed when it ends, but a thread
+    of this process would not give it back: the allocator keeps what each
+    thread frees for that thread, so each refresh that landed on another
+    thread added some 50 MB for good. A child returns it all when it ends,
+    and its work leaves this process's core to the books. refresh must be
+    importable by name, since the child imports it.
+    """
+    loop = asyncio.get_running_loop()
+    answers, answer = CONTEXT.Pipe(duplex=False)
+    child = CONTEXT.Process(target=refresh_child, args=(refresh, sports, answer), name="catalog refresh", daemon=True)
+    child.start()
+    answer.close()              # The child's end, which it holds now.
+    ready = loop.create_future()
+    loop.add_reader(answers.fileno(), lambda: ready.done() or ready.set_result(None))
+    try:
+        await ready             # The child's line, or its end closing when it died without one.
+        return answers.recv()
+    except EOFError:
+        await asyncio.to_thread(child.join)
+        raise RuntimeError(f"the refresh process ended without an answer, exit code {child.exitcode}") from None
+    except asyncio.CancelledError:
+        child.kill()            # The run is stopping, and the next run refreshes when it starts.
+        raise
+    finally:
+        loop.remove_reader(answers.fileno())
+        answers.close()
+        await asyncio.to_thread(child.join)
+
+
 async def run(conn, options):
     """
     Refresh the catalog, start a Session, tick it every config.TICK_SECONDS,
-    and keep the catalog fresh on a timer, as the RunOptions say. A refresh
-    that fails is logged and tried again at the next interval, so a bad
-    fetch never stops the recording.
+    and keep the catalog fresh on a timer, as the RunOptions say, each
+    refresh in a child process. A refresh that fails is logged and tried
+    again at the next interval, so a bad fetch never stops the recording.
     """
     sports, seconds, catalog_seconds = options.sports, options.seconds, options.catalog_seconds
     log(f"starting {', '.join(sports)}, code {code_version()}")
     if catalog_seconds and options.refresh_at_start:
         log("refreshing catalog before starting")
         try:
-            log(await asyncio.to_thread(refresh_catalog, sports, log))
+            log(await refresh_in_child(sports))
         except Exception as e:
             log(with_traceback(f"catalog refresh failed ({e!r}), starting with the stored catalog", e))
     session = Session(conn, sports, options.scan, options.executors)
@@ -311,7 +354,7 @@ async def run(conn, options):
             await asyncio.sleep(config.TICK_SECONDS)
             session.tick()
             if catalog_seconds and refresh is None and time.time() - last_catalog >= catalog_seconds:
-                refresh = asyncio.create_task(asyncio.to_thread(refresh_catalog, sports, log))
+                refresh = asyncio.create_task(refresh_in_child(sports))
             if refresh is not None and refresh.done():
                 if refresh.exception():
                     log(with_traceback(f"catalog refresh failed ({refresh.exception()!r}), keeping current subscriptions", refresh.exception()))
