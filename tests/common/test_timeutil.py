@@ -17,6 +17,11 @@ def test_iso_passes_through_missing_and_unparseable_values():
     assert timeutil.iso("garbage") == "garbage"
 
 
+def test_utc_minute_reads_seconds_since_1970_to_the_minute():
+    assert timeutil.utc_minute(1790000000) == "2026-09-21 14:13 UTC"
+    assert timeutil.utc_minute(timeutil.epoch("2026-10-21T14:13:59Z")) == "2026-10-21 14:13 UTC"
+
+
 def test_shift_moves_forward_by_hours_and_days():
     t = "2026-09-20T17:00:00+00:00"
     assert timeutil.shift(t, hours=4) == "2026-09-20T21:00:00+00:00"

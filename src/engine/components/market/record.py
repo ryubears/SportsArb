@@ -24,6 +24,7 @@ The process that runs all this is run.py.
 """
 
 import time
+from common.stats import quantile
 from common.timeutil import epoch, now_iso, shift
 from common.venues import VENUES
 from db import database
@@ -43,13 +44,6 @@ def load_targets(conn, sports):
                                                                    recorded_since(now)).items():
             targets[venue].extend(contract_ids)
     return targets
-
-
-def percentile(values, share):
-    """
-    The value that a share of the sorted values fall at or below, such as 0.9 for the 90th percentile.
-    """
-    return values[min(int(share * len(values)), len(values) - 1)]
 
 
 def top(book):
@@ -128,9 +122,9 @@ class Recorder:
         """
         How far behind the venue its books reached us since the last status, as words for the status line, and then forget it.
         """
-        behind, ours = sorted(self.behind[venue]), sorted(self.ours[venue])
+        behind, ours = self.behind[venue], self.ours[venue]
         self.behind[venue], self.ours[venue] = [], []
         if not behind:
             return ""
-        words = f", {1000 * percentile(behind, 0.5):.0f} ms behind the venue, {1000 * percentile(behind, 0.9):.0f} at 90%"
-        return words + (f", {1000 * percentile(ours, 0.5):.0f} from us" if ours else "")
+        words = f", {1000 * quantile(behind, 0.5):.0f} ms behind the venue, {1000 * quantile(behind, 0.9):.0f} at 90%"
+        return words + (f", {1000 * quantile(ours, 0.5):.0f} from us" if ours else "")

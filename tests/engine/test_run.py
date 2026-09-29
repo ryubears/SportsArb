@@ -116,7 +116,7 @@ def test_a_trading_session_logs_its_settings_when_it_starts(tmp_path, monkeypatc
 
 
 def test_a_session_trading_both_modes_keeps_a_desk_for_each_and_offers_live_the_signal_first(tmp_path, monkeypatch, capsys, fake_stream):
-    monkeypatch.setattr(money_live, "READERS", {"kalshi": lambda: 800.0, "polymarket_us": lambda: 600.0})
+    monkeypatch.setattr(money_live, "READERS", {"kalshi": lambda: (800.0, {}), "polymarket_us": lambda: (600.0, {})})
     monkeypatch.setattr(brakes, "HALT_FILE", tmp_path / "live_halt.txt")
     monkeypatch.setattr(notify, "EMAIL_FILE", tmp_path / "email.json")
 

@@ -119,7 +119,7 @@ from engine.components.trading import notify
 
 
 def live_money(kalshi, polymarket_us):
-    cash = LiveBalances(lambda m: None, {"kalshi": lambda: kalshi, "polymarket_us": lambda: polymarket_us})
+    cash = LiveBalances(lambda m: None, {"kalshi": lambda: (kalshi, {}), "polymarket_us": lambda: (polymarket_us, {})})
     asyncio.run(cash.refresh("2026-09-27T23:00:00+00:00"))
     return cash
 

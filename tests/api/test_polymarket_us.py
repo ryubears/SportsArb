@@ -234,7 +234,9 @@ def test_the_latency_stopgap_leaves_an_order_unfilled_rather_than_refused(monkey
     answer = polymarket_us.place_order("slug", "buy", "yes", 3, 0.44, "c5")
     assert (answer.status, answer.filled, answer.note) == ("unfilled", 0, "latency stopgap: Global Rate Limit Exceeded")
     fake_api(monkeypatch, {("POST", "/orders"): RequestFailed(429, '{"status": 429, "message": "Global Rate Limit Exceeded"}')})
-    assert polymarket_us.place_order("slug", "buy", "yes", 3, 0.44, "c6").status == "unfilled"
+    answer = polymarket_us.place_order("slug", "buy", "yes", 3, 0.44, "c6")
+    assert (answer.status, answer.note, answer.response["status"]) == (
+        "unfilled", 'latency stopgap: {"status": 429, "message": "Global Rate Limit Exceeded"}', 429)
 
 
 def test_an_order_waits_as_long_as_the_stopgap_for_its_answer():

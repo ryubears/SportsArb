@@ -111,12 +111,14 @@ def fake_api(monkeypatch, answers):
     return calls
 
 
-def test_balance_is_read_in_dollars_from_a_call_signed_on_the_full_path(monkeypatch):
-    calls = fake_api(monkeypatch, {("GET", "/portfolio/balance"): {"balance": 123456, "balance_dollars": "1234.5600", "portfolio_value": 0}})
-    assert kalshi.balance() == 1234.56
+def test_the_balance_and_each_shards_are_read_in_dollars_from_one_call_signed_on_the_full_path(monkeypatch):
+    breakdown = [{"exchange_index": 0, "balance": "1000.0000"}, {"exchange_index": 3, "balance": "234.5600"}]
+    calls = fake_api(monkeypatch, {("GET", "/portfolio/balance"): {"balance": 123456, "balance_dollars": "1234.5600", "portfolio_value": 0,
+                                                                   "balance_breakdown": breakdown}})
+    assert kalshi.balances() == (1234.56, {0: 1000.0, 3: 234.56})
     assert calls == [("GET", "/portfolio/balance", "GET /trade-api/v2/portfolio/balance", None)]
-    fake_api(monkeypatch, {("GET", "/portfolio/balance"): {"balance": 123456}})       # Before the dollar field, cents.
-    assert kalshi.balance() == 1234.56
+    fake_api(monkeypatch, {("GET", "/portfolio/balance"): {"balance": 123456}})       # Before the dollar field and the shards, cents.
+    assert kalshi.balances() == (1234.56, {})
 
 
 def test_the_book_stream_asks_for_yes_side_prices():

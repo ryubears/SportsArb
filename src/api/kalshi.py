@@ -210,22 +210,16 @@ def attestation_lapses():
     return signed_request("GET", "/api_keys").get("api_key_region_expiration_ts")
 
 
-def balance():
+def balances():
     """
-    Dollars available for trading on the account, every exchange shard's together.
-    """
-    answer = signed_request("GET", "/portfolio/balance")
-    return float_or_zero(answer["balance_dollars"]) if "balance_dollars" in answer else answer["balance"] / 100
-
-
-def shard_balances():
-    """
-    Dollars available on each exchange shard, as {exchange index: dollars}.
-    Kalshi runs some sports on shards of their own, baseball on 3, and an
-    order spends only the cash on its market's shard.
+    Dollars available for trading on the account, every exchange shard's
+    together, and on each shard, as (dollars, {exchange index: dollars}),
+    from one call. Kalshi runs some sports on shards of their own, baseball
+    on 3, and an order spends only the cash on its market's shard.
     """
     answer = signed_request("GET", "/portfolio/balance")
-    return {int(entry["exchange_index"]): float_or_zero(entry["balance"]) for entry in answer.get("balance_breakdown") or []}
+    dollars = float_or_zero(answer["balance_dollars"]) if "balance_dollars" in answer else answer["balance"] / 100
+    return dollars, {int(entry["exchange_index"]): float_or_zero(entry["balance"]) for entry in answer.get("balance_breakdown") or []}
 
 
 # STREAMING
@@ -370,7 +364,7 @@ def place_order(ticker, action, outcome, quantity, price, client_id):
         answer = signed_request("POST", "/portfolio/events/orders", order_body(ticker, action, outcome, quantity, price, client_id))
     except RequestFailed as e:
         if SHORT_SHARD in e.body:
-            return orders.Answer(None, "unfilled", 0, 0.0, 0.0, f"insufficient shard balance: {e.body[:300]}", {"error": e.body, "status": e.status})
+            return orders.unfilled(e, "insufficient shard balance")
         return orders.refused(e) if e.status < 500 else orders.unknown(e)
     except Exception as e:
         return orders.unknown(e)

@@ -2,6 +2,7 @@
 Round trip every table through the database module.
 """
 
+import pytest
 from db import database
 from db.models import Bet, Contract, Gap, Opportunity, Pair
 
@@ -236,10 +237,22 @@ def test_paper_and_live_trades_and_settlements_are_kept_apart(tmp_path):
     assert [(t.id, t.mode) for t in database.load_open_trades(conn, "live")] == [(live.id, "live")]
     game = ("nfl", "2026-09-27", "CAR", "ATL")
     assert database.load_open_legs(conn, "live") == [(game, "polymarket_us", 2.25), (game, "kalshi", 2.35)]
+    assert database.load_held(conn, "live") == {"polymarket_us": 2.25, "kalshi": 2.35}
     database.insert_settlement(conn, Settlement(live.id, "2026-09-27T20:30:00+00:00", mode="live"))
     assert database.load_open_trades(conn, "live") == [] and database.load_open_legs(conn, "live") == []
     assert [t.id for t in database.load_open_trades(conn, "paper")] == [paper.id]             # Settling the live trade leaves paper alone.
     assert [s.trade_id for s in database.load_settlements(conn, "live")] == [live.id] and database.load_settlements(conn, "paper") == []
+
+
+def test_a_read_only_connection_reads_what_the_live_process_writes_and_writes_nothing(tmp_path):
+    import sqlite3
+    conn = database.connect(tmp_path / "t.sqlite")
+    database.insert_gap(conn, Gap("kalshi", "2026-09-27T17:00:00+00:00", "2026-09-27T17:00:05+00:00"))
+    conn.commit()
+    reader = database.read_only(tmp_path / "t.sqlite")
+    assert reader.execute("SELECT venue FROM gaps").fetchall() == [("kalshi",)]
+    with pytest.raises(sqlite3.OperationalError, match="readonly"):
+        reader.execute("DELETE FROM gaps")
 
 
 def test_orders_are_stored_before_they_are_sent_and_updated_with_the_answer(tmp_path):

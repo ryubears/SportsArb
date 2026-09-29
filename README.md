@@ -576,7 +576,7 @@ every 15 seconds, which also keeps the venue's kept HTTPS connection warm
 for the next order, and at once after a payout, and applies what our own
 fills move in between, so a burst of trades does not spend the same dollars
 twice. Nothing is traded before the first reading. Kalshi's cash on each
-exchange shard is kept the same way, read, moved, and reserved, and an
+exchange shard comes in the same reading and is kept the same way, and an
 order on a shard spends no more than that shard has free, whatever the
 venue as a whole has. The settler settles live trades as it does paper
 ones, storing each as a `live` `Settlement`, while the venue pays out on
@@ -798,7 +798,8 @@ python3 -m tools.feed_check --seconds 300 --markets 100
 src/
   api/        venue clients and the shared websocket book stream
   catalog/    fetch, classify (one parser per venue), match, pipeline
-  common/     paths, time and json helpers, the venue list, the logger, the timer background work runs on
+  common/     paths, time and json helpers, the venue list, the logger, the timer background work runs on,
+              how a child process starts, quantiles
   db/         models, the SQLite schema and its migrations, reads and writes
   engine/     run, the process that wires the components together
     components/

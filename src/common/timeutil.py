@@ -48,6 +48,13 @@ def epoch(value):
         return None
 
 
+def utc_minute(seconds):
+    """
+    Seconds since 1970 as a time to the minute in UTC for people to read, such as '2026-10-21 14:13 UTC'.
+    """
+    return datetime.fromtimestamp(seconds, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
 def now_iso():
     """
     Current UTC time as an ISO 8601 string.

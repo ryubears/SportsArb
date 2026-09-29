@@ -124,7 +124,7 @@ def test_a_game_the_venue_says_is_live_past_its_expected_length_keeps_its_cap_an
 def test_live_caps_stay_within_the_live_bounds_and_the_budget(tmp_path):
     def live(reading):
         def make(conn):
-            cash = LiveBalances(lambda m: None, {"kalshi": lambda: reading, "polymarket_us": lambda: reading})
+            cash = LiveBalances(lambda m: None, {"kalshi": lambda: (reading, {}), "polymarket_us": lambda: (reading, {})})
             asyncio.run(cash.refresh(f"{SUNDAY}T16:00:00+00:00"))
             return cash
         return make
@@ -141,7 +141,7 @@ def test_live_caps_stay_within_the_live_bounds_and_the_budget(tmp_path):
 
 
 def test_a_plan_made_before_the_live_balances_are_read_is_not_kept(tmp_path):
-    conn, allocator = plan_for(tmp_path, EARLY, lambda conn: LiveBalances(lambda m: None, {"kalshi": lambda: 100.0, "polymarket_us": lambda: 100.0}))
+    conn, allocator = plan_for(tmp_path, EARLY, lambda conn: LiveBalances(lambda m: None, {"kalshi": lambda: (100.0, {}), "polymarket_us": lambda: (100.0, {})}))
     now = EARLY[0][2]
     assert allocator.budget_left(now) == {"kalshi": 0.0, "polymarket_us": 0.0} and allocator.plan is None
     asyncio.run(allocator.cash.refresh(now))
@@ -160,7 +160,7 @@ def test_the_live_plan_covers_only_the_sports_live_trades(tmp_path, monkeypatch)
     monkeypatch.setattr(config, "LIVE_SPORTS", ("ncaaf",))                 # As if NFL games were paper only.
 
     def live(conn):
-        cash = LiveBalances(lambda m: None, {"kalshi": lambda: 5000.0, "polymarket_us": lambda: 5000.0})
+        cash = LiveBalances(lambda m: None, {"kalshi": lambda: (5000.0, {}), "polymarket_us": lambda: (5000.0, {})})
         asyncio.run(cash.refresh(f"{SUNDAY}T16:00:00+00:00"))
         return cash
 

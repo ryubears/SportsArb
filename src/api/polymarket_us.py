@@ -438,7 +438,7 @@ def place_order(slug, action, outcome, quantity, price, client_id):
         answer = signed_request("POST", "/orders", order_body(slug, action, outcome, quantity, price))
     except RequestFailed as e:
         if STOPGAP in e.body:
-            return orders.Answer(None, "unfilled", 0, 0.0, 0.0, f"latency stopgap: {e.body[:300]}", {"error": e.body, "status": e.status})
+            return orders.unfilled(e, "latency stopgap")
         return orders.refused(e) if e.status < 500 else orders.unknown(e)
     except Exception as e:
         return orders.unknown(e)

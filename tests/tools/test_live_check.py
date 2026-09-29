@@ -1,10 +1,24 @@
 """
-Tests for the live check's reading of the Kalshi key's location attestation.
+Tests for the live check's reading of the balances and of the Kalshi key's location attestation.
 """
 
 from tools import live_check
 
 NOW = 1790000000
+
+
+def test_each_venues_balance_is_shown_with_its_shards_and_one_that_cannot_be_read_fails_the_check(capsys):
+    def unreadable():
+        raise RuntimeError("401")
+    assert live_check.check_balances({"kalshi": lambda: (100.0, {3: 20.0, 0: 80.0}), "polymarket_us": lambda: (50.0, {})})
+    assert not live_check.check_balances({"kalshi": unreadable, "polymarket_us": lambda: (50.0, {})})
+    assert capsys.readouterr().out.splitlines() == [
+        "kalshi: 100.00$ available to trade",
+        "kalshi by exchange shard, each trading only its own markets: shard 0 80.00$, shard 3 20.00$",
+        "polymarket_us: 50.00$ available to trade",
+        "kalshi: the balance could not be read (RuntimeError('401'))",
+        "polymarket_us: 50.00$ available to trade",
+    ]
 
 
 def test_the_attestation_date_is_shown_with_a_reminder_to_renew_when_it_is_near(capsys):
