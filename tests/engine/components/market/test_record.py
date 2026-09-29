@@ -33,3 +33,16 @@ def test_a_gap_is_stored_and_only_the_dropped_connections_books_wait_to_be_sent_
     assert [(g.start_ts, g.end_ts) for g in gaps] == [("2026-09-20T20:37:31+00:00", "2026-09-20T20:37:36+00:00")]
     r.on_book("polymarket_us", "P1", [[0.5, 1]], [[0.6, 1]])    # The same book again from the new connection.
     assert sorted(r.books) == [("kalshi", "K"), ("polymarket_us", "P1"), ("polymarket_us", "P2")]
+
+
+def test_status_says_how_far_behind_the_venue_its_books_came_and_starts_over_after(tmp_path, monkeypatch):
+    monkeypatch.setattr(record.time, "time", lambda: 1000.0)
+    r = record.Recorder(database.connect(tmp_path / "test.sqlite"))
+    received = "1970-01-01T00:16:39.998000+00:00"          # 2 ms before the recorder has it, at 1000.
+    for ms in range(10, 110, 10):                          # The venue sent them 10 to 100 ms before that.
+        r.on_book("polymarket_us", "P", [[0.5, 1]], [[0.6, 1]], ts=received, sent=1000.0 - ms / 1000)
+    r.on_book("kalshi", "K", [[0.5, 1]], [[0.6, 1]])       # A book without the venue's time, such as a snapshot.
+    status = r.status()
+    assert "polymarket_us 10 (last 0s ago, 0 gaps, 60 ms behind the venue, 100 at 90%, 2 from us)" in status
+    assert "kalshi 1 (last 0s ago, 0 gaps)" in status
+    assert "polymarket_us 10 (last 0s ago, 0 gaps)" in r.status()

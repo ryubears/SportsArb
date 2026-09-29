@@ -9,12 +9,24 @@ from fake_socket import Socket
 
 def test_stream_replaces_the_book_from_each_message():
     seen = []
-    stream = polymarket_us.PolymarketUSBookStream(["s"], lambda slug, bids, asks: seen.append((slug, bids, asks)))
+    stream = polymarket_us.PolymarketUSBookStream(["s"], lambda slug, bids, asks, sent: seen.append((slug, bids, asks)))
     stream.reset()
     assert stream.handle('{"requestId": "md-1", "subscriptionType": "SUBSCRIPTION_TYPE_MARKET_DATA"}') is False
     stream.handle('{"marketData": {"marketSlug": "s", "bids": [{"px": {"value": "0.30"}, "qty": "5"}, {"px": {"value": "0.31"}, "qty": "2"}], "offers": [{"px": {"value": "0.33"}, "qty": "1"}]}}')
     stream.handle('{"marketData": {"marketSlug": "other", "bids": [], "offers": []}}')
     assert seen == [("s", [[0.31, 2.0], [0.30, 5.0]], [[0.33, 1.0]])]
+
+
+def test_a_book_carries_its_transact_time_except_the_first_of_each_market_on_a_connection():
+    sent = []
+    stream = polymarket_us.PolymarketUSBookStream(["s"], lambda slug, bids, asks, at: sent.append(at))
+    message = '{"marketData": {"marketSlug": "s", "bids": [], "offers": [], "transactTime": "2026-09-29T04:15:16.288755493Z"}}'
+    stream.reset()
+    stream.handle(message)          # The snapshot a subscription starts with, whose time is its last change.
+    stream.handle(message)
+    stream.reset()                  # A new connection starts with a snapshot again.
+    stream.handle(message)
+    assert sent == [None, 1790655316.288755, None]
 
 
 def test_levels_drop_empty_sizes_and_sort_best_first():

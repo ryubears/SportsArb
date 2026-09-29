@@ -25,7 +25,7 @@ from api.bookstream import BookStream
 from api.http import RequestFailed, get_json, send_json
 from common.jsonutil import float_or_none, float_or_zero
 from common.paths import DATA_DIR
-from common.timeutil import iso
+from common.timeutil import epoch, iso
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from db.models import Contract
 
@@ -203,6 +203,7 @@ class PolymarketUSBookStream(BookStream):
         self.request_id = 0
         self.requests = 0       # Subscription requests this connection has spent, adds still queued included.
         self.asked = {}         # Each request id sent maps to its slugs, to hand them back if it is refused.
+        self.seen = set()       # Slugs whose first book has come on this connection. That one is a snapshot, whose transactTime is its last change, maybe long ago.
 
     def room(self):
         """
@@ -271,7 +272,9 @@ class PolymarketUSBookStream(BookStream):
             return True
         bids, asks = levels(data.get("bids"), reverse=True)[:self.depth], levels(data.get("offers"), reverse=False)[:self.depth]
         self.books[slug] = {"bids": bids, "asks": asks}
-        self.on_book(slug, bids, asks)
+        sent = epoch(data.get("transactTime")) if slug in self.seen else None
+        self.seen.add(slug)
+        self.on_book(slug, bids, asks, sent)
         return True
 
 

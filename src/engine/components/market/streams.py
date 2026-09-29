@@ -33,12 +33,12 @@ class Streams:
         self.feeds = {}                                             # Venue maps to its VenueFeed, or the FeedProcess running it.
         self.wanted = {venue: set() for venue in stream_classes}   # The contracts each venue records.
 
-    def on_book(self, venue, contract_id, bids, asks, ts, books=1):
+    def on_book(self, venue, contract_id, bids, asks, ts, books=1, sent=None):
         """
         Pass a book to the recorder, unless its contract was removed and the feed had not caught up.
         """
         if contract_id in self.wanted[venue]:
-            self.recorder.on_book(venue, contract_id, bids, asks, ts, books)
+            self.recorder.on_book(venue, contract_id, bids, asks, ts, books, sent)
 
     def connections(self, venue):
         """
@@ -53,8 +53,8 @@ class Streams:
         """
         self.wanted[venue] = set(contract_ids)
 
-        def on_book(contract_id, bids, asks, ts, books=1):
-            self.on_book(venue, contract_id, bids, asks, ts, books)
+        def on_book(contract_id, bids, asks, ts, books=1, sent=None):
+            self.on_book(venue, contract_id, bids, asks, ts, books, sent)
 
         def on_gap(start_ts, end_ts, gap_ids):
             self.recorder.on_gap(venue, start_ts, end_ts, gap_ids)

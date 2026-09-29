@@ -35,6 +35,19 @@ def iso(value):
     return dt.astimezone(timezone.utc).isoformat()
 
 
+def epoch(value):
+    """
+    Seconds since 1970 for an ISO 8601 timestamp, such as the venues send
+    with their messages, or None when there is none or it does not parse.
+    """
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
 def now_iso():
     """
     Current UTC time as an ISO 8601 string.

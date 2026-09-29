@@ -54,7 +54,8 @@ PAPER_TRANSFER_DAYS = 4     # Business days a paper transfer between venues take
 LIVE_MIN_CAP = 1            # The cap a live game gets when its plan gives less than one contract, while the half hour's budget lasts.
                             # It only keeps the cap from rounding down to nothing: a trade still needs the edge, the depth, and the cash.
 LIVE_MAX_CAP = 5            # The most contracts one live trade may hold, whatever the allocator would give.
-LIVE_BALANCE_SECONDS = 30   # Between readings of the venues' balances.
+LIVE_BALANCE_SECONDS = 15   # Between readings of the venues' balances. Under http.IDLE_SECONDS, so each reading also keeps the
+                            # venue's kept connection open for the next order: one opened afresh took Polymarket US 11 ms longer.
 LIVE_CASH_FLOOR = 5.0       # Dollars new live trades leave untouched on each venue. Flattening may still use them.
 LIVE_ORDER_WINDOW = 20      # The newest orders the unknown outcome brake looks at.
 LIVE_UNKNOWN_LIMIT = 3      # Orders with an unknown outcome among the newest LIVE_ORDER_WINDOW at which live trading halts.

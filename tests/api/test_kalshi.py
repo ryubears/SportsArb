@@ -22,7 +22,7 @@ def test_update_frame():
 
 def test_stream_restates_no_side_as_yes_asks_and_tracks_sid():
     seen = []
-    stream = kalshi.KalshiBookStream(["T"], lambda ticker, bids, asks: seen.append((ticker, bids, asks)))
+    stream = kalshi.KalshiBookStream(["T"], lambda ticker, bids, asks, sent: seen.append((ticker, bids, asks)))
     stream.reset()
     stream.handle('{"type": "subscribed", "msg": {"channel": "orderbook_delta", "sid": 4}}')
     assert stream.sid == 4 and stream.subscribed.is_set()
@@ -37,7 +37,7 @@ def test_stream_restates_no_side_as_yes_asks_and_tracks_sid():
 def test_the_levels_passed_on_are_the_best_of_the_whole_book_after_every_delta():
     rng = random.Random(3)
     seen = []
-    stream = kalshi.KalshiBookStream(["T"], lambda ticker, bids, asks: seen.append((bids, asks)))
+    stream = kalshi.KalshiBookStream(["T"], lambda ticker, bids, asks, sent: seen.append((bids, asks)))
     stream.reset()
     stream.depth = 3
     stream.apply({"type": "orderbook_snapshot", "msg": {"market_ticker": "T", "yes_dollars_fp": [["0.40", "5"], ["0.39", "0"]],
@@ -49,6 +49,17 @@ def test_the_levels_passed_on_are_the_best_of_the_whole_book_after_every_delta()
         assert all(size > 0 for side in ("yes", "no") for size in book[side].values())
         assert seen[-1] == ([[p, s] for p, s in sorted(book["yes"].items(), reverse=True)][:3],
                             [[p, s] for p, s in sorted(book["no"].items())][:3])
+
+
+def test_a_delta_carries_the_matching_engine_time_and_a_snapshot_none():
+    sent = []
+    stream = kalshi.KalshiBookStream(["T"], lambda ticker, bids, asks, at: sent.append(at))
+    stream.reset()
+    stream.apply({"type": "orderbook_snapshot", "msg": {"market_ticker": "T", "yes_dollars_fp": [["0.28", "10"]], "no_dollars_fp": []}})
+    stream.apply({"type": "orderbook_delta", "msg": {"market_ticker": "T", "price_dollars": "0.30", "delta_fp": "4", "side": "yes",
+                                                     "ts_ms": 1790651367684}})
+    stream.apply({"type": "orderbook_delta", "msg": {"market_ticker": "T", "price_dollars": "0.30", "delta_fp": "1", "side": "yes"}})
+    assert sent == [None, 1790651367.684, None]
 
 
 def test_stream_asks_to_reconnect_on_a_sequence_gap():

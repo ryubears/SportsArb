@@ -26,10 +26,10 @@ class Pipe:
 
 def test_the_outbox_keeps_the_newest_book_of_each_contract_and_counts_the_ones_behind_it():
     outbox = feeds.Outbox(Pipe())
-    outbox.book("a", [[0.50, 1]], [[0.60, 1]], "t1")
-    outbox.book("a", [[0.51, 1]], [[0.60, 1]], "t2")
+    outbox.book("a", [[0.50, 1]], [[0.60, 1]], "t1", sent=100.0)
+    outbox.book("a", [[0.51, 1]], [[0.60, 1]], "t2", sent=101.0)
     outbox.book("b", [[0.40, 1]], [[0.70, 1]], "t3")
-    assert outbox.take() == [("books", [("a", [[0.51, 1]], [[0.60, 1]], "t2", 2), ("b", [[0.40, 1]], [[0.70, 1]], "t3", 1)])]
+    assert outbox.take() == [("books", [("a", [[0.51, 1]], [[0.60, 1]], "t2", 101.0, 2), ("b", [[0.40, 1]], [[0.70, 1]], "t3", None, 1)])]
     assert outbox.take() == []
 
 
@@ -39,7 +39,7 @@ def test_a_gap_goes_out_before_later_books_and_drops_the_unsent_books_of_its_con
     outbox.book("c", [[0.5, 1]], [], "t1")         # From another connection, which carries on.
     outbox.gap("t0", "t2", ["a", "b"])
     outbox.book("b", [[0.4, 1]], [], "t3")         # From the new connection.
-    assert outbox.take() == [("gap", "t0", "t2", ["a", "b"]), ("books", [("c", [[0.5, 1]], [], "t1", 1), ("b", [[0.4, 1]], [], "t3", 1)])]
+    assert outbox.take() == [("gap", "t0", "t2", ["a", "b"]), ("books", [("c", [[0.5, 1]], [], "t1", None, 1), ("b", [[0.4, 1]], [], "t3", None, 1)])]
 
 
 def test_the_outbox_thread_sends_everything_before_it_closes():
@@ -51,7 +51,7 @@ def test_the_outbox_thread_sends_everything_before_it_closes():
     outbox.close()
     newest = {entry[0]: entry for _, entries in pipe.sent for entry in entries}
     assert {c: entry[1] for c, entry in newest.items()} == {f"c{j}": [[0.5, 990 + j]] for j in range(10)}
-    assert sum(entry[4] for _, entries in pipe.sent for entry in entries) == 1000       # Each book counted once, sent or replaced.
+    assert sum(entry[5] for _, entries in pipe.sent for entry in entries) == 1000       # Each book counted once, sent or replaced.
 
 
 class OfflinePolymarket(polymarket_us.PolymarketUSBookStream):
@@ -125,4 +125,5 @@ def test_a_feed_in_its_own_process_follows_the_catalog_and_comes_back_with_a_gap
     (gap,) = database.load_gaps(conn, "polymarket_us")
     assert gap.start_ts <= gap.end_ts
     assert r.updates["polymarket_us"] >= 7                                      # a, b, c, then d, then b, c, d again.
+    assert len(r.behind["polymarket_us"]) >= 7 and all(0 <= s < 5 for s in r.behind["polymarket_us"])   # The venue's time came through.
     assert [line.split(" process ")[0] for line in logs] == ["polymarket_us feed runs in", "polymarket_us feed", "polymarket_us feed runs in"]

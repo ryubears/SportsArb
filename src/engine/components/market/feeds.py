@@ -43,8 +43,9 @@ class VenueFeed:
     connections in order, as many as each one's room() allows, and to new
     connections once none has room. Contracts a venue refuses on one
     connection come back through its on_refused and are placed the same
-    way. Each book is passed to on_book(contract_id, bids, asks, ts) with
-    the time it arrived, depth levels a side, and each gap to
+    way. Each book is passed to on_book(contract_id, bids, asks, ts, sent=)
+    with the time it arrived and the venue's time for it, as the stream
+    gives it, depth levels a side, and each gap to
     on_gap(start_ts, end_ts, contract_ids). down_since, when given, is when
     the venue's connections were lost before these, so their first
     subscriptions end a gap.
@@ -68,7 +69,8 @@ class VenueFeed:
         """
         Open one more connection, carrying these contracts.
         """
-        stream = self.stream_class(list(contract_ids), lambda cid, bids, asks: self.on_book(cid, bids, asks, now_iso()), self.on_gap, self.log)
+        stream = self.stream_class(list(contract_ids), lambda cid, bids, asks, sent=None: self.on_book(cid, bids, asks, now_iso(), sent=sent),
+                                   self.on_gap, self.log)
         if self.depth:
             stream.depth = self.depth
         stream.down_since = self.down_since
@@ -139,16 +141,16 @@ class Outbox:
     def __init__(self, conn):
         self.conn = conn
         self.lock = threading.Lock()
-        self.books = {}                     # Contract id maps to (bids, asks, ts, books behind it) not yet sent.
+        self.books = {}                     # Contract id maps to (bids, asks, ts, sent, books behind it) not yet sent.
         self.gaps = []                      # ("gap", start_ts, end_ts, contract_ids) not yet sent, in order.
         self.pending = threading.Event()    # Set while something waits to be sent.
         self.closed = False
         self.thread = None
 
-    def book(self, contract_id, bids, asks, ts):
+    def book(self, contract_id, bids, asks, ts, sent=None):
         with self.lock:
             unsent = self.books.get(contract_id)
-            self.books[contract_id] = (bids, asks, ts, unsent[3] + 1 if unsent else 1)
+            self.books[contract_id] = (bids, asks, ts, sent, unsent[4] + 1 if unsent else 1)
         self.pending.set()
 
     def gap(self, start_ts, end_ts, contract_ids):
@@ -243,7 +245,8 @@ class FeedProcess:
     """
     One venue's VenueFeed, run in a child process. What the child sends is
     passed on here in the main process: each book to on_book(contract_id,
-    bids, asks, ts, books) with the number of books it stands for, and each
+    bids, asks, ts, books, sent) with the number of books it stands for and
+    the venue's time for the newest, and each
     gap to on_gap(start_ts, end_ts, contract_ids). When the child dies,
     on_lost(contract_ids) drops its books, and a new child starts after a
     pause, its first subscriptions ending a gap from when the old one was
@@ -298,8 +301,8 @@ class FeedProcess:
         try:
             if message[0] == "books":
                 self.deaths = 0
-                for contract_id, bids, asks, ts, books in message[1]:
-                    self.on_book(contract_id, bids, asks, ts, books)
+                for contract_id, bids, asks, ts, sent, books in message[1]:
+                    self.on_book(contract_id, bids, asks, ts, books, sent)
             else:
                 self.on_gap(*message[1:])
         except Exception as e:

@@ -6,15 +6,17 @@ it by name, from the import path pytest gives tests/support.
 """
 
 import asyncio
+import time
 from api.bookstream import BookStream
 from common.timeutil import now_iso
 
 
 class ScriptedStream(BookStream):
     """
-    Sends a book for each contract it carries as soon as it carries it, and
-    ends a gap first when its connection was lost before it started. Two
-    contracts fill a connection.
+    Sends a book for each contract it carries as soon as it carries it,
+    stamped with the time it sent it as a venue does, and ends a gap first
+    when its connection was lost before it started. Two contracts fill a
+    connection.
     """
 
     name = "scripted"
@@ -27,6 +29,6 @@ class ScriptedStream(BookStream):
         sent = set()
         while True:
             for contract_id in sorted(self.wanted - sent):
-                self.on_book(contract_id, [[0.5, 1]], [[0.6, 1]])
+                self.on_book(contract_id, [[0.5, 1]], [[0.6, 1]], time.time())
             sent = set(self.wanted)
             await asyncio.sleep(0.01)

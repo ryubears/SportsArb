@@ -46,7 +46,11 @@ class BookStream:
     contracts this connection carries, so the recorder can mark the stretch
     and drop just their books. A connection left with nothing to carry
     stays closed, and reports no gap, until contracts are added to it.
-    Subclasses set name and implement the venue hooks below.
+    Each change goes to on_book(contract_id, bids, asks, sent), where sent
+    is when the venue says it made the change, in seconds since 1970, or
+    None when the message does not say, so how far the feed runs behind
+    the venue can be measured. Subclasses set name and implement the venue
+    hooks below.
     """
 
     name = "venue"                  # Used in log lines.
