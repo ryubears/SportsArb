@@ -73,3 +73,28 @@ def test_settled_legs_count_by_when_each_leg_settled(tmp_path, monkeypatch, caps
     out = report(tmp_path, monkeypatch, capsys, fill)
     # Only the first trade's no leg, on Kalshi, settled in the window. Its yes leg settled before it, as did the second trade.
     assert table(out, "paper settled legs by venue, last 12 hours") == [["kalshi", "1", "10", "4.7", "0.0", "-4.7"]]
+
+
+def test_live_money_shows_each_venue_read_now_and_what_open_live_trades_hold(tmp_path, capsys):
+    path = tmp_path / "t.sqlite"
+    conn = database.connect(path)
+    conn.execute("INSERT INTO pairs (id, label, kind, venues, contracts, flags, matched_at) "
+                 "VALUES (1, 'the bet', 'winner', 'kalshi,polymarket_us', 2, '[]', ?)", (BEFORE,))
+    for held, cost in ((5, 2.5), (0, 0.0)):      # One live trade holding 5 contracts a side, one flattened to nothing.
+        database.insert_trade(conn, Trade(mode="live", pair_id=1, trade="t", signal_ts=INSIDE, edge=0.06, quantity=5,
+                                          yes_venue="kalshi", yes_contract="k", yes_polarity="yes", yes_limit=0.5,
+                                          no_venue="polymarket_us", no_contract="p", no_polarity="yes", no_limit=0.45,
+                                          pays_at=INSIDE, yes_held=held, no_held=held, yes_cost=cost, no_cost=cost * 0.9, status="filled"))
+    conn.commit()
+
+    def unreachable():
+        raise RuntimeError("401 unauthorized")
+
+    balances = summary.read_live_balances({"kalshi": lambda: 92.0, "polymarket_us": unreachable})
+    assert balances == {"kalshi": 92.0, "polymarket_us": "not read (401 unauthorized)"}
+    summary.print_live_money(sqlite3.connect(f"file:{path}?mode=ro", uri=True), balances)
+    assert capsys.readouterr().out.splitlines()[1:] == [
+        "live money",
+        "  live balances on the venues, read now: kalshi 92.00$, polymarket_us not read (401 unauthorized)",
+        "  in open live trades: kalshi 2.50$, polymarket_us 2.25$",
+    ]
