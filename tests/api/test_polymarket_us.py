@@ -3,6 +3,7 @@ Tests for the Polymarket US client's book handling that need no network.
 """
 
 import asyncio
+import json
 from api import polymarket_us
 from fake_socket import Socket
 
@@ -47,22 +48,30 @@ def test_error_frames_are_logged_and_do_not_count_as_data():
     assert stream.wanted == {"s"}
 
 
+def test_each_chunk_of_slugs_subscribes_to_books_and_trades():
+    ws = Socket()
+    asyncio.run(polymarket_us.PolymarketUSBookStream([f"s{i:03}" for i in range(150)], lambda *args: None).subscribe(ws))
+    assert [(f["subscribe"]["requestId"], f["subscribe"]["subscriptionType"], len(f["subscribe"]["marketSlugs"])) for f in ws.sent] == [
+        ("md-1", "SUBSCRIPTION_TYPE_MARKET_DATA", 100), ("tr-1", "SUBSCRIPTION_TYPE_TRADE", 100),
+        ("md-2", "SUBSCRIPTION_TYPE_MARKET_DATA", 50), ("tr-2", "SUBSCRIPTION_TYPE_TRADE", 50)]
+
+
 def test_room_counts_the_subscription_requests_left_rather_than_the_slugs():
-    stream = polymarket_us.PolymarketUSBookStream([f"s{i:03}" for i in range(950)], lambda *args: None)
-    assert polymarket_us.PolymarketUSBookStream.capacity == 1000
+    stream = polymarket_us.PolymarketUSBookStream([f"s{i:03}" for i in range(450)], lambda *args: None)
+    assert polymarket_us.PolymarketUSBookStream.capacity == 500     # Five chunks, each taking a request for books and one for trades.
     assert stream.room() == 50                          # Before it subscribes, only the slug capacity bounds it.
     ws = Socket()
     asyncio.run(stream.subscribe(ws))
-    assert len(ws.sent) == 10 and stream.room() == 0    # Ten requests, the last carrying 50 slugs, leave none for an add.
+    assert len(ws.sent) == 10 and stream.room() == 0    # Ten requests, the last two carrying 50 slugs, leave none for an add.
 
 
-def test_every_add_spends_a_request_however_few_slugs_it_brings():
-    stream = polymarket_us.PolymarketUSBookStream([f"s{i:03}" for i in range(420)], lambda *args: None)
+def test_every_add_spends_requests_however_few_slugs_it_brings():
+    stream = polymarket_us.PolymarketUSBookStream([f"s{i:03}" for i in range(220)], lambda *args: None)
     asyncio.run(stream.subscribe(Socket()))
-    assert stream.room() == 500                         # Five requests spent, five left.
-    for refresh in range(5):
+    assert stream.room() == 200                         # Six requests spent, four left, two chunks.
+    for refresh in range(2):
         stream.add([f"r{refresh}-{i}" for i in range(28)])
-    assert len(stream.wanted) == 560 and stream.room() == 0     # Counting slugs, it would take 440 more.
+    assert len(stream.wanted) == 276 and stream.room() == 0     # Counting slugs, it would take 224 more.
     stream.remove(["s000"])
     assert stream.room() == 0                           # With no unsubscribe, a removal gives no request back.
 
@@ -76,11 +85,54 @@ def test_a_refused_subscription_fills_the_connection_and_hands_back_its_slugs():
     stream.add(["c", "d", "e"])
     asyncio.run(stream.send_command(ws, *stream.commands.get_nowait()))
     stream.remove(["e"])
-    assert [frame["subscribe"]["requestId"] for frame in ws.sent] == ["md-1", "md-2"]
+    assert [frame["subscribe"]["requestId"] for frame in ws.sent] == ["md-1", "tr-1", "md-2", "tr-2"]
     assert stream.handle('{"requestId": "md-2", "error": "max subscriptions per connection reached"}') is False
+    assert stream.handle('{"requestId": "tr-2", "error": "max subscriptions per connection reached"}') is False    # Moved already.
     assert handed == [["c", "d"]]                       # e was removed since, so it needs no other connection.
     assert stream.wanted == {"a", "b"} and stream.room() == 0
     assert logs == ["polymarket_us refused md-2 as one subscription too many, moving its 2 contracts to another connection"]
+
+
+def book_message(slug, at, bids, asks):
+    return json.dumps({"marketData": {"marketSlug": slug, "transactTime": at, "bids": [{"px": {"value": p}, "qty": q} for p, q in bids],
+                                      "offers": [{"px": {"value": p}, "qty": q} for p, q in asks]}})
+
+
+def trade_message(slug, at, price, quantity, maker_side, state="TRADE_STATE_NEW"):
+    return json.dumps({"trade": {"marketSlug": slug, "price": {"value": price}, "quantity": {"value": quantity}, "tradeTime": at,
+                                 "maker": {"side": maker_side}, "taker": {}, "state": state}})
+
+
+def test_a_trade_shows_in_the_book_until_a_book_shows_it():
+    seen = []
+    stream = polymarket_us.PolymarketUSBookStream(["s"], lambda slug, bids, asks, sent: seen.append((bids, asks, sent)))
+    stream.reset()
+    bids = [("0.40", "5"), ("0.39", "3")]
+    stream.handle(book_message("s", "2026-09-29T07:00:00Z", bids, [("0.42", "2"), ("0.43", "4")]))
+    # A buyer took all of 0.42 and one at 0.43. Its trade at 0.42 was missed, and the 0.43 one still takes 0.42 away.
+    stream.handle(trade_message("s", "2026-09-29T07:00:02Z", "0.43", "1", "ORDER_SIDE_SELL"))
+    assert seen[-1] == ([[0.40, 5.0], [0.39, 3.0]], [[0.43, 3.0]], 1790665202.0)
+    # A book from before the trade, arriving late, gets it again.
+    stream.handle(book_message("s", "2026-09-29T07:00:01Z", bids, [("0.42", "2"), ("0.43", "4"), ("0.44", "1")]))
+    assert seen[-1] == ([[0.40, 5.0], [0.39, 3.0]], [[0.43, 3.0], [0.44, 1.0]], 1790665201.0)
+    # The book that shows the trade replaces it, and an older trade arriving now changes nothing.
+    stream.handle(book_message("s", "2026-09-29T07:00:02Z", bids, [("0.43", "3"), ("0.45", "2")]))
+    stream.handle(trade_message("s", "2026-09-29T07:00:01.500Z", "0.40", "5", "ORDER_SIDE_BUY"))
+    assert seen[-1] == ([[0.40, 5.0], [0.39, 3.0]], [[0.43, 3.0], [0.45, 2.0]], 1790665202.0)
+    assert len(seen) == 4 and stream.pending == {}
+
+
+def test_a_sell_takes_from_the_bids_and_trades_without_a_book_or_off_the_list_wait_or_are_left_out():
+    seen = []
+    stream = polymarket_us.PolymarketUSBookStream(["s"], lambda slug, bids, asks, sent: seen.append((bids, asks)))
+    stream.reset()
+    stream.handle(trade_message("s", "2026-09-29T07:00:02Z", "0.39", "1", "ORDER_SIDE_BUY"))      # Before any book: it waits.
+    stream.handle(trade_message("other", "2026-09-29T07:00:02Z", "0.39", "1", "ORDER_SIDE_BUY"))
+    stream.handle(trade_message("s", "2026-09-29T07:00:03Z", "0.30", "9", "ORDER_SIDE_BUY", state="TRADE_STATE_BUSTED"))
+    assert seen == [] and stream.handle(trade_message("s", "2026-09-29T07:00:04Z", "0.39", "1", "ORDER_SIDE_BUY")) is True
+    # The snapshot from before both trades shows them: bids above 0.39 are gone, and 0.39 is two less.
+    stream.handle(book_message("s", "2026-09-29T07:00:00Z", [("0.40", "5"), ("0.39", "3"), ("0.30", "1")], [("0.42", "2")]))
+    assert seen == [([[0.39, 1.0], [0.30, 1.0]], [[0.42, 2.0]])]
 
 
 # TRADING
