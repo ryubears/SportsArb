@@ -46,3 +46,4 @@ def test_status_says_how_far_behind_the_venue_its_books_came_and_starts_over_aft
     assert "polymarket_us 10 (last 0s ago, 0 gaps, 60 ms behind the venue, 100 at 90%, 2 from us)" in status
     assert "kalshi 1 (last 0s ago, 0 gaps)" in status
     assert "polymarket_us 10 (last 0s ago, 0 gaps)" in r.status()
+    assert r.books[("polymarket_us", "P")].at == 1000.0 - 0.1 and r.books[("kalshi", "K")].at is None     # The venue's time stays with the book.

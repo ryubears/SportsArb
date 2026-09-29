@@ -521,6 +521,13 @@ def update_alert(conn, alert):
     conn.commit()
 
 
+def alert_raised(conn, kind, subject):
+    """
+    Whether an alert of a kind with this subject has been raised before, sent or not.
+    """
+    return conn.execute("SELECT 1 FROM alerts WHERE kind = ? AND subject = ?", (kind, subject)).fetchone() is not None
+
+
 def last_alert_ts(conn, kind):
     """
     When the newest alert of a kind was raised, or None when there has been none.

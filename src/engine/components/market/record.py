@@ -93,7 +93,7 @@ class Recorder:
                 self.ours[venue].append(now - received)
         key = (venue, contract_id)
         before = self.books.get(key)
-        book = self.books[key] = Book(venue, contract_id, ts or now_iso(), bids[:config.BOOK_LEVELS], asks[:config.BOOK_LEVELS])
+        book = self.books[key] = Book(venue, contract_id, ts or now_iso(), bids[:config.BOOK_LEVELS], asks[:config.BOOK_LEVELS], sent)
         if self.scanner and (before is None or top(before) != top(book)):
             self.scanner.on_book(venue, contract_id, self.books, book.ts)
 

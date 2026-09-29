@@ -39,13 +39,13 @@ def check_balances():
     return ok
 
 
-def check_kalshi_key(read=lambda: kalshi.signed_request("GET", "/api_keys"), now=time.time):
+def check_kalshi_key(read=kalshi.attestation_lapses, now=time.time):
     """
     Print when the Kalshi key's location attestation lapses, and to renew it
     when that is near. Returns whether it has not lapsed.
     """
     try:
-        lapses = read().get("api_key_region_expiration_ts")
+        lapses = read()
     except Exception as e:
         print(f"kalshi key: its location attestation could not be read ({e!r})")
         return False

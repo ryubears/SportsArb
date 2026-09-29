@@ -174,12 +174,13 @@ def test_live_trading_halts_at_three_unknown_outcomes_in_twenty_orders(tmp_path)
 
 
 def test_a_venue_refusing_orders_in_a_row_halts_live_trading(tmp_path):
-    venues = Venues(polymarket_us=[REFUSED, fills(0), REFUSED, REFUSED], kalshi=[REFUSED, REFUSED, REFUSED, REFUSED])
+    venues = Venues(polymarket_us=[REFUSED, fills(0), REFUSED, REFUSED, REFUSED])
     conn, cash, ex = executor(tmp_path, venues)
     assert trade(ex, 2) == [True, True] and not ex.halted               # An order Polymarket US took, though it filled nothing, starts it over.
-    assert trade(ex, 2) == [True, False]
-    assert ex.halted == "kalshi refused 3 orders in a row, the last with: insufficient balance"
+    assert trade(ex, 4) == [True, True, True, False]
+    assert ex.halted == "polymarket_us refused 3 orders in a row, the last with: insufficient balance"
     assert ex.brakes.stopped == ex.halted                               # Flattening stops too.
+    assert {venue for venue, *_ in venues.orders} == {"polymarket_us"}  # It goes first, and filled nothing, so Kalshi was never sent one.
 
 
 def test_flattening_losses_over_the_limit_halt_live_trading(tmp_path, monkeypatch):
@@ -314,3 +315,14 @@ def test_new_trades_leave_five_dollars_on_each_venue_that_flattening_may_use(tmp
     cash.read["kalshi"] = 20.0                                          # A payout arrives.
     ex.tick(NOW)
     assert logs[-1] == "live kalshi has 17.18$, back over its 5.00$ floor"         # 20 read, less the 2.82 bought since.
+
+
+def test_the_polymarket_us_order_goes_first_and_kalshi_is_sent_only_for_what_it_filled(tmp_path):
+    venues = Venues(polymarket_us=[fills(6), fills(0)], kalshi=[fills()])
+    conn, cash, ex = executor(tmp_path, venues)
+    assert trade(ex, 2) == [True, True]
+    assert venues.orders == [("polymarket_us", "buy", "yes", 10, 0.45), ("kalshi", "buy", "no", 6, 0.47), ("polymarket_us", "buy", "yes", 10, 0.45)]
+    first, second = stored(conn, "trades")
+    assert (first["quantity"], first["yes_filled"], first["no_filled"], first["status"], first["hedge"]) == (10, 6, 6, "partial", "none")
+    assert (second["yes_filled"], second["no_filled"], second["status"], second["hedge"]) == (0, 0, "failed", "none")
+    assert cash.amounts == pytest.approx({"polymarket_us": 1000 - 6 * 0.45, "kalshi": 1000 - 6 * 0.47})   # Nothing left reserved.

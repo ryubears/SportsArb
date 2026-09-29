@@ -9,6 +9,18 @@ reaches its venue and what comes back is the one thing that differs:
 paper.py fills it against the in memory books after a simulated latency,
 live.py sends it to the venue. Everything else is here.
 
+An edge is taken only while each leg's book is current. Polymarket US
+books reach us some 85 ms after the venue changes them, Kalshi's in 12, so
+a price that just moved on one venue can sit next to the other's old one,
+an edge that is gone by the time an order arrives. A leg on a venue in
+config.CONFIRM_SECONDS must have a book newer, by the venues' own clocks,
+than the other leg's last change, or wait until that change is old enough
+that any reaction to it would have reached us. The scanner offers the edge
+again at the next change or tick, so one that is real is taken then.
+
+The leg on config.FIRST_VENUE, whose quotes are the ones most often gone,
+is sent first, and the other leg follows for what it filled.
+
 When the two legs fill unevenly the executor goes flat at once. It either
 sells the excess back on its own venue or buys the missing amount on the
 other venue, whichever the books say leaves more money, and records the
@@ -30,7 +42,7 @@ import asyncio
 import dataclasses
 from dataclasses import dataclass
 from common.log import on_failure
-from common.timeutil import now_iso
+from common.timeutil import epoch, now_iso
 from common.venues import VENUES
 from db import database
 from db.models import Ledger, Leg, Trade
@@ -81,6 +93,7 @@ class Executor:
         self.flattening = set()     # Ids of exposed trades with an order in flight to flatten them, which the settler leaves alone.
         self.set_aside = {}         # Trade id maps to why no more orders are sent for it, which only live trading does.
         self.low = set()            # Venues whose free cash is under the floor, so new trades wait.
+        self.waiting = set()        # Pairs whose edge waited for a book to catch up since the last summary, see confirmed().
         self.retrying = None        # The task flattening exposed trades while one runs.
         self.totals = {"trades": 0, "profit": 0.0, "hedge": 0.0}
         self.reload_exposed()
@@ -228,11 +241,26 @@ class Executor:
         trade.matched = min(yes.filled, no.filled)
         trade.profit = trade.matched * (1 - yes.average - no.average)
 
+    async def open_legs(self, trade, legs):
+        """
+        Send both legs' opening orders and return their Fills, in the legs'
+        order. With one leg on config.FIRST_VENUE and the other elsewhere,
+        that leg goes first and the other follows for as many as it filled,
+        or not at all, so a miss there leaves nothing to flatten.
+        """
+        first = [leg for leg in legs if leg.venue == config.FIRST_VENUE]
+        if len(first) != 1:
+            return await asyncio.gather(*(self.fill(trade, leg, "open") for leg in legs))
+        led = await self.fill(trade, first[0], "open")
+        other = next(leg for leg in legs if leg is not first[0])
+        followed = await self.fill(trade, dataclasses.replace(other, quantity=led.filled), "open") if led.filled else Fill(ts=self.clock())
+        return [led, followed] if legs[0] is first[0] else [followed, led]
+
     async def run_trade(self, trade, legs):
         """
         Fill both legs, flatten any mismatch, and record the result.
         """
-        fills = await asyncio.gather(*(self.fill(trade, leg, "open") for leg in legs))
+        fills = await self.open_legs(trade, legs)
         for leg, fill in zip(legs, fills):
             self.cash.release(leg.venue, leg.quantity * leg.limit)
             leg.held, leg.cost = fill.filled, fill.dollars
@@ -316,6 +344,9 @@ class Executor:
         self.done = []
         counts = {s: sum(1 for t in recent if t.status == s) for s in ("filled", "partial", "failed")}
         waiting = f"; new trades wait on {', '.join(sorted(self.low))}, under the floor" if self.low else ""
+        if self.waiting:
+            waiting += f"; {len(self.waiting)} pairs' edges waited for a book to catch up"
+            self.waiting = set()
         return (f"{self.mode}: {len(recent)} trades ({counts['filled']} filled, {counts['partial']} partial, {counts['failed']} failed), "
                 f"locked in {sum(t.profit for t in recent):.2f}$, hedges {sum(t.hedge_pnl for t in recent):+.2f}$; "
                 f"total {self.totals['trades']} trades, {self.totals['profit'] + self.totals['hedge']:.2f}$; balances {self.cash.summary()}{waiting}")
@@ -341,6 +372,27 @@ class Executor:
             return self.allocator.in_play(pair, now)
         kickoff = game.kickoff(members)
         return bool(kickoff) and game.in_play(kickoff, now, pair["sport"])
+
+    def confirmed(self, yes, no, now):
+        """
+        Whether each leg's book is current enough to trade on. A leg on a
+        venue in config.CONFIRM_SECONDS needs a book newer, by the venues'
+        own clocks, than the other leg's last change, or else that change
+        must be at least that many seconds old. A book the venue gave no time
+        for counts from when it reached us.
+        """
+        books = self.books()
+        times = []
+        for member in (yes, no):
+            book = books.get((member["venue"], member["contract_id"]))
+            if book is None:
+                return False
+            times.append(book.at if book.at is not None else epoch(book.ts))
+        (yes_at, no_at), clock = times, epoch(now)
+        for member, own, other in ((yes, yes_at, no_at), (no, no_at, yes_at)):
+            if own < other and clock - other < config.CONFIRM_SECONDS.get(member["venue"], 0):
+                return False
+        return True
 
     def quantity_for(self, pair, legs, now):
         """
@@ -378,6 +430,9 @@ class Executor:
         if edge < config.MIN_EDGE:
             return False
         if not self.in_play(pair, (yes, no), now):
+            return False
+        if not self.confirmed(yes, no, now):
+            self.waiting.add(pair["id"])
             return False
         legs = [Leg(side, m["venue"], m["contract_id"], m["polarity"], fee_info=fee_infos[(m["venue"], m["contract_id"])])
                 for side, m in (("yes", yes), ("no", no))]

@@ -196,6 +196,16 @@ def results(tickers):
     return out
 
 
+def attestation_lapses():
+    """
+    When the account's location attestation for API keys lapses, in seconds
+    since 1970, or None when Kalshi gives no date. Past it, Kalshi refuses
+    the keys for Sports, Elections, and Entertainment markets until the
+    attestation is renewed on Kalshi.
+    """
+    return signed_request("GET", "/api_keys").get("api_key_region_expiration_ts")
+
+
 def balance():
     """
     Dollars available for trading on the account.

@@ -15,6 +15,8 @@ venues, trading/ makes the trades, and money/ keeps the cash.
 - The scoreboard, from market/scoreboard.py, asks Polymarket US how the
   games under way stand, so trading runs to each game's real final
   whistle.
+- The attestation watch, from trading/notify.py, which emails a human
+  before the Kalshi key's location attestation lapses.
 - A Desk for each mode the run trades in, with its own money, allocator,
   executor, settler, and rebalancer, and its trades stored with its mode,
   so paper and live never mix. Both can run at once on the same signals,
@@ -105,6 +107,15 @@ def code_version():
         return "unknown"
 
 
+def ordering():
+    """
+    How both executors order a trade's legs and wait for current books, in words.
+    """
+    c = config
+    waits = ", ".join(f"{venue} up to {seconds}s" for venue, seconds in c.CONFIRM_SECONDS.items())
+    return f"{c.FIRST_VENUE} leg first, a leg waits for its book to catch up with the other's last change: {waits}"
+
+
 def trading_settings():
     """
     The settings that decide what the paper trader does, in one line, so each run's log says what it ran with.
@@ -117,7 +128,7 @@ def trading_settings():
             f"planned every {c.BUDGET_MINUTES} minutes over {c.PLAN_HOURS}h, expected game "
             f"{', '.join(f'{sport} {hours}h' for sport, hours in c.GAME_HOURS.items())} + settle {c.SETTLE_HOURS}h, "
             f"start balance {c.PAPER_START_BALANCE:,.0f}$, floor {c.PAPER_CASH_FLOOR:,.0f}$, "
-            f"rebalance daily at {c.PAPER_REBALANCE_HOUR}:00 UTC over {c.REBALANCE_DRIFT:.0%}")
+            f"rebalance daily at {c.PAPER_REBALANCE_HOUR}:00 UTC over {c.REBALANCE_DRIFT:.0%}; {ordering()}")
 
 
 def live_settings():
@@ -129,7 +140,7 @@ def live_settings():
             f"{c.LIVE_BALANCE_SECONDS}s, floor {c.LIVE_CASH_FLOOR:,.2f}$; halt at {c.LIVE_UNKNOWN_LIMIT} "
             f"unknown outcomes in {c.LIVE_ORDER_WINDOW} orders, {c.LIVE_REJECT_LIMIT} refusals in a row, or a loss over "
             f"{c.LIVE_MAX_LOSS_SHARE:.0%} in {c.LIVE_RESULT_HOURS}h; "
-            f"email to rebalance over {c.REBALANCE_DRIFT:.0%} every {c.LIVE_ALERT_HOURS}h")
+            f"email to rebalance over {c.REBALANCE_DRIFT:.0%} every {c.LIVE_ALERT_HOURS}h; {ordering()}")
 
 
 class Desk:
@@ -189,6 +200,7 @@ class Session:
         self.conn = conn
         self.sports = sports
         self.notifier = notify.Notifier(conn, log)
+        self.attestation = notify.AttestationWatch(conn, self.notifier, log)
         self.scoreboard = Scoreboard(conn, sports, log) if with_scanner and executors else None
         # The executors trade against the recorder's books, which exist once the recorder does, below.
         self.desks = [Desk(mode, conn, lambda: self.recorder.books, self.notifier, self.scoreboard) for mode in executors] if with_scanner else []
@@ -236,6 +248,7 @@ class Session:
             self.scanner.tick(self.recorder.books, now)
         if self.scoreboard:
             self.scoreboard.tick(now, time.time())
+        self.attestation.tick(now, time.time())
         for desk in self.desks:
             desk.tick(now, time.time())
         if self.scanner and time.time() - self.last_summary >= config.SUMMARY_SECONDS:

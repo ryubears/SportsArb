@@ -4,7 +4,16 @@ A stand in for the venue streams, shared by the live tests as a fixture.
 
 import asyncio
 import pytest
+from api import kalshi
 from engine.helper import config
+
+
+@pytest.fixture(autouse=True)
+def no_kalshi_key_reading(monkeypatch):
+    """
+    A session reads when the Kalshi key's location attestation lapses. In tests Kalshi gives no date, and nothing asks it.
+    """
+    monkeypatch.setattr(kalshi, "attestation_lapses", lambda: None)
 
 
 class FakeStream:

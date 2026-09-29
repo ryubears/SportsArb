@@ -93,6 +93,7 @@ class Book:
     ts: str                 # Our clock, ISO 8601 UTC, when the book changed.
     bids: list              # [[price, size], ...] best first.
     asks: list              # [[price, size], ...] best first.
+    at: float | None = None     # The venue's clock, seconds since 1970, when it made the change, or None when it did not say.
 
 
 @dataclass
@@ -292,7 +293,8 @@ class Alert:
     """
     id: int | None = row_id()
     ts: str
-    kind: str               # 'rebalance' when the live venues drifted apart, 'set_aside' when a live trade's order had an unknown outcome, 'halt' when live trading stopped.
+    kind: str               # 'rebalance' when the live venues drifted apart, 'set_aside' when a live trade's order had an unknown outcome, 'halt' when live trading stopped,
+                            # 'attestation' when the Kalshi key's location attestation is about to lapse or has.
     subject: str
     body: str
     sent_at: str | None = None      # When the email went out, None until it has.

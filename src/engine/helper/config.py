@@ -17,6 +17,13 @@ Override one for a run with --set, for example:
 MIN_EDGE = 0.05             # Net dollars per contract at the top before orders are sent, and the floor for the deeper levels they sweep.
                             # In-game, 2 to 3 cent edges lost money after hedging.
 FILL_SHARE = 0.5            # The share of visible size at a level assumed to be ours. Other takers get the rest.
+# A leg on a venue here trades only once its book is current: newer, by the venues' own clocks, than the other leg's last
+# change, or else that change is this many seconds old, time for any reaction to it on this venue to reach us. Polymarket US
+# books reached us 85 ms after the venue changed them at the median, 160 at the 90th percentile, so a price that moved on
+# Kalshi sat next to Polymarket US's old one, and on 2026-09-28 only 4 of 72 orders there filled.
+CONFIRM_SECONDS = {"polymarket_us": 0.3}
+FIRST_VENUE = "polymarket_us"   # With a leg here and the other elsewhere, this one's order goes first and the other follows for
+                                # what it filled, or not at all. Its orders filled 4 of 72 times on 2026-09-28, Kalshi's 50.
 
 # SIZING, trading/allocate.py. A game's cap is the most contracts one trade on it may hold. The allocator sets every game's cap
 # each half hour, and a budget of dollars the half hour's trades share. The caps' bounds are under PAPER and LIVE.
@@ -63,6 +70,8 @@ LIVE_REJECT_LIMIT = 3       # Orders one venue refuses in a row at which live tr
 LIVE_RESULT_HOURS = 6       # The sliding window the loss brake looks at, in hours.
 LIVE_MAX_LOSS_SHARE = 0.10  # Net loss of the trades decided in the window, as a share of the live money, over which live trading halts.
 LIVE_ALERT_HOURS = 24       # Between emails asking for the live venues to be rebalanced, while they stay apart.
+KEY_CHECK_HOURS = 1         # Between readings of when the Kalshi key's location attestation lapses, see notify.AttestationWatch.
+KEY_WARN_HOURS = 48         # How long before it lapses the email goes out, so it comes before the day it does.
 
 # GAMES, game.py, which the recorder, the scoreboard, the scanner, the executor, and the allocator time games by. Game
 # lengths are from the games Polymarket US has recorded as finished, the settling time from the first live game, Atlanta
