@@ -51,8 +51,7 @@ SPORTS = {
     },
     "nhl": {
         "kalshi": {
-            # No player props: Polymarket US settles a scratched player's at the last fair price, and Kalshi's rules do not say.
-            "tickers": ["KXNHLGAME", "KXNHLSPREAD", "KXNHLTOTAL", "KXNHLTEAMTOTAL"],
+            "tickers": ["KXNHLGAME", "KXNHLSPREAD", "KXNHLTOTAL", "KXNHLTEAMTOTAL", "KXNHLGOAL", "KXNHLPTS"],
         },
         "polymarket_us": {
             "tags": ["nhl"],

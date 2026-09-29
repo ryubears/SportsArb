@@ -136,10 +136,12 @@ def test_hockey_tickers_read_like_footballs_and_its_two_letter_codes_name_the_nh
     assert kalshi.split_codes("NJNYI", "nhl") == ("NJD", "NYI") and kalshi.split_codes("WSHTB", "nhl") == ("WSH", "TBL")
 
 
-def test_hockey_player_props_are_left_out():
+def test_hockey_player_props_name_the_player_and_keep_the_strict_line():
     goals = nhl("KXNHLGOAL", "KXNHLGOAL-26SEP29FLACAR", "KXNHLGOAL-26SEP29FLACAR-FLAABARKOV16-2", title="Aleksander Barkov: 2+ goals",
                 line=1.5)
-    assert goals is None
+    points = nhl("KXNHLPTS", "KXNHLPTS-26SEP29FLACAR", "KXNHLPTS-26SEP29FLACAR-FLAAEKBLAD5-1", title="Aaron Ekblad: 1+ points", line=0.5)
+    assert bet_fields(goals) == ("player_goals", 2027, "2026-09-29", "FLA", "CAR", "aleksander barkov", 1.5, "yes")
+    assert bet_fields(points) == ("player_points", 2027, "2026-09-29", "FLA", "CAR", "aaron ekblad", 0.5, "yes")
 
 
 def test_a_doubleheader_is_two_start_times_for_one_date_and_teams():

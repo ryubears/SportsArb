@@ -51,6 +51,8 @@ PLAYER_SERIES = {
     "KXMLBHA": "player_hits_allowed",
     "KXMLBERA": "player_earned_runs_allowed",
     "KXMLBWA": "player_walks_allowed",
+    "KXNHLGOAL": "player_goals",
+    "KXNHLPTS": "player_points",
 }
 PLAYER_TITLE = re.compile(r"^(.+?): ")     # 'Bijan Robinson: 100+ receiving yards'.
 
