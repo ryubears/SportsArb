@@ -229,17 +229,16 @@ and writes.
 
 **fetch.py** pulls a sport's open contracts from both venues into the
 `contracts` table. Of the hundreds of series Kalshi lists for a sport it
-takes only those classified: the game winner, spread, and total, baseball's
-and hockey's team totals, and the NFL's and MLB's player props. The NHL's
-are left out, since Polymarket US settles a scratched player's at the last
-fair price and Kalshi's rules do not say. Kalshi is read through its public
+takes only those classified: the game winner, spread, and total,
+baseball's and hockey's team totals, and player props, the NFL's and
+MLB's, and the NHL's goals and points. Kalshi is read through its public
 REST catalog, paged under the rate limit, and each series brings the
 exchange shard its markets trade on. Polymarket US is read through its
 gateway, one call per tag, deduplicated across tags, baseball through the
-`mlb` tag, since `baseball` brings Korean and Japanese league games too. An
-event there is a game, whose start time is its kickoff, when it has a game
-id, the venue's own or Sportradar's, which NHL preseason games and many
-small college games carry alone. A future's start time is left out.
+`mlb` tag, since `baseball` brings Korean and Japanese league games too.
+An event there is a game, whose start time is its kickoff, when it has a
+game id, the venue's own or Sportradar's, which NHL preseason games and
+many small college games carry alone. A future's start time is left out.
 
 **classify/** turns each contract into a `Bet`, a venue neutral statement
 of what the contract is about: kind, season, game date, the two teams, a
@@ -280,7 +279,7 @@ Polymarket US ignores stat corrections made after the game, and a
 postponed baseball game settles at a fair price on Kalshi after two days
 while Polymarket US waits up to two weeks for it. Hockey's rules agree:
 both venues count overtime, and a shootout as one goal for its winner in
-spreads and totals.
+spreads and totals, but not in a player's goals.
 
 **pipeline.py** runs fetch, classify, and match in one call. The live
 process runs it every hour in a child process, so new games and props
