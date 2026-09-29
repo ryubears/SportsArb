@@ -39,7 +39,8 @@ def test_a_game_the_venue_says_is_live_is_played_past_its_expected_length(tmp_pa
     b = board(tmp_path, lambda events: {event(*GAME): {"live": True, "ended": False, "finished": None}})
     asyncio.run(b.check(f"{SUNDAY}T20:20:00+00:00"))
     assert b.in_play(key(*GAME), f"{SUNDAY}T20:20:30+00:00")
-    assert b.end(key(*GAME), f"{SUNDAY}T20:20:30+00:00") == f"{SUNDAY}T20:20:30+00:00"         # It may end at any moment.
+    assert b.end(key(*GAME), f"{SUNDAY}T20:20:30+00:00") == f"{SUNDAY}T20:50:30+00:00"         # Planned to go on another half hour.
+    assert b.settles(key(*GAME), f"{SUNDAY}T20:20:30+00:00") == f"{SUNDAY}T21:20:30+00:00"
     # A live reading holds for three lookups, 90 seconds, and then the expected length rules again.
     assert b.in_play(key(*GAME), f"{SUNDAY}T20:21:30+00:00")
     assert not b.in_play(key(*GAME), f"{SUNDAY}T20:21:31+00:00")

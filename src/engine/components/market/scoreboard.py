@@ -22,7 +22,7 @@ from common.periodic import Periodic
 from common.timeutil import hours_between, seconds_between
 from db import database
 from engine.helper import config
-from engine.helper.game import expected_end, game_label, in_play, money_back, recorded_since
+from engine.helper.game import expected_end, game_label, in_play, money_back, overtime_end, recorded_since
 
 LIVE_CHECKS = 3     # Lookups a live reading holds for, so one that fails does not end a game early.
 
@@ -71,12 +71,14 @@ class Scoreboard:
     def end(self, key, now):
         """
         When the game ends: when the venue says it did, or else when it is
-        expected to, or now for a game still live past that.
+        expected to. A game still live past that is planned to go on a while
+        longer, see game.overtime_end(), so the allocator keeps giving it
+        money for as long as the venue says it is live.
         """
         if key in self.ended:
             return self.ended[key]
         expected = expected_end(self.games[key][0], key[0])
-        return max(expected, now) if self.in_play(key, now) else expected
+        return overtime_end(now) if now >= expected and self.in_play(key, now) else expected
 
     def settles(self, key, now):
         """
