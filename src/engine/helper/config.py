@@ -24,8 +24,6 @@ FILL_SHARE = 0.5            # The share of visible size at a level assumed to be
 CONFIRM_SECONDS = {"polymarket_us": 0.3}
 LIVE_SPORTS = ("nfl", "ncaaf", "mlb")  # The sports live trading takes signals on. Kalshi keeps baseball on exchange shard 3, whose
                                         # cash is its own, so live baseball trades only with cash moved to that shard.
-FIRST_VENUE = "polymarket_us"   # With a leg here and the other elsewhere, this one's order goes first and the other follows for
-                                # what it filled, or not at all. Its orders filled 4 of 72 times on 2026-09-28, Kalshi's 50.
 
 # SIZING, trading/allocate.py. A game's cap is the most contracts one trade on it may hold. The allocator sets every game's cap
 # each half hour, and a budget of dollars the half hour's trades share. The caps' bounds are under PAPER and LIVE.

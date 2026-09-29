@@ -40,6 +40,15 @@ def expected_end(kickoff, sport):
     return shift(kickoff, hours=config.GAME_HOURS[sport])
 
 
+def overtime_end(now):
+    """
+    When a game still live past its expected end is planned to end:
+    config.BUDGET_MINUTES from now, so the plan made now gives it the rest of
+    its half hour, and each plan after gives it more while it goes on.
+    """
+    return shift(now, hours=config.BUDGET_MINUTES / 60)
+
+
 def money_back(end):
     """
     When the money on a game that ends at end comes back: config.SETTLE_HOURS later, once the venues have settled.

@@ -110,6 +110,17 @@ def test_nothing_before_kickoff_after_the_venue_calls_the_game_over_or_for_a_bet
     assert allocator.summary(f"{SUNDAY}T19:55:00+00:00") == "paper capital: no games in play, 0 within 24 hours"
 
 
+def test_a_game_the_venue_says_is_live_past_its_expected_length_keeps_its_cap_and_budget(tmp_path):
+    live = {"live": True, "ended": False, "finished": None}
+    conn, allocator = plan_for(tmp_path, EARLY[:1], states=lambda events: {event(*EARLY[0]): live})
+    now = f"{SUNDAY}T20:20:00+00:00"                                   # Five minutes past its 3.25 hours.
+    asyncio.run(allocator.scoreboard.check(now))
+    # Planned to go on another half hour, of which the ten minutes to 20:30 fall in this one, a third of the money.
+    assert allocator.cap(pair_for(*EARLY[0]), now) == config.PAPER_MAX_CAP
+    assert allocator.budget_left(now) == pytest.approx({venue: FREE / 3 for venue in ("kalshi", "polymarket_us")})
+    assert allocator.cap(pair_for(*EARLY[0]), f"{SUNDAY}T20:21:31+00:00") == 0      # No word it is live for 90 seconds, so over.
+
+
 def test_live_caps_stay_within_the_live_bounds_and_the_budget(tmp_path):
     def live(reading):
         def make(conn):

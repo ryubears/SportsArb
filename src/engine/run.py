@@ -39,14 +39,14 @@ money is one pool: a second process would spend the same dollars.
 
 Run with:
     python3 -m engine.run --sport nfl
-    python3 -m engine.run --sport nfl,ncaaf
+    python3 -m engine.run --sport nfl,ncaaf,mlb
     python3 -m engine.run --sport nfl --seconds 120 --catalog-minutes 0
     python3 -m engine.run --sport nfl --skip-refresh
     python3 -m engine.run --sport nfl --no-scan
     python3 -m engine.run --sport nfl --no-trade
     python3 -m engine.run --sport nfl --execute live
     python3 -m engine.run --sport nfl --execute both
-    python3 -m engine.run --sport nfl --set min_edge=0.03 --set max_cap=100
+    python3 -m engine.run --sport nfl --set min_edge=0.03 --set paper_max_cap=100
 
 For a long run on a laptop, stop the Mac from sleeping while it runs:
     caffeinate -i -s python3 -m engine.run --sport nfl
@@ -107,13 +107,12 @@ def code_version():
         return "unknown"
 
 
-def ordering():
+def book_waits():
     """
-    How both executors order a trade's legs and wait for current books, in words.
+    How long both executors let a leg wait for its book to catch up with the other leg's, in words.
     """
-    c = config
-    waits = ", ".join(f"{venue} up to {seconds}s" for venue, seconds in c.CONFIRM_SECONDS.items())
-    return f"{c.FIRST_VENUE} leg first, a leg waits for its book to catch up with the other's last change: {waits}"
+    waits = ", ".join(f"{venue} up to {seconds}s" for venue, seconds in config.CONFIRM_SECONDS.items())
+    return f"a leg waits for its book to catch up with the other's last change: {waits}"
 
 
 def trading_settings():
@@ -128,7 +127,7 @@ def trading_settings():
             f"planned every {c.BUDGET_MINUTES} minutes over {c.PLAN_HOURS}h, expected game "
             f"{', '.join(f'{sport} {hours}h' for sport, hours in c.GAME_HOURS.items())} + settle {c.SETTLE_HOURS}h, "
             f"start balance {c.PAPER_START_BALANCE:,.0f}$, floor {c.PAPER_CASH_FLOOR:,.0f}$, "
-            f"rebalance daily at {c.PAPER_REBALANCE_HOUR}:00 UTC over {c.REBALANCE_DRIFT:.0%}; {ordering()}")
+            f"rebalance daily at {c.PAPER_REBALANCE_HOUR}:00 UTC over {c.REBALANCE_DRIFT:.0%}; {book_waits()}")
 
 
 def live_settings():
@@ -140,7 +139,7 @@ def live_settings():
             f"{c.LIVE_BALANCE_SECONDS}s, floor {c.LIVE_CASH_FLOOR:,.2f}$; halt at {c.LIVE_UNKNOWN_LIMIT} "
             f"unknown outcomes in {c.LIVE_ORDER_WINDOW} orders, {c.LIVE_REJECT_LIMIT} refusals in a row, or a loss over "
             f"{c.LIVE_MAX_LOSS_SHARE:.0%} in {c.LIVE_RESULT_HOURS}h; "
-            f"email to rebalance over {c.REBALANCE_DRIFT:.0%} every {c.LIVE_ALERT_HOURS}h; {ordering()}")
+            f"email to rebalance over {c.REBALANCE_DRIFT:.0%} every {c.LIVE_ALERT_HOURS}h; {book_waits()}")
 
 
 class Desk:
