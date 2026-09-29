@@ -4,6 +4,10 @@ Tests for the latency report's reading of the log and of the venues' answers.
 
 import json
 from datetime import datetime, timezone
+from db import database
+from engine.components.market import record
+from engine.components.money.paper import PaperBalances
+from engine.components.trading.paper import PaperExecutor
 from tools import latency_report
 
 NOW = datetime(2026, 9, 29, 0, 5, tzinfo=timezone.utc)
@@ -35,3 +39,18 @@ def test_the_venue_time_of_an_order_comes_from_each_venues_answer():
     assert latency_report.venue_time("polymarket_us", polymarket_us) == datetime(2026, 9, 29, 0, 53, 53, 85017, tzinfo=timezone.utc).timestamp()
     assert latency_report.venue_time("kalshi", json.dumps({"error": "refused"})) is None
     assert latency_report.venue_time("polymarket_us", "not json") is None
+
+
+def test_the_lines_read_are_the_ones_the_recorder_and_the_executors_write(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(record.time, "time", lambda: 1000.0)
+    conn = database.connect(tmp_path / "t.sqlite")
+    recorder = record.Recorder(conn)
+    recorder.on_book("kalshi", "K", [[0.5, 1]], [[0.6, 1]], sent=1000.0 - 0.012)
+    recorder.on_book("polymarket_us", "P", [[0.5, 1]], [[0.6, 1]], ts="1970-01-01T00:16:39.999000+00:00", sent=1000.0 - 0.080)
+    executor = PaperExecutor(conn, PaperBalances(conn, 1000.0), lambda: {}, lambda m: None)
+    executor.waiting = {1, 2}                               # Two pairs' edges waited for a Polymarket US book.
+    lines = [(NOW, f"00:05:00 {recorder.status()}"), (NOW, f"00:05:00 {executor.summary()}")]
+    row = latency_report.status_minutes(lines)[0]
+    assert (row["kalshi"], row["polymarket_us"]) == ((None, 12, 12, None), (None, 80, 80, 1))
+    latency_report.print_waits(lines)
+    assert capsys.readouterr().out.strip().endswith(": paper 2 pairs")

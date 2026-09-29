@@ -54,8 +54,6 @@ For a long run on a laptop, stop the Mac from sleeping while it runs:
 
 import argparse
 import asyncio
-import multiprocessing
-import signal
 import subprocess
 import sys
 import time
@@ -63,6 +61,7 @@ from dataclasses import dataclass
 from catalog import fetch, pipeline
 from common.log import log, with_traceback
 from common.paths import ROOT
+from common.processes import CONTEXT, set_up_child
 from common.timeutil import now_iso
 from db import database
 from engine.components.market import scan
@@ -80,7 +79,6 @@ from engine.helper import config
 
 CATALOG_MINUTES = 60    # How often the catalog is refreshed and subscriptions updated. Zero disables it.
 EXECUTE = {"paper": ("paper",), "live": ("live",), "both": ("live", "paper")}     # What --execute trades in. Live first, so its orders go out first.
-CONTEXT = multiprocessing.get_context("spawn")      # A refresh child starts afresh, not as a copy of a process with a running loop and threads.
 
 
 @dataclass(frozen=True)
@@ -305,8 +303,7 @@ def refresh_child(refresh, sports, answer):
     """
     Where a refresh child starts: run refresh(sports, log) and send its line back over answer.
     """
-    signal.signal(signal.SIGINT, signal.SIG_IGN)    # The main process stops its children, Ctrl-C included.
-    sys.stdout.reconfigure(line_buffering=True)     # Log lines go out as they are written, as the main process's do.
+    set_up_child()
     answer.send(refresh(sports, log))
 
 

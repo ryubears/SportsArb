@@ -19,7 +19,8 @@ Four sections, all from what the live process already keeps:
 
 The log gives only the time of day, so each line's date is worked out by
 walking back from the end. Reads only, so it is safe to run while the live
-process runs, and like summary.py it opens the files directly.
+process runs, and like summary.py it sets its own import path, so it runs
+from any folder.
 
 Run with:
     python3 src/tools/latency_report.py
@@ -30,29 +31,23 @@ Run with:
 import argparse
 import json
 import re
-import sqlite3
+import sys
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent.parent
-DB_PATH = ROOT / "data" / "sportsarb.sqlite"
-LOG_PATH = ROOT / "data" / "record.log"
-VENUES = ("kalshi", "polymarket_us")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))     # src, so the script runs from any folder.
+from common.paths import DATA_DIR
+from common.stats import quantile
+from common.timeutil import epoch
+from common.venues import VENUES
+from db.database import read_only
+
+LOG_PATH = DATA_DIR / "record.log"
 TIME_OF_DAY = re.compile(r"^(\d\d):(\d\d):(\d\d) ")
 # One venue's part of the status line: 'polymarket_us 59123 (last 0s ago, 0 gaps, 81 ms behind the venue, 145 at 90%, 0 from us)'.
 STATUS = re.compile(r"(kalshi|polymarket_us) (\d+) \(last [^,]*, \d+ gaps(?:, (\d+) ms behind the venue, (\d+) at 90%(?:, (\d+) from us)?)?\)")
 WAITED = re.compile(r"^\S+ (paper|live): .*; (\d+) pairs' edges waited for a book to catch up")
 LASTED = [(0.1, "under 100 ms"), (0.2, "100-200 ms"), (0.5, "200-500 ms"), (2.0, "0.5-2 s"), (float("inf"), "over 2 s")]
-
-
-def quantile(values, share):
-    """
-    The value that a share of the values fall at or below, or None when there are none.
-    """
-    if not values:
-        return None
-    values = sorted(values)
-    return values[min(int(share * len(values)), len(values) - 1)]
 
 
 def ms(value):
@@ -158,8 +153,7 @@ def venue_time(venue, response):
     if venue == "kalshi":
         return answer["ts_ms"] / 1000 if answer.get("ts_ms") else None
     execution = (answer.get("executions") or [{}])[-1]
-    stamp = execution.get("transactTime") or (execution.get("order") or {}).get("createTime")
-    return datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp() if stamp else None
+    return epoch(execution.get("transactTime") or (execution.get("order") or {}).get("createTime"))
 
 
 def print_orders(conn, since, until):
@@ -237,7 +231,7 @@ if __name__ == "__main__":
     print(f"from {since:%Y-%m-%d %H:%M} to {until:%Y-%m-%d %H:%M} UTC")
     lines = [(when, line) for when, line in dated(LOG_PATH.read_text(errors="replace").splitlines(), now) if since <= when < until]
     print_feeds(status_minutes(lines), args.every)
-    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    conn = read_only()
     print_orders(conn, since, until)
     print_edges(conn, since, until, args.sport, args.edge)
     print_waits(lines)

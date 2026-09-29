@@ -24,14 +24,11 @@ stretch between is stored as a gap.
 """
 
 import asyncio
-import multiprocessing
-import signal
-import sys
 import threading
 from common.log import log, with_traceback
+from common.processes import CONTEXT, set_up_child
 from common.timeutil import now_iso
 
-CONTEXT = multiprocessing.get_context("spawn")  # A child starts afresh, not as a copy of a process with a running loop and threads.
 RESTART_SECONDS = (1, 5, 30)    # Pause before starting a dead feed again, longer while it keeps dying. The last value repeats.
 STOP_SECONDS = 5                # How long a child may take to stop before it is killed.
 
@@ -236,8 +233,7 @@ def child_main(stream_class, contract_ids, depth, down_since, commands, updates)
     """
     Where a feed child starts.
     """
-    signal.signal(signal.SIGINT, signal.SIG_IGN)    # The main process stops its children, Ctrl-C included.
-    sys.stdout.reconfigure(line_buffering=True)     # Log lines go out as they are written, as the main process's do.
+    set_up_child()
     asyncio.run(run_child(stream_class, contract_ids, depth, down_since, commands, updates))
 
 

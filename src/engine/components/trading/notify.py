@@ -23,13 +23,12 @@ import asyncio
 import json
 import smtplib
 import ssl
-from datetime import datetime, timezone
 from email.message import EmailMessage
 from api import kalshi
 from common.log import on_failure
 from common.paths import DATA_DIR
 from common.periodic import Periodic
-from common.timeutil import epoch, now_iso
+from common.timeutil import epoch, now_iso, utc_minute
 from db import database
 from db.models import Alert
 from engine.helper import config
@@ -141,7 +140,7 @@ class AttestationWatch:
         """
         The alert for an attestation that lapses at lapses as of now, as (subject, body), or None when it is not due yet.
         """
-        when = datetime.fromtimestamp(lapses, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        when = utc_minute(lapses)
         left = lapses - epoch(now)
         if left <= 0:
             return (f"SportsArb: the Kalshi key's location attestation lapsed at {when}",

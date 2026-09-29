@@ -18,7 +18,7 @@ def setup(tmp_path, cash_each=50.0):
     """
     conn = database.connect(tmp_path / "t.sqlite")
     conn.execute("INSERT INTO pairs (id, label, kind, venues, contracts, flags, matched_at) VALUES (1, 'p', 'game_winner', '', 2, '[]', 'm')")
-    cash = LiveBalances(lambda m: None, {"kalshi": lambda: cash_each, "polymarket_us": lambda: cash_each})
+    cash = LiveBalances(lambda m: None, {"kalshi": lambda: (cash_each, {}), "polymarket_us": lambda: (cash_each, {})})
     asyncio.run(cash.refresh(NOW))
     return conn, brakes.Brakes(conn, cash, lambda m: None, clock=lambda: NOW)
 

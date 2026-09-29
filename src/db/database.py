@@ -83,6 +83,14 @@ def connect(db_path=None):
     return conn
 
 
+def read_only(db_path=None):
+    """
+    Open the database to read only, as the tools do, which is safe while the
+    live process writes. Rows are plain tuples. Uses DB_PATH unless a path is given.
+    """
+    return sqlite3.connect(f"file:{Path(db_path or DB_PATH)}?mode=ro", uri=True, timeout=30)
+
+
 # CONTRACTS
 
 def upsert_contracts(conn, contracts, fetched_at):
@@ -369,8 +377,8 @@ def load_open_legs(conn, mode):
     """
     Every leg of the unsettled trades of one mode that still holds contracts,
     as [(game key, venue, dollars paid for what it holds)]. The game key is
-    (sport, game_date, team_a, team_b), or None for a bet with no game. The
-    rebalancers sum them by venue, the allocator by game, and the brakes in all.
+    (sport, game_date, team_a, team_b), or None for a bet with no game.
+    load_held sums them by venue, the allocator by game, and the brakes in all.
     """
     rows = conn.execute("""
         SELECT p.sport, p.game_date, p.team_a, p.team_b, t.yes_venue, t.yes_cost
@@ -381,6 +389,17 @@ def load_open_legs(conn, mode):
         FROM trades t LEFT JOIN pairs p ON p.id = t.pair_id
         WHERE t.mode = ? AND t.no_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""", (mode, mode))
     return [((sport, game_date, team_a, team_b) if game_date else None, venue, cost) for sport, game_date, team_a, team_b, venue, cost in rows]
+
+
+def load_held(conn, mode):
+    """
+    Dollars the unsettled trades of one mode hold on each venue, at what
+    their legs paid, as {venue: dollars}, for the rebalancers and the summary.
+    """
+    held = {}
+    for _, venue, cost in load_open_legs(conn, mode):
+        held[venue] = held.get(venue, 0.0) + cost
+    return held
 
 
 def load_spending(conn, mode, since):

@@ -2,7 +2,6 @@
 Tests for the database report, run against a small database.
 """
 
-import sqlite3
 from db import database
 from db.models import Opportunity, Settlement, Trade
 from tools import summary
@@ -23,7 +22,7 @@ def report(tmp_path, monkeypatch, capsys, fill):
     fill(conn)
     conn.commit()
     monkeypatch.setattr(summary, "DB_PATH", path)
-    ro = sqlite3.connect(f"file:{path}?mode=ro", uri=True)      # As the script opens it.
+    ro = database.read_only(path)      # As the script opens it.
     summary.print_storage(ro)
     summary.print_pairs(ro)
     summary.print_opportunities(ro, SINCE, 12)
@@ -90,9 +89,9 @@ def test_live_money_shows_each_venue_read_now_and_what_open_live_trades_hold(tmp
     def unreachable():
         raise RuntimeError("401 unauthorized")
 
-    balances = summary.read_live_balances({"kalshi": lambda: 92.0, "polymarket_us": unreachable})
+    balances = summary.read_live_balances({"kalshi": lambda: (92.0, {3: 20.0}), "polymarket_us": unreachable})
     assert balances == {"kalshi": 92.0, "polymarket_us": "not read (401 unauthorized)"}
-    summary.print_live_money(sqlite3.connect(f"file:{path}?mode=ro", uri=True), balances)
+    summary.print_live_money(database.read_only(path), balances)
     assert capsys.readouterr().out.splitlines()[1:] == [
         "live money",
         "  live balances on the venues, read now: kalshi 92.00$, polymarket_us not read (401 unauthorized)",

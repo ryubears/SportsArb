@@ -75,9 +75,7 @@ def drift(conn, cash, incoming=None):
     what it will have once they settle. incoming is the money on its way
     to each venue, which it will have once it lands.
     """
-    held = {}
-    for _, venue, cost in database.load_open_legs(conn, cash.mode):
-        held[venue] = held.get(venue, 0.0) + cost
+    held = database.load_held(conn, cash.mode)
     incoming = incoming or {}
     totals = {venue: cash[venue] + held.get(venue, 0.0) + incoming.get(venue, 0.0) for venue in cash.amounts}
     average = sum(totals.values()) / len(totals)

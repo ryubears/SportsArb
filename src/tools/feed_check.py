@@ -35,14 +35,14 @@ Run from src/ with:
 import argparse
 import asyncio
 import json
-import sqlite3
 import statistics
 import time
 import websockets
 from api import kalshi, polymarket_us
 from api.http import send_json
+from common.stats import quantile
 from common.timeutil import epoch
-from db.database import DB_PATH
+from db.database import read_only
 from engine.components.market.record import load_targets
 
 KALSHI_LEGACY_WS = "wss://api.elections.kalshi.com/trade-api/ws/v2"      # The host before Kalshi dedicated external-api to API traders.
@@ -133,14 +133,6 @@ def kalshi_update(m, seen):
     return [key], body["ts_ms"] / 1000
 
 
-def quantile(values, share):
-    """
-    The value that a share of the values fall at or below.
-    """
-    values = sorted(values)
-    return values[min(int(share * len(values)), len(values) - 1)]
-
-
 class Listener:
     """
     One connection's measurements: when each update arrived, and how long after the venue's time for it.
@@ -215,7 +207,7 @@ def markets(venue, limit, sports):
     The contracts of the sports the recorder follows on the venue, the games nearest in time first, at most limit.
     Kalshi gives no kickoff, so its contracts go by close time, which it sets at the expected final whistle.
     """
-    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    conn = read_only()
     try:
         followed = set(load_targets(conn, sports)[venue])
         when = {cid: epoch(t) for cid, t in conn.execute("SELECT contract_id, COALESCE(start_time, close_time) FROM contracts WHERE venue = ?", (venue,))}

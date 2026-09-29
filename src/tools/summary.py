@@ -6,12 +6,11 @@ for the recent window the feed drops, the opportunities found, and the
 trades made, paper and live apart. Reads only, so it is safe to run
 while the live process is writing.
 
-This script opens the database file directly rather than importing the
-db package, so it runs from any folder without setting an import path.
-The one exception is the live money: live balances are not in the
-database but on the venues, so they are read from each venue with the
-same read-only calls the live process makes, using the keys in data/.
---no-live leaves that out, and a venue that cannot be read says why.
+The script sets its own import path, so it runs from any folder. The live
+money is not in the database but on the venues, so it is read from each
+venue with the same read-only calls the live process makes, using the
+keys in data/. --no-live leaves that out, and a venue that cannot be read
+says why.
 
 Run with:
     python3 src/tools/summary.py
@@ -21,13 +20,12 @@ Run with:
 
 import argparse
 import os
-import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "sportsarb.sqlite"
-SRC = Path(__file__).resolve().parent.parent       # Where the venue clients are, for the live balances.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))     # src, so the script runs from any folder.
+from db.database import DB_PATH, load_held, read_only
 
 
 def query_rows(conn, sql, params=()):
@@ -214,19 +212,19 @@ def print_mode_trades(conn, since, hours, mode):
 
 def read_live_balances(readers=None):
     """
-    Each venue's live balance as {venue: dollars, or the reason it could not be read}. readers maps a
-    venue to a function returning its dollars; by default the live process's own, which need the keys in data/.
+    Each venue's live balance as {venue: dollars, or the reason it could not be read}. readers maps a venue
+    to a function returning its dollars and each exchange shard's; by default the live process's own, which
+    need the keys in data/. They are loaded only here, so the rest of the report runs without the venue clients.
     """
     if readers is None:
         try:
-            sys.path.insert(0, str(SRC))
             from engine.components.money.live import READERS as readers
         except Exception as e:
             return {"live balances": f"not read, the venue clients did not load ({e!r})"}
     out = {}
     for venue, read in readers.items():
         try:
-            out[venue] = read()
+            out[venue] = read()[0]
         except Exception as e:
             out[venue] = f"not read ({str(e)[:120]})"
     return out
@@ -236,14 +234,7 @@ def print_live_money(conn, balances):
     """
     The live balances on the venues, read now, and the dollars on each venue in live trades still open.
     """
-    held = dict(query_rows(conn, """
-        SELECT venue, ROUND(SUM(cost), 2) FROM (
-            SELECT yes_venue AS venue, yes_cost AS cost FROM trades t
-            WHERE mode = 'live' AND yes_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)
-            UNION ALL
-            SELECT no_venue, no_cost FROM trades t
-            WHERE mode = 'live' AND no_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id))
-        GROUP BY venue"""))
+    held = load_held(conn, "live")
     print("\nlive money")
     print("  live balances on the venues, read now: " + ", ".join(
         f"{venue} {amount:,.2f}$" if isinstance(amount, (int, float)) else f"{venue} {amount}" for venue, amount in balances.items()))
@@ -272,7 +263,7 @@ if __name__ == "__main__":
     args = ap.parse_args()
     now = datetime.now(timezone.utc).isoformat()
     since = (datetime.fromisoformat(now) - timedelta(hours=args.hours)).isoformat()
-    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=30)
+    conn = read_only()
     print_storage(conn)
     print_contracts(conn, now)
     print_pairs(conn)

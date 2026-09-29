@@ -42,3 +42,13 @@ def refused(error):
     The Answer for an order the venue refused, with the reason it gave.
     """
     return Answer(None, "rejected", 0, 0.0, 0.0, error.body[:500], {"error": error.body, "status": error.status})
+
+
+def unfilled(error, why):
+    """
+    The Answer for an order the venue turned away with an error that is no
+    refusal of ours, since nothing traded and the next order may well go
+    through, such as a lack of cash on a Kalshi shard, with why in words
+    ahead of what the venue said.
+    """
+    return Answer(None, "unfilled", 0, 0.0, 0.0, f"{why}: {error.body[:300]}", {"error": error.body, "status": error.status})

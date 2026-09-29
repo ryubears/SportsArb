@@ -68,7 +68,7 @@ class FakeNotifier:
 
 def executor(tmp_path, venues, latest=None, notifier=None, logs=None, read=True, balance=1000.0):
     conn = database.connect(tmp_path / "t.sqlite")
-    cash = LiveBalances(lambda m: None, {"kalshi": lambda: balance, "polymarket_us": lambda: balance})
+    cash = LiveBalances(lambda m: None, {"kalshi": lambda: (balance, {}), "polymarket_us": lambda: (balance, {})})
     if read:
         asyncio.run(cash.refresh(NOW))
     latest = books() if latest is None else latest
@@ -345,7 +345,7 @@ def test_live_trading_takes_no_signal_on_a_sport_outside_its_list(tmp_path):
 
 def test_a_kalshi_leg_trades_only_with_the_cash_on_its_markets_shard(tmp_path):
     shards = {0: 1000.0, 3: 0.0}                        # Kalshi's cash all on football's shard, none on baseball's.
-    cash = LiveBalances(lambda m: None, {"kalshi": lambda: sum(shards.values()), "polymarket_us": lambda: 1000.0}, {"kalshi": lambda: dict(shards)})
+    cash = LiveBalances(lambda m: None, {"kalshi": lambda: (sum(shards.values()), dict(shards)), "polymarket_us": lambda: (1000.0, {})})
     asyncio.run(cash.refresh(NOW))
     venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
     conn = database.connect(tmp_path / "t.sqlite")
