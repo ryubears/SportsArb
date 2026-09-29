@@ -127,14 +127,10 @@ def test_hockey_markets_read_like_baseballs_and_the_venues_own_codes_name_the_nh
     assert (montreal.team_a, montreal.team_b) == ("MTL", "TOR")
 
 
-def test_hockey_player_props_shift_the_at_least_line_by_a_half():
-    event = "nhl-fla-car-2026-09-29"
-    goals = nhl(event, "astatc-nhl-fla-car-2026-09-29-goals-alebar-gte2", "hockey_player_goals", 2.0,
+def test_hockey_player_props_are_left_out():
+    goals = nhl("nhl-fla-car-2026-09-29", "astatc-nhl-fla-car-2026-09-29-goals-alebar-gte2", "hockey_player_goals", 2.0,
                 title="Will Aleksander Barkov record at least 2 goals in FLA vs CAR?")
-    points = nhl(event, "astatc-nhl-fla-car-2026-09-29-pts-sebaho-gte1", "hockey_player_points", 1.0,
-                 title="Will Sebastian Aho record at least 1 points in FLA vs CAR?")
-    assert bet_fields(goals) == ("player_goals", 2027, "2026-09-29", "FLA", "CAR", "aleksander barkov", 1.5, "yes")
-    assert bet_fields(points) == ("player_points", 2027, "2026-09-29", "FLA", "CAR", "sebastian aho", 0.5, "yes")
+    assert goals is None
 
 
 def test_a_doubleheader_is_a_dh_slug_or_two_events_for_one_date_and_teams():

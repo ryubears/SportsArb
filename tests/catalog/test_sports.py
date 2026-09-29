@@ -1,6 +1,7 @@
 """
 Every table of sport specific settings covers every sport the catalog fetches, and nothing else,
-every list of sports names only those, and the Kalshi series fetched are the ones the Kalshi classifier reads.
+every list of sports names only those, every sport with player props has their rules note, and the
+Kalshi series fetched are the ones the Kalshi classifier reads.
 """
 
 import pytest
@@ -16,7 +17,6 @@ from engine.helper import config
     ("teams.ALIASES, the files in classify/aliases/", teams.ALIASES),
     ("polymarket_us.EVENT_PREFIX", polymarket_us.EVENT_PREFIX),
     ("match.KIND_NOTES", match.KIND_NOTES),
-    ("match.PLAYER_NOTES", match.PLAYER_NOTES),
 ])
 def test_table_covers_every_sport(name, table):
     assert set(table) == set(fetch.SPORTS), name
@@ -28,6 +28,12 @@ def test_table_covers_every_sport(name, table):
 ])
 def test_sports_named_apart_are_ones_the_catalog_fetches(name, sports):
     assert set(sports) <= set(fetch.SPORTS), name
+
+
+def test_every_sport_whose_player_props_are_fetched_has_their_rules_note():
+    with_props = {sport for sport, venues in fetch.SPORTS.items() if set(venues["kalshi"]["tickers"]) & set(kalshi.PLAYER_SERIES)}
+    assert with_props <= set(match.PLAYER_NOTES) <= set(fetch.SPORTS)
+    assert "nhl" not in with_props      # Left out, see fetch.SPORTS.
 
 
 def test_the_kalshi_series_fetched_are_the_ones_the_kalshi_classifier_reads():

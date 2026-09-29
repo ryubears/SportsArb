@@ -60,8 +60,6 @@ PLAYER_KINDS = {
     "baseball_player_hits_allowed": "player_hits_allowed",
     "baseball_player_earned_runs_allowed": "player_earned_runs_allowed",
     "baseball_player_walks_allowed": "player_walks_allowed",
-    "hockey_player_goals": "player_goals",
-    "hockey_player_points": "player_points",
 }
 PLAYER_TITLE = re.compile(r"^Will (.+?) (?:record|score|throw) ")     # 'Will Bijan Robinson record 40+ receiving yards?'.
 

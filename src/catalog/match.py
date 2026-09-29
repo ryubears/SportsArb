@@ -44,9 +44,6 @@ PLAYER_NOTES = {
     "mlb": "Both venues settle to a fair price, each its own, if the player is not in the starting lineup, or for a pitching prop is not "
            "the starting pitcher, and count extra innings. Kalshi also settles at a fair price for a starter who never comes to the plate "
            "or faces a batter, and does not count a pinch hitter's at bats.",
-    "nhl": "Overtime counts and shootout goals do not, on Polymarket US by its rules and on Kalshi by the official stats it goes by. "
-           "A player who dresses but never plays settles at a fair price on both venues, each its own, and Polymarket US settles a "
-           "scratched player the same way, which Kalshi's rules leave unsaid.",
 }
 
 
