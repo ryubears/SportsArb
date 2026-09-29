@@ -92,6 +92,16 @@ def fetch_events(tag_slug, page_size=500):
         offset += page_size
 
 
+def is_game(event):
+    """
+    Whether an event is a game, whose start time is its kickoff, rather than
+    a future. The venue gives a game the id of its sports data feed, and
+    Sportradar's, though not always its own: NHL preseason games and many
+    small college ones come with only Sportradar's.
+    """
+    return bool(event.get("gameId") or event.get("sportradarGameId"))
+
+
 def contracts(sport, tags):
     """
     One Contract per open market on events carrying one of the tag slugs.
@@ -119,7 +129,7 @@ def contracts(sport, tags):
                 market_type=m.get("sportsMarketType"),
                 line=float_or_none(m.get("line")),
                 rules=m.get("description"),
-                start_time=iso(event.get("startTime")) if event.get("gameId") else None,
+                start_time=iso(event.get("startTime")) if is_game(event) else None,
                 close_time=iso(m.get("endDate")),
                 fee_info={"feeCoefficient": m.get("feeCoefficient")},
             ))

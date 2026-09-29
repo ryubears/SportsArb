@@ -32,7 +32,11 @@ FOOTBALL_NOTES = {
 BASEBALL_POSTPONED = ("Extra innings count on both venues. If the game is postponed, Kalshi waits two days for it and then settles at a "
                       "fair price, while Polymarket US waits up to two weeks for it.")
 BASEBALL_NOTES = {"game_winner": BASEBALL_POSTPONED, "spread": BASEBALL_POSTPONED, "total": BASEBALL_POSTPONED, "team_total": BASEBALL_POSTPONED}
-KIND_NOTES = {"nfl": FOOTBALL_NOTES, "ncaaf": FOOTBALL_NOTES, "mlb": BASEBALL_NOTES}
+HOCKEY_POSTPONED = "If the game does not start within two days, both venues settle at a fair price, each its own."
+HOCKEY_GOALS = f"Overtime counts on both venues, and a shootout as one goal for its winner. {HOCKEY_POSTPONED}"
+HOCKEY_NOTES = {"game_winner": f"Overtime and the shootout count on both venues. {HOCKEY_POSTPONED}",
+                "spread": HOCKEY_GOALS, "total": HOCKEY_GOALS, "team_total": HOCKEY_GOALS}
+KIND_NOTES = {"nfl": FOOTBALL_NOTES, "ncaaf": FOOTBALL_NOTES, "mlb": BASEBALL_NOTES, "nhl": HOCKEY_NOTES}
 FOOTBALL_PLAYER_NOTE = "Both venues settle to the pre-game fair price if the player never takes a snap and count overtime. Polymarket US ignores stat corrections made after the game."
 PLAYER_NOTES = {
     "nfl": FOOTBALL_PLAYER_NOTE,

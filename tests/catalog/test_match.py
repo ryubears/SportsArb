@@ -82,3 +82,13 @@ def test_baseball_pairs_carry_baseballs_notes_not_footballs():
                             bet("kalshi", "kp", **prop), bet("polymarket_us", "usp", **prop)], "mlb")
     winner, strikeouts = sorted(pairs, key=lambda p: p.kind)
     assert winner.flags == [match.BASEBALL_POSTPONED] and strikeouts.flags == [match.PLAYER_NOTES["mlb"]]
+
+
+def test_hockey_pairs_carry_hockeys_notes():
+    game = dict(game_date="2026-09-29", team_a="FLA", team_b="CAR")
+    spread = dict(game, kind="spread", subject="CAR", line=1.5)
+    pairs, _ = match.match([bet("kalshi", "k", subject="FLA", **game), bet("polymarket_us", "us", subject="FLA", **game),
+                            bet("kalshi", "ks", **spread), bet("polymarket_us", "uss", polarity="no", **spread)], "nhl")
+    winner, covers = sorted(pairs, key=lambda p: p.kind)
+    assert winner.label == "nhl game_winner 2026-09-29 FLA@CAR FLA"
+    assert winner.flags == [match.HOCKEY_NOTES["game_winner"]] and covers.flags == [match.HOCKEY_GOALS]

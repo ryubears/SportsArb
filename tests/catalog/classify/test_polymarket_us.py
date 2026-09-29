@@ -105,6 +105,34 @@ def test_baseball_player_props_shift_the_at_least_line_by_a_half():
     assert bet_fields(prop) == ("player_strikeouts", 2026, "2026-09-29", "BOS", "NYY", "payton tolle", 4.5, "yes")
 
 
+def nhl(event, slug, market_type, line=None, title="", start_time="2026-09-29T21:00:00+00:00"):
+    return polymarket_us.classify(row(event, slug, market_type, line, start_time) | {"sport": "nhl", "title": title})
+
+
+def test_hockey_markets_read_like_baseballs_and_the_venues_own_codes_name_the_nhls_teams():
+    event = "nhl-fla-car-2026-09-29"
+    winner = nhl(event, "aec-nhl-fla-car-2026-09-29", "hockey_team_full_game_winner")
+    favored = nhl(event, "asc-nhl-fla-car-2026-09-29-neg-1pt5", "hockey_team_full_game_spread", -1.5)
+    underdog = nhl(event, "asc-nhl-fla-car-2026-09-29-pos-1pt5", "hockey_team_full_game_spread", 1.5)
+    total = nhl(event, "tsc-nhl-fla-car-2026-09-29-5pt5", "hockey_team_full_game_total", 5.5)
+    team_total = nhl(event, "tsc-nhl-fla-car-2026-09-29-tt-car-2pt5", "hockey_team_total_goals", 2.5)
+    saves = nhl(event, "astatc-nhl-fla-car-2026-09-29-saves-car-gte17", "hockey_team_saves", 17)
+    montreal = nhl("nhl-mon-tor-2026-09-29", "aec-nhl-mon-tor-2026-09-29", "hockey_team_full_game_winner", start_time="2026-09-29T23:00:00+00:00")
+    assert bet_fields(winner) == ("game_winner", 2027, "2026-09-29", "FLA", "CAR", "FLA", None, "yes")
+    assert bet_fields(favored) == ("spread", 2027, "2026-09-29", "FLA", "CAR", "FLA", 1.5, "yes")
+    assert bet_fields(underdog) == ("spread", 2027, "2026-09-29", "FLA", "CAR", "CAR", 1.5, "no")
+    assert bet_fields(total) == ("total", 2027, "2026-09-29", "FLA", "CAR", None, 5.5, "yes")
+    assert bet_fields(team_total) == ("team_total", 2027, "2026-09-29", "FLA", "CAR", "CAR", 2.5, "yes")
+    assert saves is None                    # A team's saves, where Kalshi's are a goalie's.
+    assert (montreal.team_a, montreal.team_b) == ("MTL", "TOR")
+
+
+def test_hockey_player_props_are_left_out():
+    goals = nhl("nhl-fla-car-2026-09-29", "astatc-nhl-fla-car-2026-09-29-goals-alebar-gte2", "hockey_player_goals", 2.0,
+                title="Will Aleksander Barkov record at least 2 goals in FLA vs CAR?")
+    assert goals is None
+
+
 def test_a_doubleheader_is_a_dh_slug_or_two_events_for_one_date_and_teams():
     def contract(event, slug):
         return row(event, slug, "baseball_team_full_game_winner") | {"sport": "mlb"}

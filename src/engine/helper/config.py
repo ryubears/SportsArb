@@ -23,7 +23,8 @@ FILL_SHARE = 0.5            # The share of visible size at a level assumed to be
 # Kalshi sat next to Polymarket US's old one, and on 2026-09-28 only 4 of 72 orders there filled.
 CONFIRM_SECONDS = {"polymarket_us": 0.3}
 LIVE_SPORTS = ("nfl", "ncaaf", "mlb")  # The sports live trading takes signals on. Kalshi keeps baseball on exchange shard 3, whose
-                                        # cash is its own, so live baseball trades only with cash moved to that shard.
+                                        # cash is its own, so live baseball trades only with cash moved to that shard. Hockey is on
+                                        # shard 0 with football, and trades on paper only until its paper trades have settled.
 
 # SIZING, trading/allocate.py. A game's cap is the most contracts one trade on it may hold. The allocator sets every game's cap
 # each half hour, and a budget of dollars the half hour's trades share. The caps' bounds are under PAPER and LIVE.
@@ -31,8 +32,9 @@ LIVE_SPORTS = ("nfl", "ncaaf", "mlb")  # The sports live trading takes signals o
 DOLLARS_PER_CAP_HOUR = {    # What a game is expected to spend on its busier venue, per hour of play, for each contract of its cap.
     "nfl": 3.1,             # A cap of 100 spends about 310 dollars an hour, 1,000 over a game. Measured, since most trades are smaller
     "ncaaf": 3.1,           # than the cap: 10 dollars a game, a little above the median of 8 across the 14 NFL games on Sunday
-    "mlb": 3.1,             # 2026-09-27, which ranged from 2 to 24. College football and baseball start at the NFL's rate until
-}                           # they have trades.
+    "mlb": 3.1,             # 2026-09-27, which ranged from 2 to 24. College football, baseball, and hockey start at the NFL's rate
+    "nhl": 3.1,             # until they have trades.
+}
 BUDGET_MINUTES = 30         # How often the allocator plans again, and the stretch each budget covers.
 PLAN_HOURS = 24             # How far ahead each plan looks: the games in play and those kicking off within this many hours.
 
@@ -80,8 +82,9 @@ KEY_WARN_HOURS = 48         # How long before it lapses the email goes out, so i
 
 GAME_HOURS = {              # How long a game is expected to last, kickoff to final whistle: three in four of the sport's games end
     "nfl": 3.25,            # by then. 168 NFL games had a median of 3.11 hours, three in four by 3.24, and 382 college games a median
-    "ncaaf": 3.75,          # of 3.48, three in four by 3.71, and 2,399 baseball games a median of 2.83, three in four by 3.09,
-    "mlb": 3.25,            # nine in ten by 3.58, the more for playoff games, which run longer. Trading follows the scoreboard, to
+    "ncaaf": 3.75,          # of 3.48, three in four by 3.71. 2,399 baseball games had a median of 2.83, three in four by 3.09, and
+    "mlb": 3.25,            # 475 hockey games a median of 2.75, three in four by 2.88, and both get more for playoff games, which
+    "nhl": 3.0,             # run longer: three in four of 79 hockey playoff games ended by 3.17. Trading follows the scoreboard, to
 }                           # the real end of each game, so this is the end only when Polymarket US says nothing, and what the
                             # allocator plans with until the real end is known.
 SETTLE_HOURS = 0.5          # Final whistle to the venues settling. A game's money is back SETTLE_HOURS after it ends.
