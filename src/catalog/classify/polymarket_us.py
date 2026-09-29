@@ -2,14 +2,14 @@
 Turn Polymarket US contracts into Bets.
 
 Every contract is a market's long side. The event slug names the game,
-and the line is the away team's handicap for spreads, in football and
-baseball alike. The venue's titles on positive spread lines contradict
-its own prices, so only the slug and the signed line are trusted. A team
-total names its team in the market slug. Player props name the player in
-the title and carry an 'at least N' line, restated as the strict
-threshold N minus a half. Only games are read, since only games are
-traded, so futures are left out. This is the only file that knows
-Polymarket US's slug layout.
+and the line is the away team's handicap for spreads, in football,
+baseball, and hockey alike. The venue's titles on positive spread lines
+contradict its own prices, so only the slug and the signed line are
+trusted. A team total names its team in the market slug. Player props
+name the player in the title and carry an 'at least N' line, restated as
+the strict threshold N minus a half. Only games are read, since only
+games are traded, so futures are left out. This is the only file that
+knows Polymarket US's slug layout.
 """
 
 import re
@@ -18,7 +18,7 @@ from collections import defaultdict
 from common.timeutil import eastern_date, season_from_date
 from db.models import Bet
 
-EVENT_PREFIX = {"nfl": "nfl", "ncaaf": "cfb", "mlb": "mlb"}     # How each sport's event slugs start.
+EVENT_PREFIX = {"nfl": "nfl", "ncaaf": "cfb", "mlb": "mlb", "nhl": "nhl"}     # How each sport's event slugs start.
 # 'nfl-phi-ten-2026-09-20', the date Eastern, and for a doubleheader's games a suffix, 'mlb-stl-cin-2026-05-23-dh1'.
 GAME_EVENTS = {sport: re.compile(rf"^{prefix}-([a-z]+)-([a-z]+)-(\d{{4}}-\d{{2}}-\d{{2}})(-dh\d)?$") for sport, prefix in EVENT_PREFIX.items()}
 TEAM_TOTAL = re.compile(r"-tt-([a-z]+)-")   # The team in a team total's market slug, 'tsc-mlb-bos-nyy-2026-09-29-tt-nyy-1pt5'.
@@ -30,6 +30,10 @@ GAME_KINDS = {
     "baseball_team_full_game_spread": "spread",
     "baseball_team_full_game_total": "total",
     "baseball_team_total_runs": "team_total",
+    "hockey_team_full_game_winner": "game_winner",
+    "hockey_team_full_game_spread": "spread",
+    "hockey_team_full_game_total": "total",
+    "hockey_team_total_goals": "team_total",
 }
 PLAYER_KINDS = {
     "football_player_receiving_yards": "player_receiving_yards",
@@ -56,6 +60,8 @@ PLAYER_KINDS = {
     "baseball_player_hits_allowed": "player_hits_allowed",
     "baseball_player_earned_runs_allowed": "player_earned_runs_allowed",
     "baseball_player_walks_allowed": "player_walks_allowed",
+    "hockey_player_goals": "player_goals",
+    "hockey_player_points": "player_points",
 }
 PLAYER_TITLE = re.compile(r"^Will (.+?) (?:record|score|throw) ")     # 'Will Bijan Robinson record 40+ receiving yards?'.
 

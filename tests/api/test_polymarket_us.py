@@ -178,6 +178,18 @@ def test_game_states_come_from_one_call_asking_for_each_events_moneyline_only(mo
     assert ("marketTypes", "moneyline") in params and ("limit", 3) in params
 
 
+def test_a_game_gives_its_start_time_with_either_game_id_and_a_future_never(monkeypatch):
+    def event(slug, **ids):
+        return {"slug": slug, "startTime": "2026-09-29T21:00:00Z", "markets": [{"slug": f"aec-{slug}", "id": 1}], **ids}
+    events = [event("nfl-pit-cle-2026-10-01", gameId=19503, sportradarGameId="a"),
+              event("nhl-fla-car-2026-09-29", sportradarGameId="198c21f5"),       # NHL preseason games carry only Sportradar's.
+              event("nhl-champ-2027-06-18-w")]                                    # A future.
+    monkeypatch.setattr(polymarket_us, "fetch_events", lambda tag: events)
+    starts = {c.event_id: c.start_time for c in polymarket_us.contracts("nhl", ["nhl"])}
+    assert starts == {"nfl-pit-cle-2026-10-01": "2026-09-29T21:00:00+00:00", "nhl-fla-car-2026-09-29": "2026-09-29T21:00:00+00:00",
+                      "nhl-champ-2027-06-18-w": None}
+
+
 def test_balance_is_the_buying_power_of_the_dollar_balance(monkeypatch):
     calls = fake_api(monkeypatch, {("GET", "/account/balances"): {"balances": [{"currentBalance": 1500.0, "buyingPower": 1234.5, "currency": "USD"}]}})
     assert polymarket_us.balance() == 1234.5

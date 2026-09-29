@@ -116,6 +116,34 @@ def test_baseball_player_props_name_the_player_and_keep_the_strict_line():
     assert accent.subject == "jeremy pena"
 
 
+def nhl(series, event, ticker, **fields):
+    return kalshi.classify(row(series, event, ticker, sport="nhl", **fields))
+
+
+def test_hockey_tickers_read_like_footballs_and_its_two_letter_codes_name_the_nhls_teams():
+    event = "26SEP29FLACAR"
+    winner = nhl("KXNHLGAME", f"KXNHLGAME-{event}", f"KXNHLGAME-{event}-CAR")
+    spread = nhl("KXNHLSPREAD", f"KXNHLSPREAD-{event}", f"KXNHLSPREAD-{event}-CAR2", line=1.5)
+    total = nhl("KXNHLTOTAL", f"KXNHLTOTAL-{event}", f"KXNHLTOTAL-{event}-3", line=2.5)
+    team_total = nhl("KXNHLTEAMTOTAL", f"KXNHLTEAMTOTAL-{event}", f"KXNHLTEAMTOTAL-{event}-FLA2", line=1.5)
+    kings = nhl("KXNHLGAME", "KXNHLGAME-26OCT03LASJ", "KXNHLGAME-26OCT03LASJ-LA")
+    # A season runs October to June, so a game from August on is in the season that ends the next year, as in football.
+    assert bet_fields(winner) == ("game_winner", 2027, "2026-09-29", "FLA", "CAR", "FLA", None, "no")     # Carolina winning is Florida not.
+    assert bet_fields(spread) == ("spread", 2027, "2026-09-29", "FLA", "CAR", "CAR", 1.5, "yes")
+    assert bet_fields(total) == ("total", 2027, "2026-09-29", "FLA", "CAR", None, 2.5, "yes")
+    assert bet_fields(team_total) == ("team_total", 2027, "2026-09-29", "FLA", "CAR", "FLA", 1.5, "yes")
+    assert bet_fields(kings) == ("game_winner", 2027, "2026-10-03", "LAK", "SJS", "LAK", None, "yes")
+    assert kalshi.split_codes("NJNYI", "nhl") == ("NJD", "NYI") and kalshi.split_codes("WSHTB", "nhl") == ("WSH", "TBL")
+
+
+def test_hockey_player_props_name_the_player_and_keep_the_strict_line():
+    goals = nhl("KXNHLGOAL", "KXNHLGOAL-26SEP29FLACAR", "KXNHLGOAL-26SEP29FLACAR-FLAABARKOV16-2", title="Aleksander Barkov: 2+ goals",
+                line=1.5)
+    points = nhl("KXNHLPTS", "KXNHLPTS-26SEP29FLACAR", "KXNHLPTS-26SEP29FLACAR-FLAAEKBLAD5-1", title="Aaron Ekblad: 1+ points", line=0.5)
+    assert bet_fields(goals) == ("player_goals", 2027, "2026-09-29", "FLA", "CAR", "aleksander barkov", 1.5, "yes")
+    assert bet_fields(points) == ("player_points", 2027, "2026-09-29", "FLA", "CAR", "aaron ekblad", 0.5, "yes")
+
+
 def test_a_doubleheader_is_two_start_times_for_one_date_and_teams():
     rows = [row("KXMLBGAME", "KXMLBGAME-26MAY231310STLCIN", "KXMLBGAME-26MAY231310STLCIN-STL", sport="mlb"),
             row("KXMLBHIT", "KXMLBHIT-26MAY231840STLCIN", "KXMLBHIT-26MAY231840STLCIN-STLNARENADO28-1", sport="mlb"),

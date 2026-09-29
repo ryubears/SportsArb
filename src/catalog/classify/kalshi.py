@@ -2,12 +2,13 @@
 Turn Kalshi contracts into Bets.
 
 The series ticker says the kind, the event ticker holds the game, and the
-market ticker holds the team. College football's game series share the
-NFL's layout, with team codes of two to five letters. Baseball's event
-tickers carry the start time too, which tells a doubleheader's two games
-apart. Player props name the player in the title, before the colon. Only
-games are read, since only games are traded, so futures are left out.
-This is the only file that knows Kalshi's ticker layout.
+market ticker holds the team. College football's and hockey's game series
+share the NFL's layout, with team codes of two to five letters in college
+football and two or three in hockey. Baseball's event tickers carry the
+start time too, which tells a doubleheader's two games apart. Player
+props name the player in the title, before the colon. Only games are
+read, since only games are traded, so futures are left out. This is the
+only file that knows Kalshi's ticker layout.
 """
 
 import re
@@ -22,6 +23,7 @@ GAME_SERIES = {
     "KXNFLGAME": "game_winner", "KXNFLSPREAD": "spread", "KXNFLTOTAL": "total",
     "KXNCAAFGAME": "game_winner", "KXNCAAFSPREAD": "spread", "KXNCAAFTOTAL": "total",
     "KXMLBGAME": "game_winner", "KXMLBSPREAD": "spread", "KXMLBTOTAL": "total", "KXMLBTEAMTOTAL": "team_total",
+    "KXNHLGAME": "game_winner", "KXNHLSPREAD": "spread", "KXNHLTOTAL": "total", "KXNHLTEAMTOTAL": "team_total",
 }
 # Player props on one game. Every one but the first touchdown carries a line, stored as the strict threshold.
 PLAYER_SERIES = {
@@ -49,6 +51,8 @@ PLAYER_SERIES = {
     "KXMLBHA": "player_hits_allowed",
     "KXMLBERA": "player_earned_runs_allowed",
     "KXMLBWA": "player_walks_allowed",
+    "KXNHLGOAL": "player_goals",
+    "KXNHLPTS": "player_points",
 }
 PLAYER_TITLE = re.compile(r"^(.+?): ")     # 'Bijan Robinson: 100+ receiving yards'.
 
