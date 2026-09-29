@@ -16,10 +16,8 @@ an edge that is gone by the time an order arrives. A leg on a venue in
 config.CONFIRM_SECONDS must have a book newer, by the venues' own clocks,
 than the other leg's last change, or wait until that change is old enough
 that any reaction to it would have reached us. The scanner offers the edge
-again at the next change or tick, so one that is real is taken then.
-
-The leg on config.FIRST_VENUE, whose quotes are the ones most often gone,
-is sent first, and the other leg follows for what it filled.
+again at the next change or tick, so one that is real is taken then. Once
+it is taken, both legs' orders go out at once.
 
 When the two legs fill unevenly the executor goes flat at once. It either
 sells the excess back on its own venue or buys the missing amount on the
@@ -248,26 +246,11 @@ class Executor:
         trade.matched = min(yes.filled, no.filled)
         trade.profit = trade.matched * (1 - yes.average - no.average)
 
-    async def open_legs(self, trade, legs):
-        """
-        Send both legs' opening orders and return their Fills, in the legs'
-        order. With one leg on config.FIRST_VENUE and the other elsewhere,
-        that leg goes first and the other follows for as many as it filled,
-        or not at all, so a miss there leaves nothing to flatten.
-        """
-        first = [leg for leg in legs if leg.venue == config.FIRST_VENUE]
-        if len(first) != 1:
-            return await asyncio.gather(*(self.fill(trade, leg, "open") for leg in legs))
-        led = await self.fill(trade, first[0], "open")
-        other = next(leg for leg in legs if leg is not first[0])
-        followed = await self.fill(trade, dataclasses.replace(other, quantity=led.filled), "open") if led.filled else Fill(ts=self.clock())
-        return [led, followed] if legs[0] is first[0] else [followed, led]
-
     async def run_trade(self, trade, legs):
         """
         Fill both legs, flatten any mismatch, and record the result.
         """
-        fills = await self.open_legs(trade, legs)
+        fills = await asyncio.gather(*(self.fill(trade, leg, "open") for leg in legs))
         for leg, fill in zip(legs, fills):
             self.cash.release(leg.venue, leg.quantity * leg.limit, shard(leg))
             leg.held, leg.cost = fill.filled, fill.dollars

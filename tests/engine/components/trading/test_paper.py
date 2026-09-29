@@ -202,7 +202,7 @@ def test_rejected_orders_fail_without_a_hedge(tmp_path, quick, monkeypatch):
     conn, cash, ex = executor(tmp_path, latest)
     run(ex)
     t = stored(conn)[0]
-    assert (t["status"], t["matched"], t["hedge"]) == ("failed", 0, "yes leg rejected")     # Polymarket US goes first, so no is never sent.
+    assert (t["status"], t["matched"], t["hedge"]) == ("failed", 0, "yes leg rejected, no leg rejected")
     assert cash.amounts == pytest.approx({"polymarket_us": 10000, "kalshi": 10000})
 
 
@@ -376,18 +376,3 @@ def test_an_edge_trades_once_the_other_venues_move_is_older_than_the_wait_or_whe
     moved(latest, "polymarket_us", 0.01)                    # Polymarket US just moved, Kalshi's book is older: Kalshi has no wait.
     moved(latest, "kalshi", 3.0)
     assert run(ex) == [True]
-
-
-def test_the_polymarket_us_leg_goes_first_even_as_the_no_leg_and_the_other_follows_for_what_it_filled(tmp_path, quick):
-    latest = books(pm_bid=0.50, pm_ask=0.51, k_bid=0.39, k_ask=0.40)
-    conn, cash, ex = executor(tmp_path, latest)
-
-    async def scenario():
-        # Yes through Kalshi at 0.40, no through the other side of Polymarket US at 1 - 0.50.
-        assert ex.signal(PAIR, NO, YES, 1 - 0.40 - 0.50, 100, FEES, NOW)
-        latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [[0.50, 20]], [[0.51, 100]])   # Thinner before it arrives.
-        await asyncio.gather(*ex.tasks)
-    asyncio.run(scenario())
-    t = stored(conn)[0]
-    # Polymarket US filled half the 20 left. Kalshi, with 100 there, was asked only for those 10.
-    assert (t["yes_venue"], t["quantity"], t["no_filled"], t["yes_filled"], t["matched"], t["hedge"]) == ("kalshi", 50, 10, 10, 10, "none")
