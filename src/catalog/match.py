@@ -36,7 +36,12 @@ HOCKEY_POSTPONED = "If the game does not start within two days, both venues sett
 HOCKEY_GOALS = f"Overtime counts on both venues, and a shootout as one goal for its winner. {HOCKEY_POSTPONED}"
 HOCKEY_NOTES = {"game_winner": f"Overtime and the shootout count on both venues. {HOCKEY_POSTPONED}",
                 "spread": HOCKEY_GOALS, "total": HOCKEY_GOALS, "team_total": HOCKEY_GOALS}
-KIND_NOTES = {"nfl": FOOTBALL_NOTES, "ncaaf": FOOTBALL_NOTES, "mlb": BASEBALL_NOTES, "nhl": HOCKEY_NOTES}
+# From Polymarket US's rules as of June 2026, since it listed no basketball game for the new season yet.
+BASKETBALL_POSTPONED = ("Overtime counts on both venues. If the game does not start within 48 hours, Kalshi settles at a fair price, "
+                        "while Polymarket US waits up to two weeks for it and then settles at its last price.")
+BASKETBALL_NOTES = {"game_winner": BASKETBALL_POSTPONED, "spread": BASKETBALL_POSTPONED, "total": BASKETBALL_POSTPONED,
+                    "team_total": BASKETBALL_POSTPONED}
+KIND_NOTES = {"nfl": FOOTBALL_NOTES, "ncaaf": FOOTBALL_NOTES, "mlb": BASEBALL_NOTES, "nhl": HOCKEY_NOTES, "nba": BASKETBALL_NOTES}
 FOOTBALL_PLAYER_NOTE = "Both venues settle to the pre-game fair price if the player never takes a snap and count overtime. Polymarket US ignores stat corrections made after the game."
 PLAYER_NOTES = {
     "nfl": FOOTBALL_PLAYER_NOTE,
@@ -47,6 +52,9 @@ PLAYER_NOTES = {
     "nhl": "Overtime counts and shootout goals do not, on Polymarket US by its rules and on Kalshi by the official stats it goes by. "
            "A player who dresses but never plays settles at a fair price on both venues, each its own, and Polymarket US settles a "
            "scratched player the same way, which Kalshi's rules leave unsaid.",
+    "nba": "Both venues count overtime, and Polymarket US ignores stat corrections made after the game. A player who is active but "
+           "never takes the court settles at a fair price on both venues, each its own, and Polymarket US settles an inactive player "
+           "the same way, which Kalshi's rules leave unsaid.",
 }
 
 

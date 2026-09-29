@@ -137,6 +137,36 @@ def test_hockey_player_props_shift_the_at_least_line_by_a_half():
     assert bet_fields(points) == ("player_points", 2027, "2026-09-29", "FLA", "CAR", "sebastian aho", 0.5, "yes")
 
 
+def nba(event, slug, market_type, line=None, title="", start_time="2026-06-14T00:30:00+00:00"):
+    return polymarket_us.classify(row(event, slug, market_type, line, start_time) | {"sport": "nba", "title": title})
+
+
+def test_basketball_markets_read_like_the_others_and_the_venues_own_codes_name_the_nbas_teams():
+    event = "nba-ny-sa-2026-06-13"                  # 8:30 PM Eastern, the next day in UTC.
+    winner = nba(event, "aec-nba-ny-sa-2026-06-13", "basketball_team_full_game_winner")
+    favored = nba(event, "asc-nba-ny-sa-2026-06-13-neg-10pt5", "basketball_team_full_game_spread", -10.5)
+    underdog = nba(event, "asc-nba-ny-sa-2026-06-13-pos-4pt5", "basketball_team_full_game_spread", 4.5)
+    total = nba(event, "tsc-nba-ny-sa-2026-06-13-197pt5", "basketball_team_full_game_total", 197.5)
+    assert bet_fields(winner) == ("game_winner", 2026, "2026-06-13", "NYK", "SAS", "NYK", None, "yes")
+    assert bet_fields(favored) == ("spread", 2026, "2026-06-13", "NYK", "SAS", "NYK", 10.5, "yes")
+    assert bet_fields(underdog) == ("spread", 2026, "2026-06-13", "NYK", "SAS", "SAS", 4.5, "no")
+    assert bet_fields(total) == ("total", 2026, "2026-06-13", "NYK", "SAS", None, 197.5, "yes")
+    assert nba(event, "aec-nba-ny-sa-2026-06-13", "moneyline") is None             # Last season's name, left out.
+    warriors = nba("nba-gs-pho-2026-10-21", "aec-nba-gs-pho-2026-10-21", "basketball_team_full_game_winner",
+                   start_time="2026-10-22T02:00:00+00:00")
+    assert (warriors.team_a, warriors.team_b) == ("GSW", "PHX")
+
+
+def test_basketball_player_props_shift_the_at_least_line_by_a_half():
+    event = "nba-ny-sa-2026-06-13"
+    points = nba(event, "astatc-nba-ny-sa-2026-06-13-pts-defox-gte10", "basketball_player_points", 10.0,
+                 title="Will De'Aaron Fox record at least 10 points in NY vs SA?")
+    threes = nba(event, "astatc-nba-ny-sa-2026-06-13-threes-defox-gte2", "basketball_player_threes", 2.0,
+                 title="Will De'Aaron Fox record at least 2 three pointers made in NY vs SA?")
+    assert bet_fields(points) == ("player_points", 2026, "2026-06-13", "NYK", "SAS", "deaaron fox", 9.5, "yes")
+    assert bet_fields(threes) == ("player_threes", 2026, "2026-06-13", "NYK", "SAS", "deaaron fox", 1.5, "yes")
+
+
 def test_a_doubleheader_is_a_dh_slug_or_two_events_for_one_date_and_teams():
     def contract(event, slug):
         return row(event, slug, "baseball_team_full_game_winner") | {"sport": "mlb"}

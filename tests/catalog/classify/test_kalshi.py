@@ -144,6 +144,32 @@ def test_hockey_player_props_name_the_player_and_keep_the_strict_line():
     assert bet_fields(points) == ("player_points", 2027, "2026-09-29", "FLA", "CAR", "aaron ekblad", 0.5, "yes")
 
 
+def nba(series, event, ticker, **fields):
+    return kalshi.classify(row(series, event, ticker, sport="nba", **fields))
+
+
+def test_basketball_tickers_read_like_footballs():
+    event = "26JUN13NYKSAS"                         # Game 5 of the 2026 finals, New York at San Antonio.
+    winner = nba("KXNBAGAME", f"KXNBAGAME-{event}", f"KXNBAGAME-{event}-SAS")
+    spread = nba("KXNBASPREAD", f"KXNBASPREAD-{event}", f"KXNBASPREAD-{event}-SAS31", line=31.5)
+    total = nba("KXNBATOTAL", f"KXNBATOTAL-{event}", f"KXNBATOTAL-{event}-172", line=172.5)
+    team_total = nba("KXNBATEAMTOTAL", f"KXNBATEAMTOTAL-{event}", f"KXNBATEAMTOTAL-{event}-SAS124", line=124.5)
+    assert bet_fields(winner) == ("game_winner", 2026, "2026-06-13", "NYK", "SAS", "NYK", None, "no")     # San Antonio winning is New York not.
+    assert bet_fields(spread) == ("spread", 2026, "2026-06-13", "NYK", "SAS", "SAS", 31.5, "yes")
+    assert bet_fields(total) == ("total", 2026, "2026-06-13", "NYK", "SAS", None, 172.5, "yes")
+    assert bet_fields(team_total) == ("team_total", 2026, "2026-06-13", "NYK", "SAS", "SAS", 124.5, "yes")
+    opener = nba("KXNBAGAME", "KXNBAGAME-26OCT20BOSDET", "KXNBAGAME-26OCT20BOSDET-BOS")
+    assert (opener.season, opener.team_a, opener.team_b, opener.polarity) == (2027, "BOS", "DET", "yes")
+
+
+def test_basketball_player_props_name_the_player_and_keep_the_strict_line():
+    event = "26JUN13NYKSAS"
+    points = nba("KXNBAPTS", f"KXNBAPTS-{event}", f"KXNBAPTS-{event}-SASVWEMBANYAMA1-40", title="Victor Wembanyama: 40+ points", line=39.5)
+    threes = nba("KXNBA3PT", f"KXNBA3PT-{event}", f"KXNBA3PT-{event}-NYKMMCBRIDE2-5", title="Miles McBride: 5+ threes", line=4.5)
+    assert bet_fields(points) == ("player_points", 2026, "2026-06-13", "NYK", "SAS", "victor wembanyama", 39.5, "yes")
+    assert bet_fields(threes) == ("player_threes", 2026, "2026-06-13", "NYK", "SAS", "miles mcbride", 4.5, "yes")
+
+
 def test_a_doubleheader_is_two_start_times_for_one_date_and_teams():
     rows = [row("KXMLBGAME", "KXMLBGAME-26MAY231310STLCIN", "KXMLBGAME-26MAY231310STLCIN-STL", sport="mlb"),
             row("KXMLBHIT", "KXMLBHIT-26MAY231840STLCIN", "KXMLBHIT-26MAY231840STLCIN-STLNARENADO28-1", sport="mlb"),

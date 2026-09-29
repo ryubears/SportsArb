@@ -95,3 +95,12 @@ def test_hockey_pairs_carry_hockeys_notes():
     assert winner.label == "nhl game_winner 2026-09-29 FLA@CAR FLA"
     assert winner.flags == [match.HOCKEY_NOTES["game_winner"]] and covers.flags == [match.HOCKEY_GOALS]
     assert goals.flags == [match.PLAYER_NOTES["nhl"]]
+
+
+def test_basketball_pairs_carry_basketballs_notes():
+    game = dict(game_date="2026-06-13", team_a="NYK", team_b="SAS")
+    prop = dict(game, kind="player_points", subject="victor wembanyama", line=39.5)
+    pairs, _ = match.match([bet("kalshi", "k", subject="NYK", **game), bet("polymarket_us", "us", subject="NYK", **game),
+                            bet("kalshi", "kp", **prop), bet("polymarket_us", "usp", **prop)], "nba")
+    winner, points = sorted(pairs, key=lambda p: p.kind)
+    assert winner.flags == [match.BASKETBALL_POSTPONED] and points.flags == [match.PLAYER_NOTES["nba"]]

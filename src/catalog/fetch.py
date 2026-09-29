@@ -57,6 +57,15 @@ SPORTS = {
             "tags": ["nhl"],
         },
     },
+    "nba": {
+        "kalshi": {
+            "tickers": ["KXNBAGAME", "KXNBASPREAD", "KXNBATOTAL", "KXNBATEAMTOTAL",
+                        "KXNBAPTS", "KXNBAREB", "KXNBAAST", "KXNBA3PT", "KXNBABLK"],
+        },
+        "polymarket_us": {
+            "tags": ["nba"],
+        },
+    },
 }
 
 
