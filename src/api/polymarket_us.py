@@ -38,7 +38,8 @@ WS_PATH = "/v1/ws/markets"
 WS_CHUNK = 100          # Market slugs per subscription request, the documented maximum.
 WS_SUBSCRIPTIONS = 10   # Subscription requests per connection, however few slugs each carries.
 WS_FULL = "max subscriptions per connection reached"    # The error refusing a request past WS_SUBSCRIPTIONS.
-WS_DEBOUNCE = True      # Ask the feed to batch updates, which cuts bandwidth by a third and the messages to parse with it.
+WS_DEBOUNCE = False     # Whether to ask the feed to batch updates. Batching cuts bandwidth by a third, but it can hold our view of the
+                        # book behind the venue's: on the first live game, 2026-09-28, only 1 of 11 orders opening a trade here filled.
 KEY_ID_FILE = DATA_DIR / "polymarket_us_key_id.txt"
 SECRET_KEY_FILE = DATA_DIR / "polymarket_us_secret_key.txt"
 
