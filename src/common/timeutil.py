@@ -90,12 +90,17 @@ def eastern_date(iso_time):
     return datetime.fromisoformat(iso_time).astimezone(EASTERN).strftime("%Y-%m-%d")
 
 
-def season_from_date(game_date):
+CALENDAR_SEASONS = {"mlb"}  # Sports whose season ends in the year it starts.
+
+
+def season_from_date(game_date, sport=None):
     """
-    Season end year for a game date. Games from August onward belong to the season ending next year.
+    Season end year for a game date of the sport. A football game from August
+    onward belongs to the season ending next year, while a baseball season
+    ends in the year it starts.
     """
     year, month = int(game_date[:4]), int(game_date[5:7])
-    return year + 1 if month >= 8 else year
+    return year + 1 if month >= 8 and sport not in CALENDAR_SEASONS else year
 
 
 def add_business_days(iso_time, days):

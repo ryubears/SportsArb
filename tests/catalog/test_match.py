@@ -72,4 +72,13 @@ def test_player_props_pair_across_venues_and_carry_the_rules_note():
                                     bet("polymarket_us", "us50", **dict(prop, line=49.5))], "nfl")
     assert len(pairs) == 1 and [b["contract_id"] for b in unmatched] == ["us50"]
     assert pairs[0].label == "nfl player_receiving_yards 2026-09-24 ATL@GB bijan robinson 39.5"
-    assert match.PLAYER_NOTE in pairs[0].flags
+    assert match.PLAYER_NOTES["nfl"] in pairs[0].flags
+
+
+def test_baseball_pairs_carry_baseballs_notes_not_footballs():
+    game = dict(game_date="2026-09-29", team_a="BOS", team_b="NYY", subject="BOS")
+    prop = dict(kind="player_strikeouts", game_date="2026-09-29", team_a="BOS", team_b="NYY", subject="payton tolle", line=4.5)
+    pairs, _ = match.match([bet("kalshi", "k", **game), bet("polymarket_us", "us", **game),
+                            bet("kalshi", "kp", **prop), bet("polymarket_us", "usp", **prop)], "mlb")
+    winner, strikeouts = sorted(pairs, key=lambda p: p.kind)
+    assert winner.flags == [match.BASEBALL_POSTPONED] and strikeouts.flags == [match.PLAYER_NOTES["mlb"]]

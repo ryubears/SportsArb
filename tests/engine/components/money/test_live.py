@@ -92,3 +92,20 @@ def test_readings_are_taken_on_a_timer_and_at_once_after_a_payout():
         await cash.readings.running
     asyncio.run(scenario())
     assert len(reads) == 3
+
+
+def test_an_order_on_a_kalshi_shard_can_spend_only_what_that_shard_has_free():
+    shards = {0: 80.0, 3: 20.0}
+    cash = LiveBalances(lambda m: None, {"kalshi": lambda: sum(shards.values()), "polymarket_us": lambda: 100.0},
+                        {"kalshi": lambda: dict(shards)})
+    asyncio.run(cash.refresh(NOW))
+    assert (cash.available("kalshi"), cash.available("kalshi", 0), cash.available("kalshi", 3)) == (100.0, 80.0, 20.0)
+    assert cash.available("kalshi", 2) == 0.0 and cash.available("polymarket_us", 3) == 100.0    # A shard not listed, a venue without shards.
+    cash.reserve("kalshi", 15.0, 3)
+    cash.apply(Ledger(NOW, "kalshi", -10.0, "buy", 1), 0)
+    assert (cash.available("kalshi", 0), cash.available("kalshi", 3), cash["kalshi"]) == (70.0, 5.0, 75.0)
+    assert cash.spendable("kalshi", 3) == 0.0                                               # Under the floor on that shard.
+    shards.update({0: 70.0})                                                               # The venue shows the buy.
+    cash.release("kalshi", 15.0, 3)
+    asyncio.run(cash.refresh(NOW))
+    assert (cash.available("kalshi", 0), cash.available("kalshi", 3)) == (70.0, 20.0)       # Counted once, not twice.

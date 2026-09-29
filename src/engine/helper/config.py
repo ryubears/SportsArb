@@ -22,6 +22,8 @@ FILL_SHARE = 0.5            # The share of visible size at a level assumed to be
 # books reached us 85 ms after the venue changed them at the median, 160 at the 90th percentile, so a price that moved on
 # Kalshi sat next to Polymarket US's old one, and on 2026-09-28 only 4 of 72 orders there filled.
 CONFIRM_SECONDS = {"polymarket_us": 0.3}
+LIVE_SPORTS = ("nfl", "ncaaf", "mlb")  # The sports live trading takes signals on. Kalshi keeps baseball on exchange shard 3, whose
+                                        # cash is its own, so live baseball trades only with cash moved to that shard.
 FIRST_VENUE = "polymarket_us"   # With a leg here and the other elsewhere, this one's order goes first and the other follows for
                                 # what it filled, or not at all. Its orders filled 4 of 72 times on 2026-09-28, Kalshi's 50.
 
@@ -31,7 +33,8 @@ FIRST_VENUE = "polymarket_us"   # With a leg here and the other elsewhere, this 
 DOLLARS_PER_CAP_HOUR = {    # What a game is expected to spend on its busier venue, per hour of play, for each contract of its cap.
     "nfl": 3.1,             # A cap of 100 spends about 310 dollars an hour, 1,000 over a game. Measured, since most trades are smaller
     "ncaaf": 3.1,           # than the cap: 10 dollars a game, a little above the median of 8 across the 14 NFL games on Sunday
-}                           # 2026-09-27, which ranged from 2 to 24. College football starts at the NFL's rate until it has trades.
+    "mlb": 3.1,             # 2026-09-27, which ranged from 2 to 24. College football and baseball start at the NFL's rate until
+}                           # they have trades.
 BUDGET_MINUTES = 30         # How often the allocator plans again, and the stretch each budget covers.
 PLAN_HOURS = 24             # How far ahead each plan looks: the games in play and those kicking off within this many hours.
 
@@ -79,8 +82,10 @@ KEY_WARN_HOURS = 48         # How long before it lapses the email goes out, so i
 
 GAME_HOURS = {              # How long a game is expected to last, kickoff to final whistle: three in four of the sport's games end
     "nfl": 3.25,            # by then. 168 NFL games had a median of 3.11 hours, three in four by 3.24, and 382 college games a median
-    "ncaaf": 3.75,          # of 3.48, three in four by 3.71. Trading follows the scoreboard, to the real end of each game, so this is
-}                           # the end only when Polymarket US says nothing, and what the allocator plans with until the real end is known.
+    "ncaaf": 3.75,          # of 3.48, three in four by 3.71, and 2,399 baseball games a median of 2.83, three in four by 3.09,
+    "mlb": 3.25,            # nine in ten by 3.58, the more for playoff games, which run longer. Trading follows the scoreboard, to
+}                           # the real end of each game, so this is the end only when Polymarket US says nothing, and what the
+                            # allocator plans with until the real end is known.
 SETTLE_HOURS = 0.5          # Final whistle to the venues settling. A game's money is back SETTLE_HOURS after it ends.
 RECORD_HOURS = 5            # Kickoff to when a game's contracts stop being recorded, whatever their close time says. The kickoff
                             # is Polymarket US's, since Kalshi gives none, and holds for both venues' contracts.

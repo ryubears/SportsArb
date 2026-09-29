@@ -5,7 +5,10 @@ paper.py keeps paper money in a ledger of our own, and live.py reads real
 money from the venues. Either way the executor, allocator, settler, and
 rebalancing see the same thing: the dollars free on each venue, less what
 is held back for orders in flight, so two signals in the same moment
-cannot spend the same dollars.
+cannot spend the same dollars. A venue may split its cash further by
+exchange shard, as Kalshi does, and an order spends only its own shard's.
+The shard is passed along where it matters, and money that keeps no
+shards, like paper money, leaves it aside.
 """
 
 
@@ -32,27 +35,33 @@ class Balances:
         """
         raise NotImplementedError
 
-    def spendable(self, venue):
+    def available(self, venue, shard=None):
         """
-        Dollars new trades may spend on the venue: its free cash above the floor, or nothing while it is not known.
+        Dollars free on the venue, on the shard given when the money keeps shards, the floor included.
         """
-        return max(0.0, self[venue] - self.floor()) if self.known(venue) else 0.0
+        return self[venue]
 
-    def reserve(self, venue, dollars):
+    def spendable(self, venue, shard=None):
         """
-        Hold dollars back for an order in flight.
+        Dollars new trades may spend on the venue, or its shard: the free cash above the floor, or nothing while it is not known.
+        """
+        return max(0.0, self.available(venue, shard) - self.floor()) if self.known(venue) else 0.0
+
+    def reserve(self, venue, dollars, shard=None):
+        """
+        Hold dollars back for an order in flight, on the venue's shard given.
         """
         raise NotImplementedError
 
-    def release(self, venue, dollars):
+    def release(self, venue, dollars, shard=None):
         """
         Give back a reservation, or the part of it that was not spent.
         """
         raise NotImplementedError
 
-    def apply(self, entry):
+    def apply(self, entry, shard=None):
         """
-        Apply a cash movement, given as a Ledger entry: a buy, a sale, a payout, or a transfer.
+        Apply a cash movement, given as a Ledger entry: a buy, a sale, a payout, or a transfer, on the venue's shard given.
         """
         raise NotImplementedError
 

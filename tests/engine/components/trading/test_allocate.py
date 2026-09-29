@@ -143,3 +143,18 @@ def test_a_catalog_refresh_plans_again_at_once(tmp_path):
     allocator.reload()
     assert allocator.current(f"{SUNDAY}T17:10:00+00:00") is not first
     assert allocator.plan.made == f"{SUNDAY}T17:10:00+00:00" and allocator.plan.ends == f"{SUNDAY}T17:30:00+00:00"
+
+
+def test_the_live_plan_covers_only_the_sports_live_trades(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "LIVE_SPORTS", ("ncaaf",))                 # As if NFL games were paper only.
+
+    def live(conn):
+        cash = LiveBalances(lambda m: None, {"kalshi": lambda: 5000.0, "polymarket_us": lambda: 5000.0})
+        asyncio.run(cash.refresh(f"{SUNDAY}T16:00:00+00:00"))
+        return cash
+
+    now = EARLY[0][2]
+    _, live_plan = plan_for(tmp_path / "live", EARLY, live)
+    _, paper_plan = plan_for(tmp_path / "paper", EARLY)
+    assert live_plan.games_ahead(now) == {} and live_plan.cap(pair_for(*EARLY[0]), now) == 0
+    assert len(paper_plan.games_ahead(now)) == len(EARLY)

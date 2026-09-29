@@ -22,14 +22,25 @@ IDENTITY = ("kind", "season", "game_date", "team_a", "team_b", "subject", "line"
 # Flag a pair when its members stop trading more than this many days apart.
 CLOSE_GAP_LIMIT_DAYS = 60
 
-# Known rule differences by kind, from reading the venues' rules text.
+# Known rule differences by sport and kind, from reading the venues' rules text.
 # Every pair of that kind carries the note so nobody has to reread the rules.
-KIND_NOTES = {
+FOOTBALL_NOTES = {
     "game_winner": "Ties pay half on both venues. If the game does not start within 48 hours, Kalshi settles at a fair price while Polymarket US waits up to two weeks for a rescheduled game.",
     "spread": "If the game does not start within 48 hours, Kalshi settles at a fair price. Polymarket US waits up to two weeks for a rescheduled game.",
     "total": "If the game does not start within 48 hours, Kalshi settles at a fair price. Polymarket US waits up to two weeks for a rescheduled game.",
 }
-PLAYER_NOTE = "Both venues settle to the pre-game fair price if the player never takes a snap and count overtime. Polymarket US ignores stat corrections made after the game."
+BASEBALL_POSTPONED = ("Extra innings count on both venues. If the game is postponed, Kalshi waits two days for it and then settles at a "
+                      "fair price, while Polymarket US waits up to two weeks for it.")
+BASEBALL_NOTES = {"game_winner": BASEBALL_POSTPONED, "spread": BASEBALL_POSTPONED, "total": BASEBALL_POSTPONED, "team_total": BASEBALL_POSTPONED}
+KIND_NOTES = {"nfl": FOOTBALL_NOTES, "ncaaf": FOOTBALL_NOTES, "mlb": BASEBALL_NOTES}
+FOOTBALL_PLAYER_NOTE = "Both venues settle to the pre-game fair price if the player never takes a snap and count overtime. Polymarket US ignores stat corrections made after the game."
+PLAYER_NOTES = {
+    "nfl": FOOTBALL_PLAYER_NOTE,
+    "ncaaf": FOOTBALL_PLAYER_NOTE,
+    "mlb": "Both venues settle to a fair price, each its own, if the player is not in the starting lineup, or for a pitching prop is not "
+           "the starting pitcher, and count extra innings. Kalshi also settles at a fair price for a starter who never comes to the plate "
+           "or faces a batter, and does not count a pinch hitter's at bats.",
+}
 
 
 def identity(bet):
@@ -54,18 +65,19 @@ def label(bet, sport):
     return " ".join(parts)
 
 
-def flags(rows):
+def flags(rows, sport):
     """
-    Things a reviewer should check about a pair, from its members' close times and kind.
+    Things a reviewer should check about a pair of the sport, from its members' close times and kind.
     """
     found = []
     closes = sorted(r["close_time"] for r in rows if r["close_time"])
     if len(closes) > 1 and abs(days_between(closes[0], closes[-1])) > CLOSE_GAP_LIMIT_DAYS:
         found.append(f"close times {days_between(closes[0], closes[-1]):.0f} days apart")
-    if rows[0]["kind"] in KIND_NOTES:
-        found.append(KIND_NOTES[rows[0]["kind"]])
-    if rows[0]["kind"].startswith("player_"):
-        found.append(PLAYER_NOTE)
+    kind = rows[0]["kind"]
+    if kind in KIND_NOTES.get(sport, {}):
+        found.append(KIND_NOTES[sport][kind])
+    if kind.startswith("player_") and sport in PLAYER_NOTES:
+        found.append(PLAYER_NOTES[sport])
     return found
 
 
@@ -78,7 +90,7 @@ def make_pair(rows, sport):
                    r["subject"], r["line"], r["polarity"]) for r in rows]
     return Pair(sport=sport, label=label(first, sport), kind=first["kind"], season=first["season"], game_date=first["game_date"],
                 team_a=first["team_a"], team_b=first["team_b"], subject=first["subject"], line=first["line"],
-                members=members, flags=flags(rows))
+                members=members, flags=flags(rows, sport))
 
 
 def match(bets, sport):

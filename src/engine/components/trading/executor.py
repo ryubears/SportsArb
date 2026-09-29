@@ -51,6 +51,13 @@ from engine.helper import config, game
 from engine.helper.pricing import depth, fresh, ladder, reach, sell_ladder, sweep, trade_words
 
 
+def shard(leg):
+    """
+    The exchange shard a leg's market trades on, whose cash is its own, as the catalog gave it, or None for a venue without shards.
+    """
+    return (leg.fee_info or {}).get("exchange_index")
+
+
 @dataclass
 class Fill:
     """
@@ -169,7 +176,7 @@ class Executor:
         if not book:
             return [], 0, None
         buying = ladder(book, leg.polarity, leg.side)
-        affordable = min(excess, int(self.cash[leg.venue] // buying[0][0])) if buying else 0
+        affordable = min(excess, int(self.cash.available(leg.venue, shard(leg)) // buying[0][0])) if buying else 0
         bought, cost = sweep(buying, affordable, leg.venue, leg.fee_info, config.FILL_SHARE)
         return buying, affordable, (bought * (1 - average) - cost if bought else None)
 
@@ -180,7 +187,7 @@ class Executor:
         """
         fill = await self.sell_back(trade, leg, excess, reach(selling, excess, config.FILL_SHARE))
         if fill.filled:
-            self.cash.apply(Ledger(fill.ts, leg.venue, fill.dollars, "sell", trade.id))
+            self.cash.apply(Ledger(fill.ts, leg.venue, fill.dollars, "sell", trade.id), shard(leg))
         leg.held -= fill.filled
         leg.cost -= fill.filled * average
         trade.hedge_pnl += fill.dollars - fill.filled * average
@@ -193,11 +200,11 @@ class Executor:
         flatten_limit(). Returns (contracts bought, note).
         """
         limit = self.flatten_limit(reach(buying, affordable, config.FILL_SHARE))
-        self.cash.reserve(leg.venue, affordable * limit)
+        self.cash.reserve(leg.venue, affordable * limit, shard(leg))
         fill = await self.fill(trade, dataclasses.replace(leg, quantity=affordable, limit=limit), "flatten")
-        self.cash.release(leg.venue, affordable * limit)
+        self.cash.release(leg.venue, affordable * limit, shard(leg))
         if fill.filled:
-            self.cash.apply(Ledger(fill.ts, leg.venue, -fill.dollars, "buy", trade.id))
+            self.cash.apply(Ledger(fill.ts, leg.venue, -fill.dollars, "buy", trade.id), shard(leg))
         leg.held += fill.filled
         leg.cost += fill.dollars
         trade.hedge_pnl += fill.filled * (1 - average) - fill.dollars
@@ -262,10 +269,10 @@ class Executor:
         """
         fills = await self.open_legs(trade, legs)
         for leg, fill in zip(legs, fills):
-            self.cash.release(leg.venue, leg.quantity * leg.limit)
+            self.cash.release(leg.venue, leg.quantity * leg.limit, shard(leg))
             leg.held, leg.cost = fill.filled, fill.dollars
             if fill.filled:
-                self.cash.apply(Ledger(fill.ts, leg.venue, -fill.dollars, "buy", trade.id))
+                self.cash.apply(Ledger(fill.ts, leg.venue, -fill.dollars, "buy", trade.id), shard(leg))
         self.record_fills(trade, fills)
         trade.hedge_pnl = 0.0
         hedge = None                # How the mismatch was flattened, in words, when there was one.
@@ -414,7 +421,7 @@ class Executor:
         if not available:
             return 0, cap
         budget = self.allocator.budget_left(now) if self.allocator else {}
-        affordable = min(min(self.cash.spendable(leg.venue), budget.get(leg.venue, float("inf"))) // leg.limit for leg in legs)
+        affordable = min(min(self.cash.spendable(leg.venue, shard(leg)), budget.get(leg.venue, float("inf"))) // leg.limit for leg in legs)
         return int(min(available * config.FILL_SHARE, cap, affordable)), cap
 
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
@@ -441,7 +448,7 @@ class Executor:
             return False
         for leg in legs:
             leg.quantity = quantity
-            self.cash.reserve(leg.venue, quantity * leg.limit)
+            self.cash.reserve(leg.venue, quantity * leg.limit, shard(leg))
         yes_leg, no_leg = legs
         trade = Trade(mode=self.mode, pair_id=pair["id"], label=pair["label"], trade=trade_words(yes, no), signal_ts=now, edge=edge,
                       quantity=quantity, cap=cap, pays_at=game.pays_at((yes, no), pair["sport"], now),

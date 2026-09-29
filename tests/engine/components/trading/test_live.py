@@ -12,7 +12,7 @@ from engine.components.money.paper import PaperBalances
 from engine.components.trading.live import LiveExecutor
 from engine.components.trading.paper import PaperExecutor
 from engine.helper import config
-from trade_setup import FEES, NO, NOW, PAIR, YES, books, stored
+from trade_setup import FEES, NO, NO_K_FEES, NO_PM_FEES, NOW, PAIR, YES, books, stored
 
 
 def fills(n=None):
@@ -326,3 +326,36 @@ def test_the_polymarket_us_order_goes_first_and_kalshi_is_sent_only_for_what_it_
     assert (first["quantity"], first["yes_filled"], first["no_filled"], first["status"], first["hedge"]) == (10, 6, 6, "partial", "none")
     assert (second["yes_filled"], second["no_filled"], second["status"], second["hedge"]) == (0, 0, "failed", "none")
     assert cash.amounts == pytest.approx({"polymarket_us": 1000 - 6 * 0.45, "kalshi": 1000 - 6 * 0.47})   # Nothing left reserved.
+
+
+def test_live_trading_takes_no_signal_on_a_sport_outside_its_list(tmp_path):
+    venues = Venues()
+    conn, cash, ex = executor(tmp_path, venues)
+
+    async def scenario():
+        return ex.signal(dict(PAIR, sport="nba"), YES, NO, 1 - 0.45 - 0.47, 100, FEES, NOW)
+    assert asyncio.run(scenario()) is False and venues.orders == [] and stored(conn, "trades") == []
+
+
+def test_a_kalshi_leg_trades_only_with_the_cash_on_its_markets_shard(tmp_path):
+    shards = {0: 1000.0, 3: 0.0}                        # Kalshi's cash all on football's shard, none on baseball's.
+    cash = LiveBalances(lambda m: None, {"kalshi": lambda: sum(shards.values()), "polymarket_us": lambda: 1000.0}, {"kalshi": lambda: dict(shards)})
+    asyncio.run(cash.refresh(NOW))
+    venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
+    conn = database.connect(tmp_path / "t.sqlite")
+    ex = LiveExecutor(conn, cash, lambda: books(), lambda m: None, clock=lambda: NOW, place=venues.place())
+    baseball = {("polymarket_us", "pm"): NO_PM_FEES, ("kalshi", "k"): dict(NO_K_FEES, exchange_index=3)}
+
+    def signal():
+        async def scenario():
+            sent = ex.signal(dict(PAIR, sport="mlb"), YES, NO, 1 - 0.45 - 0.47, 100, baseball, NOW)
+            await asyncio.gather(*ex.tasks)
+            return sent
+        return asyncio.run(scenario())
+
+    assert signal() is False and venues.orders == []
+    shards[3] = config.LIVE_CASH_FLOOR + 3 * 0.47 + 0.01     # Room for three contracts above the floor on baseball's shard.
+    asyncio.run(cash.refresh(NOW))
+    assert signal() is True
+    assert venues.orders == [("polymarket_us", "buy", "yes", 3, 0.45), ("kalshi", "buy", "no", 3, 0.47)]
+    assert cash.available("kalshi", 3) == pytest.approx(config.LIVE_CASH_FLOOR + 0.01) and cash.available("kalshi", 0) == 1000.0

@@ -37,6 +37,9 @@ WS_PATH = "/trade-api/ws/v2"
 KEY_ID_FILE = DATA_DIR / "kalshi_key_id.txt"
 PRIVATE_KEY_FILE = DATA_DIR / "kalshi_private_key.pem"
 RESULTS_BATCH = 50   # Tickers per markets call when looking up results.
+# The error of an order whose market's exchange shard lacks the cash, which Kalshi's rebalancing between shards may cause
+# between two of our readings. Nothing traded, so it counts as unfilled rather than refused.
+SHORT_SHARD = "insufficient_shard_balance"
 
 
 # SIGNING
@@ -150,6 +153,7 @@ def contracts(sport, tickers):
         fee_info = {
             "fee_type": series.get("fee_type"),
             "fee_multiplier": series.get("fee_multiplier"),
+            "exchange_index": series.get("exchange_index", 0),     # The exchange shard its markets trade on, whose cash is its own.
         }
         for event in fetch_events(series["ticker"]):
             for m in event.get("markets", []):
@@ -208,10 +212,20 @@ def attestation_lapses():
 
 def balance():
     """
-    Dollars available for trading on the account.
+    Dollars available for trading on the account, every exchange shard's together.
     """
     answer = signed_request("GET", "/portfolio/balance")
     return float_or_zero(answer["balance_dollars"]) if "balance_dollars" in answer else answer["balance"] / 100
+
+
+def shard_balances():
+    """
+    Dollars available on each exchange shard, as {exchange index: dollars}.
+    Kalshi runs some sports on shards of their own, baseball on 3, and an
+    order spends only the cash on its market's shard.
+    """
+    answer = signed_request("GET", "/portfolio/balance")
+    return {int(entry["exchange_index"]): float_or_zero(entry["balance"]) for entry in answer.get("balance_breakdown") or []}
 
 
 # STREAMING
@@ -349,11 +363,14 @@ def place_order(ticker, action, outcome, quantity, price, client_id):
     gives the contracts filled, their average price on the yes side, so a no
     side fill at p cost 1 - p, and the average fee per contract. Contracts
     are whole in our books, so a fractional fill counts its whole contracts
-    and says so in the note.
+    and says so in the note. An order turned away for lack of cash on its
+    market's exchange shard is unfilled, not refused.
     """
     try:
         answer = signed_request("POST", "/portfolio/events/orders", order_body(ticker, action, outcome, quantity, price, client_id))
     except RequestFailed as e:
+        if SHORT_SHARD in e.body:
+            return orders.Answer(None, "unfilled", 0, 0.0, 0.0, f"insufficient shard balance: {e.body[:300]}", {"error": e.body, "status": e.status})
         return orders.refused(e) if e.status < 500 else orders.unknown(e)
     except Exception as e:
         return orders.unknown(e)

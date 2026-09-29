@@ -19,7 +19,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from api import kalshi
-from engine.components.money.live import READERS
+from engine.components.money.live import READERS, SHARD_READERS
 from engine.components.trading import notify
 
 RENEW_DAYS = 7      # Say to renew the Kalshi key's location attestation once it lapses in fewer days than this.
@@ -35,6 +35,13 @@ def check_balances():
             print(f"{venue}: {read():,.2f}$ available to trade")
         except Exception as e:
             print(f"{venue}: the balance could not be read ({e!r})")
+            ok = False
+    for venue, read in SHARD_READERS.items():
+        try:
+            print(f"{venue} by exchange shard, each trading only its own markets: "
+                  + ", ".join(f"shard {shard} {dollars:,.2f}$" for shard, dollars in sorted(read().items())))
+        except Exception as e:
+            print(f"{venue}: the shard balances could not be read ({e!r})")
             ok = False
     return ok
 

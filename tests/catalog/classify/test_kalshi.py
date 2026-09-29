@@ -89,3 +89,37 @@ def test_player_props_skip_team_units_and_missing_lines():
     assert kalshi.classify(row("KXNFLTD", "KXNFLTD-26SEP24ATLGB", "KXNFLTD-26SEP24ATLGB-ATLATLDST-1", title="ATL Falcons D/ST: 1+ touchdowns", line=0.5)) is None
     assert kalshi.classify(row("KXNFLRECYDS", "KXNFLRECYDS-26SEP24ATLGB", "KXNFLRECYDS-26SEP24ATLGB-ATLBROBINSON7-100",
                                title="Bijan Robinson: 100+ receiving yards")) is None
+
+
+def mlb(series, event, ticker, **fields):
+    return kalshi.classify(row(series, event, ticker, sport="mlb", **fields))
+
+
+def test_baseball_tickers_carry_the_start_time_and_read_like_footballs():
+    event = "26SEP291400PHIATL"
+    winner = mlb("KXMLBGAME", f"KXMLBGAME-{event}", f"KXMLBGAME-{event}-ATL")
+    spread = mlb("KXMLBSPREAD", f"KXMLBSPREAD-{event}", f"KXMLBSPREAD-{event}-ATL4", line=3.5)
+    total = mlb("KXMLBTOTAL", f"KXMLBTOTAL-{event}", f"KXMLBTOTAL-{event}-2", line=1.5)
+    team_total = mlb("KXMLBTEAMTOTAL", f"KXMLBTEAMTOTAL-{event}", f"KXMLBTEAMTOTAL-{event}-ATL2", line=1.5)
+    assert bet_fields(winner) == ("game_winner", 2026, "2026-09-29", "PHI", "ATL", "PHI", None, "no")     # Atlanta winning is Philadelphia not.
+    assert bet_fields(spread) == ("spread", 2026, "2026-09-29", "PHI", "ATL", "ATL", 3.5, "yes")
+    assert bet_fields(total) == ("total", 2026, "2026-09-29", "PHI", "ATL", None, 1.5, "yes")
+    assert bet_fields(team_total) == ("team_total", 2026, "2026-09-29", "PHI", "ATL", "ATL", 1.5, "yes")
+
+
+def test_baseball_player_props_name_the_player_and_keep_the_strict_line():
+    hits = mlb("KXMLBHIT", "KXMLBHIT-26SEP291400PHIATL", "KXMLBHIT-26SEP291400PHIATL-PHIBHARPER3-1", title="Bryce Harper: 1+ hits?", line=0.5)
+    strikeouts = mlb("KXMLBKS", "KXMLBKS-26SEP291400PHIATL", "KXMLBKS-26SEP291400PHIATL-ATLCSALE51-4", title="Chris Sale: 4+ strikeouts?", line=3.5)
+    accent = mlb("KXMLBHR", "KXMLBHR-26SEP292000BOSNYY", "KXMLBHR-26SEP292000BOSNYY-NYYJPENA3-1", title="Jeremy Peña: 1+ home runs?", line=0.5)
+    assert bet_fields(hits) == ("player_hits", 2026, "2026-09-29", "PHI", "ATL", "bryce harper", 0.5, "yes")
+    assert bet_fields(strikeouts) == ("player_strikeouts", 2026, "2026-09-29", "PHI", "ATL", "chris sale", 3.5, "yes")
+    assert accent.subject == "jeremy pena"
+
+
+def test_a_doubleheader_is_two_start_times_for_one_date_and_teams():
+    rows = [row("KXMLBGAME", "KXMLBGAME-26MAY231310STLCIN", "KXMLBGAME-26MAY231310STLCIN-STL", sport="mlb"),
+            row("KXMLBHIT", "KXMLBHIT-26MAY231840STLCIN", "KXMLBHIT-26MAY231840STLCIN-STLNARENADO28-1", sport="mlb"),
+            row("KXMLBGAME", "KXMLBGAME-26SEP291400PHIATL", "KXMLBGAME-26SEP291400PHIATL-PHI", sport="mlb"),
+            row("KXMLBHIT", "KXMLBHIT-26SEP291400PHIATL", "KXMLBHIT-26SEP291400PHIATL-PHIBHARPER3-1", sport="mlb"),
+            row("KXNFLGAME", "KXNFLGAME-26SEP20CARATL", "KXNFLGAME-26SEP20CARATL-CAR")]
+    assert kalshi.doubleheaders(rows) == {"KXMLBGAME-26MAY231310STLCIN-STL", "KXMLBHIT-26MAY231840STLCIN-STLNARENADO28-1"}

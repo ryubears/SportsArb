@@ -35,6 +35,7 @@ from db import database
 from db.models import Order
 from engine.components.trading.brakes import Brakes
 from engine.components.trading.executor import Executor, Fill
+from engine.helper import config
 
 PLACE = {"kalshi": kalshi.place_order, "polymarket_us": polymarket_us.place_order}   # How each venue takes an order.
 ORDER_THREADS = 8       # Orders in flight at once. Two per trade, so a burst of signals is not held back.
@@ -62,9 +63,10 @@ class LiveExecutor(Executor):
 
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """
-        Take the signal as the paper executor would, unless live trading has halted.
+        Take the signal as the paper executor would, unless live trading has
+        halted or the pair's sport is not one live trading takes, config.LIVE_SPORTS.
         """
-        if self.halted:
+        if self.halted or pair["sport"] not in config.LIVE_SPORTS:
             return False
         return super().signal(pair, yes, no, edge, size, fee_infos, now)
 

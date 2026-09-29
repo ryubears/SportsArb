@@ -40,6 +40,7 @@ def test_season_from_date_splits_in_august():
     assert timeutil.season_from_date("2026-09-20") == 2027
     assert timeutil.season_from_date("2027-01-10") == 2027
     assert timeutil.season_from_date("2027-08-01") == 2028
+    assert timeutil.season_from_date("2026-09-29", "mlb") == 2026     # Baseball's season ends in the year it starts.
 
 
 def test_add_business_days_skips_weekends():

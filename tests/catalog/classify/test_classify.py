@@ -51,3 +51,20 @@ def test_player_key_drops_punctuation_and_suffixes():
     assert teams.player_key("Aaron Jones Sr.") == "aaron jones"
     assert teams.player_key("Michael Penix Jr.") == "michael penix"
     assert teams.player_key("Ja'Marr Chase") == "jamarr chase"
+
+
+def test_classify_all_leaves_out_doubleheaders():
+    def kalshi_row(event, ticker):
+        return {"venue": "kalshi", "sport": "mlb", "series_id": "KXMLBGAME", "event_id": event, "contract_id": ticker,
+                "title": "", "outcome": "", "market_type": None, "line": None, "start_time": None}
+    rows = [kalshi_row("KXMLBGAME-26MAY231310STLCIN", "KXMLBGAME-26MAY231310STLCIN-STL"),
+            kalshi_row("KXMLBGAME-26MAY231840STLCIN", "KXMLBGAME-26MAY231840STLCIN-STL"),
+            kalshi_row("KXMLBGAME-26SEP291400PHIATL", "KXMLBGAME-26SEP291400PHIATL-PHI")]
+    bets, unclassified = classify.classify_all(rows)
+    assert [b.contract_id for b in bets] == ["KXMLBGAME-26SEP291400PHIATL-PHI"]
+    assert len(unclassified) == 2
+
+
+def test_player_key_drops_accents():
+    assert teams.player_key("Ronald Acuña Jr.") == teams.player_key("Ronald Acuna") == "ronald acuna"
+    assert teams.player_key("Jesús Luzardo") == "jesus luzardo"

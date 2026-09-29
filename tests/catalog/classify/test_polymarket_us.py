@@ -78,3 +78,39 @@ def test_player_props_shift_the_at_least_line_by_a_half():
 def test_player_props_skip_titles_without_a_player():
     assert polymarket_us.classify(row("nfl-atl-gb-2026-09-24", "astatc-nfl-atl-gb-2026-09-24-firsttd-none", "football_player_first_touchdown",
                                       start_time="2026-09-25T00:15:00+00:00") | {"title": "Will no touchdown be scored?"}) is None
+
+
+def mlb(event, slug, market_type, line=None, title="", start_time="2026-09-30T00:00:00+00:00"):
+    return polymarket_us.classify(row(event, slug, market_type, line, start_time) | {"sport": "mlb", "title": title})
+
+
+def test_baseball_game_markets_read_like_footballs_and_team_totals_name_the_team_in_the_slug():
+    event = "mlb-bos-nyy-2026-09-29"
+    winner = mlb(event, "aec-mlb-bos-nyy-2026-09-29", "baseball_team_full_game_winner")
+    favored = mlb(event, "asc-mlb-bos-nyy-2026-09-29-neg-1pt5", "baseball_team_full_game_spread", -1.5)
+    underdog = mlb(event, "asc-mlb-bos-nyy-2026-09-29-pos-2pt5", "baseball_team_full_game_spread", 2.5)
+    total = mlb(event, "tsc-mlb-bos-nyy-2026-09-29-5pt5", "baseball_team_full_game_total", 5.5)
+    team_total = mlb(event, "tsc-mlb-bos-nyy-2026-09-29-tt-nyy-1pt5", "baseball_team_total_runs", 1.5)
+    # The 8:00 PM Eastern start is the next day in UTC, and the game date is Eastern.
+    assert bet_fields(winner) == ("game_winner", 2026, "2026-09-29", "BOS", "NYY", "BOS", None, "yes")
+    assert bet_fields(favored) == ("spread", 2026, "2026-09-29", "BOS", "NYY", "BOS", 1.5, "yes")
+    assert bet_fields(underdog) == ("spread", 2026, "2026-09-29", "BOS", "NYY", "NYY", 2.5, "no")
+    assert bet_fields(total) == ("total", 2026, "2026-09-29", "BOS", "NYY", None, 5.5, "yes")
+    assert bet_fields(team_total) == ("team_total", 2026, "2026-09-29", "BOS", "NYY", "NYY", 1.5, "yes")
+
+
+def test_baseball_player_props_shift_the_at_least_line_by_a_half():
+    prop = mlb("mlb-bos-nyy-2026-09-29", "astatc-mlb-bos-nyy-2026-09-29-k-paytol-gte5", "baseball_player_strikeouts", 5.0,
+               title="Will Payton Tolle record at least 5 pitching strikeouts in Game 1: BOS Red Sox vs. NY Yankees?")
+    assert bet_fields(prop) == ("player_strikeouts", 2026, "2026-09-29", "BOS", "NYY", "payton tolle", 4.5, "yes")
+
+
+def test_a_doubleheader_is_a_dh_slug_or_two_events_for_one_date_and_teams():
+    def contract(event, slug):
+        return row(event, slug, "baseball_team_full_game_winner") | {"sport": "mlb"}
+    rows = [contract("mlb-stl-cin-2026-05-23", "aec-mlb-stl-cin-2026-05-23"),               # A first game without the suffix.
+            contract("mlb-stl-cin-2026-05-23-dh2", "aec-mlb-stl-cin-2026-05-23-dh2"),
+            contract("mlb-mil-pit-2026-07-11-dh1", "aec-mlb-mil-pit-2026-07-11-dh1"),       # Its other game not listed.
+            contract("mlb-phi-atl-2026-09-29", "aec-mlb-phi-atl-2026-09-29"),
+            contract("mlb-phi-atl-2026-09-30", "aec-mlb-phi-atl-2026-09-30")]              # The next day's game is no doubleheader.
+    assert polymarket_us.doubleheaders(rows) == {"aec-mlb-stl-cin-2026-05-23", "aec-mlb-stl-cin-2026-05-23-dh2", "aec-mlb-mil-pit-2026-07-11-dh1"}

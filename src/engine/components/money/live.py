@@ -20,9 +20,16 @@ replaces only the moves made before it was asked for: an order that
 filled while the balance was being read may not show in it yet, so it
 stays counted until the next reading. Before the first reading every
 venue holds nothing, so nothing is traded.
+
+Kalshi splits its cash by exchange shard, baseball's on shard 3 and
+football's on 0, and an order spends only its market's shard's. So each
+of its shards is kept the same way, read, moved, and reserved, and an
+order on a shard can spend no more than that shard has free, whatever
+the venue as a whole has. Payouts are left to the next reading there.
 """
 
 import asyncio
+from collections import defaultdict
 from api import kalshi, polymarket_us
 from common.log import with_traceback
 from common.periodic import Periodic
@@ -31,19 +38,23 @@ from engine.components.money.balances import Balances
 from engine.helper import config
 
 READERS = {"kalshi": kalshi.balance, "polymarket_us": polymarket_us.balance}    # How each venue reports the dollars available to trade.
+SHARD_READERS = {"kalshi": kalshi.shard_balances}      # How a venue that splits its cash by exchange shard reports each shard's.
 
 
 class LiveBalances(Balances):
     """
     The real cash on each venue, as last read plus what our orders moved since.
-    readers maps a venue to a function returning its balance in dollars.
+    readers maps a venue to a function returning its balance in dollars, and
+    shard_readers a venue that splits its cash by shard to a function
+    returning {shard: dollars}, by default the venues' own when readers is too.
     """
 
     mode = "live"
 
-    def __init__(self, log=print, readers=None):
+    def __init__(self, log=print, readers=None, shard_readers=None):
         self.log = log
         self.readers = readers or READERS
+        self.shard_readers = shard_readers if shard_readers is not None else (SHARD_READERS if readers is None else {})
         self.read = {venue: 0.0 for venue in VENUES}         # What each venue said at its last reading.
         self.moved = {venue: 0.0 for venue in VENUES}        # What our orders moved since, which the reading may not show.
         self.paid = {venue: 0.0 for venue in VENUES}         # Payouts since, which count as live money but are not spent until read.
@@ -51,6 +62,9 @@ class LiveBalances(Balances):
         self.read_at = {venue: None for venue in VENUES}     # When each venue was last read, ISO 8601 UTC.
         self.readings = Periodic(lambda: config.LIVE_BALANCE_SECONDS, log, "live balance reading")
         self.failing = {}           # Venue maps to the error its last reading failed with, while it fails.
+        self.shard_read = {}                        # (venue, shard) maps to what the venue said the shard held at its last reading.
+        self.shard_moved = defaultdict(float)       # What our orders moved on each shard since, which the reading may not show.
+        self.shard_reserved = defaultdict(float)    # Held back on each shard for orders in flight.
 
     @property
     def amounts(self):
@@ -58,6 +72,17 @@ class LiveBalances(Balances):
 
     def known(self, venue):
         return self.read_at[venue] is not None
+
+    def available(self, venue, shard=None):
+        """
+        The venue's free cash, and no more than its shard has free when the
+        venue keeps shards: nothing on a shard the last reading did not list.
+        """
+        free = self[venue]
+        if shard is None or not any(v == venue for v, _ in self.shard_read):
+            return free
+        key = (venue, shard)
+        return min(free, self.shard_read.get(key, 0.0) + self.shard_moved[key] - self.shard_reserved[key])
 
     def floor(self):
         return config.LIVE_CASH_FLOOR
@@ -70,13 +95,17 @@ class LiveBalances(Balances):
         """
         return sum(self.read[venue] + self.moved[venue] + self.paid[venue] for venue in VENUES)
 
-    def reserve(self, venue, dollars):
+    def reserve(self, venue, dollars, shard=None):
         self.reserved[venue] += dollars
+        if shard is not None:
+            self.shard_reserved[(venue, shard)] += dollars
 
-    def release(self, venue, dollars):
+    def release(self, venue, dollars, shard=None):
         self.reserved[venue] -= dollars
+        if shard is not None:
+            self.shard_reserved[(venue, shard)] -= dollars
 
-    def apply(self, entry):
+    def apply(self, entry, shard=None):
         """
         Apply what one of our orders moved, a Ledger entry that is not stored,
         since the venue keeps the record. A payout is not spent until the
@@ -88,15 +117,30 @@ class LiveBalances(Balances):
             self.readings.again()
         else:
             self.moved[entry.venue] += entry.amount
+            if shard is not None:
+                self.shard_moved[(entry.venue, shard)] += entry.amount
 
     async def refresh(self, now):
         """
         Read every venue's balance. A venue that fails keeps its last reading
         and is logged, with the traceback only when its error is new.
         """
-        before, paid = dict(self.moved), dict(self.paid)
+        before, paid, shards_before = dict(self.moved), dict(self.paid), dict(self.shard_moved)
         first = not any(self.read_at.values())
-        readings = await asyncio.gather(*(asyncio.to_thread(self.readers[venue]) for venue in VENUES), return_exceptions=True)
+        split = list(self.shard_readers)
+        readings = await asyncio.gather(*(asyncio.to_thread(self.readers[venue]) for venue in VENUES),
+                                        *(asyncio.to_thread(self.shard_readers[venue]) for venue in split), return_exceptions=True)
+        readings, shard_readings = readings[:len(VENUES)], readings[len(VENUES):]
+        for venue, reading in zip(split, shard_readings):
+            if isinstance(reading, BaseException):
+                self.log(f"live shard balances of {venue} could not be read ({reading!r}), keeping the last")
+                continue
+            for key in [key for key in self.shard_read if key[0] == venue]:
+                del self.shard_read[key]
+            for shard, dollars in reading.items():
+                self.shard_read[(venue, shard)] = float(dollars)
+            for key in [key for key in self.shard_moved if key[0] == venue]:
+                self.shard_moved[key] -= shards_before.get(key, 0.0)
         for venue, reading in zip(VENUES, readings):
             if isinstance(reading, BaseException):
                 message = f"live balance of {venue} could not be read ({reading!r}), keeping the last"

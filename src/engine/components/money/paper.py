@@ -36,13 +36,13 @@ class PaperBalances(Balances):
     def floor(self):
         return config.PAPER_CASH_FLOOR
 
-    def reserve(self, venue, dollars):
+    def reserve(self, venue, dollars, shard=None):
         self.amounts[venue] -= dollars
 
-    def release(self, venue, dollars):
+    def release(self, venue, dollars, shard=None):
         self.amounts[venue] += dollars
 
-    def apply(self, entry):
+    def apply(self, entry, shard=None):
         """
         Apply a Ledger entry to its venue and store it with the balance it leaves.
         """

@@ -15,6 +15,7 @@ letters is the key.
 """
 
 import re
+import unicodedata
 from common import jsonutil
 from common.venues import VENUES
 from pathlib import Path
@@ -54,8 +55,10 @@ def team_from_code(piece, sport, venue):
 def player_key(name):
     """
     A player's name as a matching key: lower case letters and digits, without
-    punctuation or a generational suffix. 'A.J. Brown' and 'AJ Brown' both
-    become 'aj brown', and 'Aaron Jones Sr.' becomes 'aaron jones'.
+    accents, punctuation, or a generational suffix. 'A.J. Brown' and 'AJ Brown'
+    both become 'aj brown', 'Aaron Jones Sr.' becomes 'aaron jones', and
+    Kalshi's 'Ronald Acuña Jr.' and Polymarket US's 'Ronald Acuna' become 'ronald acuna'.
     """
-    words = re.sub(r"[^a-z0-9 ]", "", name.lower().replace(".", "")).split()
+    plain = "".join(ch for ch in unicodedata.normalize("NFKD", name) if not unicodedata.combining(ch))
+    words = re.sub(r"[^a-z0-9 ]", "", plain.lower().replace(".", "")).split()
     return " ".join(w for w in words if w not in SUFFIXES)

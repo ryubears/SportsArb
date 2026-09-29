@@ -134,7 +134,8 @@ class Plan:
 
 class Allocator:
     """
-    Plans the money of one mode, paper or live, over the games the scoreboard knows.
+    Plans the money of one mode, paper or live, over the games the scoreboard
+    knows, for live only those of config.LIVE_SPORTS, the ones it trades.
     """
 
     def __init__(self, conn, cash, scoreboard):
@@ -169,6 +170,8 @@ class Allocator:
         board, horizon = self.scoreboard, shift(now, hours=config.PLAN_HOURS)
         games = {}
         for key, (kickoff, _) in board.games.items():
+            if self.mode == "live" and key[0] not in config.LIVE_SPORTS:
+                continue
             back = board.settles(key, now)
             if kickoff < horizon and back > now:
                 games[key] = (kickoff, board.end(key, now), back)
@@ -228,11 +231,14 @@ class Allocator:
 
     def cap(self, pair, now):
         """
-        The most contracts one trade on this pair may hold right now. Zero when its game is not being played.
+        The most contracts one trade on this pair may hold right now. Zero
+        when its game is not being played or the plan leaves it out, as the
+        live plan does a sport live trading does not take.
         """
-        if not self.in_play(pair, now):
+        caps = self.current(now).caps
+        if not self.in_play(pair, now) or game_key(pair) not in caps:
             return 0
-        return self.bounded(self.current(now).caps.get(game_key(pair), 0.0))
+        return self.bounded(caps[game_key(pair)])
 
     def budget_left(self, now):
         """

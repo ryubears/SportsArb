@@ -39,6 +39,16 @@ SPORTS = {
             "tags": ["cfb"],
         },
     },
+    "mlb": {
+        "kalshi": {
+            "tickers": ["KXMLBGAME", "KXMLBSPREAD", "KXMLBTOTAL", "KXMLBTEAMTOTAL",
+                        "KXMLBHIT", "KXMLBHR", "KXMLBKS", "KXMLBTB", "KXMLBHRR", "KXMLBRBI", "KXMLBSB", "KXMLBOUTS", "KXMLBHA",
+                        "KXMLBERA", "KXMLBWA"],
+        },
+        "polymarket_us": {
+            "tags": ["mlb"],        # Not 'baseball', which brings Korean and Japanese league games too.
+        },
+    },
 }
 
 
