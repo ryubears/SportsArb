@@ -18,9 +18,9 @@ def restore(monkeypatch):
 
 
 def test_override_reads_each_value_as_the_settings_own_type(restore):
-    config.override(["min_edge=0.03", "PAPER_MAX_CAP=100", " settle_hours = 1.5 ", "feed_processes=False"])
-    assert (config.MIN_EDGE, config.PAPER_MAX_CAP, config.SETTLE_HOURS, config.FEED_PROCESSES) == (0.03, 100, 1.5, False)
-    assert isinstance(config.PAPER_MAX_CAP, int)
+    config.override(["min_edge=0.03", "LIVE_MAX_CAP=10", " settle_hours = 1.5 ", "feed_processes=False"])
+    assert (config.MIN_EDGE, config.LIVE_MAX_CAP, config.SETTLE_HOURS, config.FEED_PROCESSES) == (0.03, 10, 1.5, False)
+    assert isinstance(config.LIVE_MAX_CAP, int)
     assert game.money_back("2026-09-20T20:00:00+00:00") == "2026-09-20T21:30:00+00:00"     # What depends on a setting follows it.
 
 
@@ -28,8 +28,8 @@ def test_override_reads_each_value_as_the_settings_own_type(restore):
     ("min_edge", "unknown setting"),
     ("no_such_setting=1", "unknown setting"),
     ("override=1", "unknown setting"),
-    ("paper_max_cap=1.5", "PAPER_MAX_CAP needs a whole number"),
-    ("max_cap=100", "unknown setting"),                        # Renamed PAPER_MAX_CAP.
+    ("live_max_cap=1.5", "LIVE_MAX_CAP needs a whole number"),
+    ("paper_max_cap=100", "unknown setting"),                  # Gone: paper trades have no cap.
     ("paper_latency_ms=5", "not a single number"),
     ("game_hours=3.5", "not a single number"),                 # One for each sport, so set in config.py.
     ("feed_processes=0", "FEED_PROCESSES needs true or false"),

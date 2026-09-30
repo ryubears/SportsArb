@@ -188,9 +188,16 @@ def step_7_min_edge_stretch(conn):
             conn.execute(f"ALTER TABLE opportunities ADD COLUMN {column} REAL")
 
 
+def step_8_drop_transfers(conn):
+    """
+    Paper money no longer moves between the venues, so the transfers table goes.
+    """
+    conn.execute("DROP TABLE IF EXISTS transfers")
+
+
 # Step n brings a database from user_version n - 1 to n. Only ever add to the end.
 STEPS = [step_1_catch_up, step_2_settlements, step_3_opening_balances, step_4_modes, step_5_drop_quotes, step_6_pair_sports,
-         step_7_min_edge_stretch]
+         step_7_min_edge_stretch, step_8_drop_transfers]
 
 
 def migrate(conn, fresh):

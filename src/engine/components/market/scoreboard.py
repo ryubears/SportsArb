@@ -9,10 +9,10 @@ live, or over and when. A game is in play from its kickoff until the
 venue says it has ended. Past its expected length, config.GAME_HOURS, it
 stays in play only while the venue keeps saying it is live, so a game the
 venue gives no state for, or a stretch when the venue cannot be reached,
-ends at the expected length. A game's money is expected back
-config.SETTLE_HOURS after its end, the real one once the venue has given
-it, which is what the allocator plans with. The lookup runs in a thread,
-off the session's tick, the way the settler's does.
+ends at the expected length. Once a game is over the executors leave its
+pairs alone, since its books may linger while the venues settle. The
+lookup runs in a thread, off the session's tick, the way the settler's
+does.
 """
 
 import asyncio
@@ -22,7 +22,7 @@ from common.periodic import Periodic
 from common.timeutil import hours_between, seconds_between
 from db import database
 from engine.helper import config
-from engine.helper.game import expected_end, game_label, in_play, money_back, overtime_end, recorded_since
+from engine.helper.game import game_label, in_play, recorded_since
 
 LIVE_CHECKS = 3     # Lookups a live reading holds for, so one that fails does not end a game early.
 
@@ -68,23 +68,11 @@ class Scoreboard:
         live = self.live_at.get(key)
         return live is not None and seconds_between(live, now) <= LIVE_CHECKS * config.SCOREBOARD_SECONDS
 
-    def end(self, key, now):
+    def over(self, key, now):
         """
-        When the game ends: when the venue says it did, or else when it is
-        expected to. A game still live past that is planned to go on a while
-        longer, see game.overtime_end(), so the allocator keeps giving it
-        money for as long as the venue says it is live.
+        Whether the game is over at now: kicked off and no longer in play. A game the catalog does not pair is not known to be.
         """
-        if key in self.ended:
-            return self.ended[key]
-        expected = expected_end(self.games[key][0], key[0])
-        return overtime_end(now) if now >= expected and self.in_play(key, now) else expected
-
-    def settles(self, key, now):
-        """
-        When the game's money is expected back, config.SETTLE_HOURS after it ends.
-        """
-        return money_back(self.end(key, now))
+        return key in self.games and self.games[key][0] <= now and not self.in_play(key, now)
 
     def under_way(self, now):
         """

@@ -19,7 +19,7 @@ FETCHERS = {"kalshi": kalshi.contracts, "polymarket_us": polymarket_us.contracts
 # How each of our sport keys maps onto the venues' own categories, as the arguments of each venue's fetcher.
 # Kalshi lists hundreds of series for a sport, so only the ones the Kalshi classifier reads are fetched: each sport's game
 # series, then its futures.
-# Adding a sport means adding it here, to config.GAME_HOURS, config.DOLLARS_PER_CAP_HOUR, polymarket_us.EVENT_PREFIX, and
+# Adding a sport means adding it here, to config.GAME_HOURS, polymarket_us.EVENT_PREFIX, and
 # match.KIND_NOTES and match.PLAYER_NOTES, an alias file in classify/aliases/, and its Kalshi series to the Kalshi classifier.
 # tests/catalog/test_sports.py fails until the tables agree.
 SPORTS = {

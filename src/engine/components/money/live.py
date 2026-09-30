@@ -84,8 +84,6 @@ class LiveBalances(Balances):
         key = (venue, shard)
         return min(free, self.shard_read.get(key, 0.0) + self.shard_moved[key] - self.shard_reserved[key])
 
-    def floor(self):
-        return config.LIVE_CASH_FLOOR
 
     def total(self):
         """

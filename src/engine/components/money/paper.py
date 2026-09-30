@@ -33,8 +33,6 @@ class PaperBalances(Balances):
             if venue not in last:
                 self.apply(Ledger(now_iso(), venue, config.PAPER_START_BALANCE if start is None else start, "transfer_in"))
 
-    def floor(self):
-        return config.PAPER_CASH_FLOOR
 
     def reserve(self, venue, dollars, shard=None):
         self.amounts[venue] -= dollars

@@ -37,7 +37,7 @@ WS_PATH = "/trade-api/ws/v2"
 KEY_ID_FILE = DATA_DIR / "kalshi_key_id.txt"
 PRIVATE_KEY_FILE = DATA_DIR / "kalshi_private_key.pem"
 RESULTS_BATCH = 50   # Tickers per markets call when looking up results.
-# The error of an order whose market's exchange shard lacks the cash, which Kalshi's rebalancing between shards may cause
+# The error of an order whose market's exchange shard lacks the cash, which Kalshi moving cash between shards may cause
 # between two of our readings. Nothing traded, so it counts as unfilled rather than refused.
 SHORT_SHARD = "insufficient_shard_balance"
 

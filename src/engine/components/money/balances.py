@@ -2,10 +2,10 @@
 The money on each venue, the shape paper and live trading share.
 
 paper.py keeps paper money in a ledger of our own, and live.py reads real
-money from the venues. Either way the executor, allocator, settler, and
-rebalancing see the same thing: the dollars free on each venue, less what
-is held back for orders in flight, so two signals in the same moment
-cannot spend the same dollars. A venue may split its cash further by
+money from the venues. Either way the executor and settler see the same
+thing: the dollars free on each venue, less what is held back for orders
+in flight, so two signals in the same moment cannot spend the same
+dollars. A venue may split its cash further by
 exchange shard, as Kalshi does, and an order spends only its own shard's.
 The shard is passed along where it matters, and money that keeps no
 shards, like paper money, leaves it aside.
@@ -17,7 +17,7 @@ class Balances:
     The free cash on each venue, as amounts, which each subclass keeps its own way.
     """
 
-    mode = None     # 'paper' or 'live', set by each subclass: the trades this money pays for, so the settler, allocator, and rebalancing read only those.
+    mode = None     # 'paper' or 'live', set by each subclass: the trades this money pays for, so the settler reads only those.
 
     def __getitem__(self, venue):
         return self.amounts[venue]
@@ -28,24 +28,17 @@ class Balances:
         """
         return True
 
-    def floor(self):
-        """
-        Dollars new trades leave untouched on each venue, so the money is
-        never run down to nothing and flattening, which may use it, still can.
-        """
-        raise NotImplementedError
-
     def available(self, venue, shard=None):
         """
-        Dollars free on the venue, on the shard given when the money keeps shards, the floor included.
+        Dollars free on the venue, on the shard given when the money keeps shards.
         """
         return self[venue]
 
     def spendable(self, venue, shard=None):
         """
-        Dollars new trades may spend on the venue, or its shard: the free cash above the floor, or nothing while it is not known.
+        Dollars new trades may spend on the venue, or its shard: all its free cash, or nothing while it is not known.
         """
-        return max(0.0, self.available(venue, shard) - self.floor()) if self.known(venue) else 0.0
+        return max(0.0, self.available(venue, shard)) if self.known(venue) else 0.0
 
     def reserve(self, venue, dollars, shard=None):
         """

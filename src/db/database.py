@@ -14,7 +14,6 @@ SQLite browser. The tables follow the pipeline in order.
     orders         every real order the live executor sent, by trading/live.py
     ledger         every paper cash movement per venue, by money/paper.py
     alerts         everything the live process emailed a human, by trading/notify.py
-    transfers      paper rebalancing transfers between venues, by money/rebalance.py
 
 Trades and settlements carry a mode, 'paper' or 'live', and every read of
 open trades is for one mode, so paper and live trades never mix.
@@ -28,7 +27,7 @@ from dataclasses import asdict, fields
 from common import jsonutil
 from common.paths import DATA_DIR
 from db import migrations, schema
-from db.models import Alert, Bet, Gap, Ledger, Opportunity, Order, Settlement, Trade, Transfer
+from db.models import Alert, Bet, Gap, Ledger, Opportunity, Order, Settlement, Trade
 from pathlib import Path
 
 DB_PATH = DATA_DIR / "sportsarb.sqlite"
@@ -378,7 +377,7 @@ def load_open_legs(conn, mode):
     Every leg of the unsettled trades of one mode that still holds contracts,
     as [(game key, venue, dollars paid for what it holds)]. The game key is
     (sport, game_date, team_a, team_b), or None for a bet with no game.
-    load_held sums them by venue, the allocator by game, and the brakes in all.
+    load_held sums them by venue, and the brakes in all.
     """
     rows = conn.execute("""
         SELECT p.sport, p.game_date, p.team_a, p.team_b, t.yes_venue, t.yes_cost
@@ -394,29 +393,12 @@ def load_open_legs(conn, mode):
 def load_held(conn, mode):
     """
     Dollars the unsettled trades of one mode hold on each venue, at what
-    their legs paid, as {venue: dollars}, for the rebalancers and the summary.
+    their legs paid, as {venue: dollars}, for the summary.
     """
     held = {}
     for _, venue, cost in load_open_legs(conn, mode):
         held[venue] = held.get(venue, 0.0) + cost
     return held
-
-
-def load_spending(conn, mode, since):
-    """
-    Dollars the trades of one mode signalled at or after since have put in
-    on each venue, as {venue: dollars}: what each leg paid for what it holds,
-    or for a trade still in flight, what its order may pay.
-    """
-    rows = conn.execute("""
-        SELECT yes_venue, CASE WHEN status = 'sent' THEN quantity * yes_limit ELSE yes_cost END FROM trades WHERE mode = ? AND signal_ts >= ?
-        UNION ALL
-        SELECT no_venue, CASE WHEN status = 'sent' THEN quantity * no_limit ELSE no_cost END FROM trades WHERE mode = ? AND signal_ts >= ?""",
-                        (mode, since, mode, since))
-    spent = {}
-    for venue, dollars in rows:
-        spent[venue] = spent.get(venue, 0.0) + dollars
-    return spent
 
 
 def insert_settlement(conn, settlement):
@@ -552,28 +534,3 @@ def last_alert_ts(conn, kind):
     When the newest alert of a kind was raised, or None when there has been none.
     """
     return conn.execute("SELECT MAX(ts) FROM alerts WHERE kind = ?", (kind,)).fetchone()[0]
-
-
-# TRANSFERS
-
-def insert_transfer(conn, transfer):
-    """
-    Store a requested Transfer and set its id.
-    """
-    cur = conn.execute(insert_sql("transfers", Transfer), asdict(transfer))
-    conn.commit()
-    transfer.id = cur.lastrowid
-    return transfer.id
-
-
-def load_transfers(conn, pending_only=False):
-    """
-    Transfers oldest first, optionally only those not yet arrived.
-    """
-    sql = "SELECT * FROM transfers" + (" WHERE arrived_at IS NULL" if pending_only else "") + " ORDER BY id"
-    return [Transfer(**dict(r)) for r in conn.execute(sql)]
-
-
-def complete_transfer(conn, transfer_id, arrived_at):
-    conn.execute("UPDATE transfers SET arrived_at = ? WHERE id = ?", (arrived_at, transfer_id))
-    conn.commit()

@@ -101,7 +101,7 @@ CREATE TABLE IF NOT EXISTS trades (
     signal_ts      TEXT NOT NULL,
     edge           REAL NOT NULL,   -- Net dollars per contract at the signal.
     quantity       INTEGER NOT NULL,   -- Contracts wanted on each leg.
-    cap            INTEGER,            -- The allocator's cap on contracts per trade when this one was sent.
+    cap            INTEGER,            -- The most contracts it could hold when sent: config.LIVE_MAX_CAP for a live trade, none for a paper one.
     yes_venue      TEXT NOT NULL,
     yes_contract   TEXT NOT NULL,
     yes_polarity   TEXT NOT NULL,   -- The side the contract pays on, so settlement knows whether the leg won.
@@ -175,7 +175,7 @@ CREATE TABLE IF NOT EXISTS ledger (
     ts           TEXT NOT NULL,
     venue        TEXT NOT NULL,
     amount       REAL NOT NULL,     -- Dollars in or out of the venue balance, positive when money arrives.
-    reason       TEXT NOT NULL,     -- 'buy', 'sell', 'payout', 'transfer_out', or 'transfer_in'. Each venue's first entry is a 'transfer_in' of its starting balance.
+    reason       TEXT NOT NULL,     -- 'buy', 'sell', 'payout', or 'transfer_in', each venue's first entry, of its starting balance.
     trade_id     INTEGER,           -- The trade behind a buy, sell, or payout.
     balance      REAL NOT NULL      -- The venue's balance after this entry, so the newest entry gives the balance.
 );
@@ -184,20 +184,9 @@ CREATE TABLE IF NOT EXISTS ledger (
 CREATE TABLE IF NOT EXISTS alerts (
     id           INTEGER PRIMARY KEY,
     ts           TEXT NOT NULL,
-    kind         TEXT NOT NULL,     -- 'rebalance' when the live venues drifted apart, 'set_aside' when a live trade's order had an unknown outcome, 'halt' when live trading stopped.
+    kind         TEXT NOT NULL,     -- 'halt' when live trading stopped, 'low_cash' when a live venue's cash fell under config.LIVE_LOW_CASH, or 'attestation' when the Kalshi key's location attestation is about to lapse or has.
     subject      TEXT NOT NULL,
     body         TEXT NOT NULL,
     sent_at      TEXT,              -- When the email went out, null until it has.
     error        TEXT               -- Why it could not be sent, for example no email settings in data/.
-);
-
-CREATE TABLE IF NOT EXISTS transfers (
-    id           INTEGER PRIMARY KEY,
-    from_venue   TEXT NOT NULL,
-    to_venue     TEXT NOT NULL,
-    amount       REAL NOT NULL,
-    requested_at TEXT NOT NULL,
-    expected_at  TEXT NOT NULL,     -- When the money should land, business days after the request.
-    arrived_at   TEXT,              -- Set when the money was credited to the receiving venue.
-    reason       TEXT NOT NULL      -- 'drift' for the daily check, or 'floor' on transfers from before the any-day top up was dropped.
 );

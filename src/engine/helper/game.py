@@ -2,9 +2,9 @@
 Which game a bet is on, when the game is played, and when the bets on it pay out.
 
 Every timing assumption about games lives here, so the recorder, the
-scoreboard, the scanner, the executor, and the allocator agree on them:
-when a game is expected to end, when its money comes back, and how long
-after kickoff it may still be under way. How long a game
+scoreboard, the scanner, and the executor agree on them: when a game is
+expected to end, when its money comes back, how long after kickoff it may
+still be under way, and when its books go stale if they stop changing. How long a game
 is expected to last depends on the sport, see config.GAME_HOURS: three in
 four of the sport's past games had ended by then. The scoreboard in
 market/scoreboard.py knows when each game under way really ends, and
@@ -13,7 +13,7 @@ venues settled the first live game, Atlanta at Green Bay, within half an
 hour of its final whistle.
 """
 
-from common.timeutil import shift
+from common.timeutil import days_between, shift
 from engine.helper import config
 
 
@@ -38,15 +38,6 @@ def expected_end(kickoff, sport):
     When a game of the sport that kicked off at kickoff is expected to end, config.GAME_HOURS later.
     """
     return shift(kickoff, hours=config.GAME_HOURS[sport])
-
-
-def overtime_end(now):
-    """
-    When a game still live past its expected end is planned to end:
-    config.BUDGET_MINUTES from now, so the plan made now gives it the rest of
-    its half hour, and each plan after gives it more while it goes on.
-    """
-    return shift(now, hours=config.BUDGET_MINUTES / 60)
 
 
 def money_back(end):
@@ -86,6 +77,27 @@ def kickoff(members):
     The latest kickoff among the members, or None when none of them is a game.
     """
     return max((m["start_time"] for m in members if m["start_time"]), default=None)
+
+
+def books_age(game_date, members, now):
+    """
+    Whether the books of a pair on the game of game_date, None for a future,
+    with these members go stale when they stop changing, see pricing.fresh():
+    once its game may have started, or at once when no member gives the
+    kickoff. Before kickoff a game's markets are open, and a future's until
+    its season settles, so their books may rest unchanged for hours.
+    """
+    if game_date is None:
+        return False
+    start = kickoff(members)
+    return start is None or start <= now
+
+
+def days_until(now, pays_at):
+    """
+    Days from now until a bet paying at pays_at pays, at least an hour, for its return a year.
+    """
+    return max(days_between(now, pays_at), 1 / 24)
 
 
 def pays_at(members, sport, now=None):

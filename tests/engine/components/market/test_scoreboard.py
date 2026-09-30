@@ -19,8 +19,8 @@ def test_a_game_the_venue_says_nothing_about_is_in_play_for_its_expected_length(
     assert not b.in_play(key(*GAME), f"{SUNDAY}T16:59:00+00:00")
     assert b.in_play(key(*GAME), GAME[2]) and b.in_play(key(*GAME), f"{SUNDAY}T20:14:00+00:00")
     assert not b.in_play(key(*GAME), f"{SUNDAY}T20:15:00+00:00")                 # Kickoff plus the expected 3.25 hours.
-    assert b.end(key(*GAME), f"{SUNDAY}T18:00:00+00:00") == f"{SUNDAY}T20:15:00+00:00"
-    assert b.settles(key(*GAME), f"{SUNDAY}T18:00:00+00:00") == f"{SUNDAY}T20:45:00+00:00"
+    assert not b.over(key(*GAME), f"{SUNDAY}T16:59:00+00:00") and not b.over(key(*GAME), f"{SUNDAY}T18:00:00+00:00")
+    assert b.over(key(*GAME), f"{SUNDAY}T20:15:00+00:00")
     assert not b.in_play(("nfl", SUNDAY, "X", "Y"), GAME[2])                     # A game the catalog does not pair.
 
 
@@ -29,8 +29,7 @@ def test_a_game_the_venue_calls_over_stops_at_its_real_end(tmp_path):
     b = board(tmp_path, lambda events: {event(*GAME): {"live": False, "ended": True, "finished": f"{SUNDAY}T19:58:00+00:00"}}, logs)
     asyncio.run(b.check(f"{SUNDAY}T20:00:00+00:00"))
     assert not b.in_play(key(*GAME), f"{SUNDAY}T20:00:00+00:00")
-    assert b.end(key(*GAME), f"{SUNDAY}T20:00:00+00:00") == f"{SUNDAY}T19:58:00+00:00"
-    assert b.settles(key(*GAME), f"{SUNDAY}T20:00:00+00:00") == f"{SUNDAY}T20:28:00+00:00"     # Its money is expected back sooner.
+    assert b.over(key(*GAME), f"{SUNDAY}T20:00:00+00:00")                                        # Before its expected end.
     assert logs == ["game over: nfl 2026-09-27 CAR@ATL, 2.97 hours after kickoff"]
     assert b.under_way(f"{SUNDAY}T20:01:00+00:00") == {}                                        # Not asked about again.
 
@@ -39,8 +38,7 @@ def test_a_game_the_venue_says_is_live_is_played_past_its_expected_length(tmp_pa
     b = board(tmp_path, lambda events: {event(*GAME): {"live": True, "ended": False, "finished": None}})
     asyncio.run(b.check(f"{SUNDAY}T20:20:00+00:00"))
     assert b.in_play(key(*GAME), f"{SUNDAY}T20:20:30+00:00")
-    assert b.end(key(*GAME), f"{SUNDAY}T20:20:30+00:00") == f"{SUNDAY}T20:50:30+00:00"         # Planned to go on another half hour.
-    assert b.settles(key(*GAME), f"{SUNDAY}T20:20:30+00:00") == f"{SUNDAY}T21:20:30+00:00"
+    assert not b.over(key(*GAME), f"{SUNDAY}T20:20:30+00:00")
     # A live reading holds for three lookups, 90 seconds, and then the expected length rules again.
     assert b.in_play(key(*GAME), f"{SUNDAY}T20:21:30+00:00")
     assert not b.in_play(key(*GAME), f"{SUNDAY}T20:21:31+00:00")

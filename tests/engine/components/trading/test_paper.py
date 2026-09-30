@@ -85,11 +85,31 @@ def test_a_shrunken_leg_is_completed_on_the_other_venue_when_that_is_cheaper(tmp
     t = stored(conn)[0]
     assert (t["yes_filled"], t["no_filled"]) == (50, 20)
     # Selling 30 yes back at the 0.44 bid loses a cent each. Buying more no on Kalshi at 0.47 still earns 8 cents each, so it wins,
-    # but only 20 more are there for us, leaving 10 exposed.
-    assert t["hedge"] == "bought 20 of 30 on kalshi, 10 exposed"
-    assert t["hedge_pnl"] == pytest.approx(20 * (1 - 0.45 - 0.47))
-    assert (t["matched"], t["status"], t["yes_held"], t["no_held"]) == (40, "partial", 50, 40)
-    assert cash["kalshi"] == pytest.approx(10000 - 40 * 0.47)
+    # but the opening order took 20 of the 40 there, and half of the 20 left are for us, leaving 20 exposed.
+    assert t["hedge"] == "bought 10 of 30 on kalshi, 20 exposed"
+    assert t["hedge_pnl"] == pytest.approx(10 * (1 - 0.45 - 0.47))
+    assert (t["matched"], t["status"], t["yes_held"], t["no_held"]) == (30, "partial", 50, 30)
+    assert cash["kalshi"] == pytest.approx(10000 - 30 * 0.47)
+
+
+def test_paper_orders_leave_the_contracts_they_took_out_of_later_books(tmp_path, quick):
+    latest = books()
+    conn, cash, ex = executor(tmp_path, latest)
+    run(ex)
+    run(ex)
+    first, second = stored(conn)
+    assert (first["quantity"], second["quantity"]) == (50, 25)     # The first took 50 of each 100, so the second saw 50 and took half.
+    assert ex.book(("polymarket_us", "pm")).asks == [[0.45, 25.0]]
+    # A new book with the level still there keeps what we took off it. One where the level shrank below it keeps only that much,
+    # and once the level is gone, what we took is forgotten, so the level coming back is whole again.
+    latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [[0.44, 100]], [[0.45, 100]])
+    assert ex.book(("polymarket_us", "pm")).asks == [[0.45, 25.0]]
+    latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [[0.44, 100]], [[0.45, 30]])
+    assert ex.book(("polymarket_us", "pm")).asks == []
+    latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [[0.44, 100]], [[0.46, 100]])
+    assert ex.book(("polymarket_us", "pm")).asks == [[0.46, 100]]
+    latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [[0.44, 100]], [[0.45, 100]])
+    assert ex.book(("polymarket_us", "pm")).asks == [[0.45, 100]]
 
 
 def test_a_leg_with_no_book_is_flattened_by_selling_the_other_back(tmp_path, quick):
@@ -206,78 +226,97 @@ def test_rejected_orders_fail_without_a_hedge(tmp_path, quick, monkeypatch):
     assert cash.amounts == pytest.approx({"polymarket_us": 10000, "kalshi": 10000})
 
 
-def test_signal_is_refused_for_thin_edges_and_games_not_in_play(tmp_path, quick):
+FUTURE = dict(PAIR, label="nfl champion 2027 CAR", kind="champion", game_date=None, team_a=None, team_b=None)   # A future, no game.
+SEASON_END = "2027-02-14T00:00:00+00:00"            # When the future's contracts close and pay.
+FUTURE_YES, FUTURE_NO = (dict(m, start_time=None, close_time=SEASON_END) for m in (YES, NO))
+
+
+def test_signal_is_refused_for_thin_edges_poor_returns_and_games_that_are_over(tmp_path, quick):
     latest = books()
     conn, cash, ex = executor(tmp_path, latest)
     assert ex.signal(PAIR, YES, NO, 0.015, 100, FEES, NOW) is False
-    future = dict(YES, start_time=None, close_time="2027-02-14T00:00:00+00:00")
-    assert ex.signal(PAIR, future, dict(NO, start_time=None, close_time="2027-02-14T00:00:00+00:00"), 0.05, 100, FEES, NOW) is False   # A future.
-    assert ex.signal(PAIR, YES, NO, 0.08, 100, FEES, "2026-09-20T16:59:00+00:00") is False        # Before kickoff.
+    assert ex.signal(FUTURE, FUTURE_YES, FUTURE_NO, 0.08, 100, FEES, NOW) is False     # 8.7% until February is 21% a year, under 50.
     assert ex.signal(PAIR, YES, NO, 0.08, 100, FEES, "2026-09-20T20:16:00+00:00") is False        # After the final whistle.
     assert ex.tasks == set() and stored(conn) == []
 
 
-class HalfHour:
+def at(ex, pair, yes, no, edge, now, fees=FEES):
     """
-    A stand in for the allocator: whether the game is in play, the cap, and what is left of the half hour's budget.
+    Send one signal at now inside a loop and wait for its trade.
     """
-
-    def __init__(self, playing=True, cap=1000, budget=None):
-        self.playing, self.limit, self.left = playing, cap, budget or {}
-
-    def in_play(self, pair, now):
-        return self.playing
-
-    def cap(self, pair, now):
-        return self.limit
-
-    def budget_left(self, now):
-        return self.left
-
-
-def test_a_trade_keeps_to_the_half_hours_budget_and_the_scoreboards_word_on_the_game(tmp_path, quick):
-    latest = books()
-    conn, cash, ex = executor(tmp_path, latest)
-    ex.allocator = HalfHour(budget={"polymarket_us": 9.2, "kalshi": 100.0})
-    assert run(ex) == [True] and stored(conn)[0]["quantity"] == 20            # 9.20 dollars at 0.45 buys 20.
-    ex.allocator = HalfHour(playing=False)
-    assert run(ex) == [False]                                                   # The venue has called the game over.
-
-    # Past its expected end, a game the scoreboard says is still live is traded, and pays no sooner than half an hour on.
-    async def late():
-        sent = ex.signal(PAIR, YES, NO, 0.08, 100, FEES, "2026-09-20T20:40:00+00:00")
+    async def scenario():
+        sent = ex.signal(pair, yes, no, edge, 100, fees, now)
         await asyncio.gather(*ex.tasks)
         return sent
-    ex.allocator = HalfHour(budget={"polymarket_us": 100.0, "kalshi": 100.0})
-    assert asyncio.run(late()) is True and stored(conn)[-1]["pays_at"] == "2026-09-20T21:10:00+00:00"
+    return asyncio.run(scenario())
+
+
+def test_edges_before_kickoff_and_on_futures_that_pay_enough_are_traded(tmp_path, quick):
+    conn, cash, ex = executor(tmp_path, books())
+    assert at(ex, PAIR, YES, NO, 0.08, "2026-09-20T16:00:00+00:00") is True      # An hour before kickoff, paying that night.
+    ex.books = lambda: books(pm_bid=0.34, pm_ask=0.35, k_bid=0.55, k_ask=0.56)   # 20 cents: 25% until February, 62% a year.
+    assert at(ex, FUTURE, FUTURE_YES, FUTURE_NO, 0.20, NOW) is True
+    before_game, future = stored(conn)
+    assert (before_game["status"], before_game["quantity"], before_game["pays_at"]) == ("filled", 50, "2026-09-20T20:45:00+00:00")
+    assert (future["status"], future["quantity"], future["pays_at"], future["cap"]) == ("filled", 50, SEASON_END, None)   # Paper has no cap.
+    assert ex.games == {}                   # Both filled evenly, so neither is kept for flattening.
+
+
+class Scoreboard:
+    """
+    A stand in for the scoreboard, which says whether a game is over.
+    """
+
+    def __init__(self, over=False):
+        self.called_over = over
+
+    def over(self, key, now):
+        return self.called_over
+
+
+def test_a_trade_takes_half_the_book_as_far_as_the_cash_goes_until_the_scoreboard_calls_the_game_over(tmp_path, quick):
+    conn, cash, ex = executor(tmp_path, books(size=5000))
+    ex.scoreboard = Scoreboard()
+    assert at(ex, PAIR, YES, NO, 0.08, NOW) is True and stored(conn)[0]["quantity"] == 2500       # Half the 5,000 shown, with no cap.
+    ex.scoreboard = Scoreboard(over=True)
+    assert at(ex, PAIR, YES, NO, 0.08, NOW) is False                           # The venue has called the game over.
+    # Past its expected end, a game the scoreboard says is not over is traded, and pays no sooner than half an hour on.
+    ex.scoreboard = Scoreboard()
+    assert at(ex, PAIR, YES, NO, 0.08, "2026-09-20T20:40:00+00:00") is True
+    assert stored(conn)[-1]["pays_at"] == "2026-09-20T21:10:00+00:00"
+
+
+def test_legs_on_one_venue_share_its_cash(tmp_path, quick):
+    other = dict(NO, venue="polymarket_us", contract_id="pm2")         # No through the other side of a second Polymarket US market.
+    latest = {("polymarket_us", "pm"): books()[("polymarket_us", "pm")],
+              ("polymarket_us", "pm2"): Book("polymarket_us", "pm2", NOW, [[0.53, 100]], [[0.54, 100]])}
+    conn, cash, ex = executor(tmp_path, latest, start=10.0)            # 10 dollars on each venue.
+    fees = {("polymarket_us", "pm"): NO_PM_FEES, ("polymarket_us", "pm2"): NO_PM_FEES}
+    assert at(ex, PAIR, YES, other, 0.08, NOW, fees) is True
+    # A contract of both legs costs 0.45 and 0.47 from the one venue's 10 dollars: 10 of them, not 22 of each.
+    assert stored(conn)[0]["quantity"] == 10
 
 
 def test_two_signals_at_once_share_the_balance_instead_of_both_spending_it(tmp_path, quick):
     latest = books()
-    conn, cash, ex = executor(tmp_path, latest, start=530.0)     # 30 over the 500 floor: room for 50 contracts at 0.45 once, not twice.
+    conn, cash, ex = executor(tmp_path, latest, start=30.0)      # Room for 50 contracts at 0.45 once, not twice.
     assert run(ex, signals=2) == [True, True]
     first, second = stored(conn)
     # The second saw what the first had reserved on both venues: 7.5 left on Polymarket US and 6.5 on Kalshi, so 13 at 0.47.
     assert (first["quantity"], second["quantity"]) == (50, 13)
-    assert cash.amounts == pytest.approx({"polymarket_us": 530 - 63 * 0.45, "kalshi": 530 - 63 * 0.47})
-    assert min(cash.amounts.values()) >= 500
+    assert cash.amounts == pytest.approx({"polymarket_us": 30 - 63 * 0.45, "kalshi": 30 - 63 * 0.47})
+    assert min(cash.amounts.values()) >= 0
 
 
-def test_new_paper_trades_leave_500_dollars_on_each_venue(tmp_path, quick):
+def test_paper_trades_spend_the_cash_down_to_nothing(tmp_path, quick):
     latest = books()
     logs = []
-    conn, cash, ex = executor(tmp_path, latest, logs.append, start=510.0)
+    conn, cash, ex = executor(tmp_path, latest, logs.append, start=10.0)
     assert run(ex) == [True] and stored(conn)[0]["quantity"] == 21      # 10 to spend: 22 at 0.45 but 21 at 0.47.
-    assert cash.amounts == pytest.approx({"polymarket_us": 510 - 21 * 0.45, "kalshi": 510 - 21 * 0.47})
+    assert cash.amounts == pytest.approx({"polymarket_us": 10 - 21 * 0.45, "kalshi": 10 - 21 * 0.47})
     ex.tick(NOW)
-    assert not any("floor" in line for line in logs)                    # Both still at 500 or more.
-    cash.amounts["kalshi"] = 499.0
-    ex.tick(NOW)
-    assert logs[-1] == "paper kalshi has 499.00$, under its 500.00$ floor, so new trades wait until more arrives"
-    assert run(ex) == [False]
-    cash.amounts["kalshi"] = 600.0
-    ex.tick(NOW)
-    assert logs[-1] == "paper kalshi has 600.00$, back over its 500.00$ floor"
+    assert run(ex) == [False] and len(stored(conn)) == 1               # The 0.13 left on Kalshi pays for no more.
+    assert not any("cash" in line for line in logs[1:])                 # Paper sends no alert however low it runs.
 
 
 def test_a_trade_is_stored_as_sent_before_it_fills(tmp_path, quick):

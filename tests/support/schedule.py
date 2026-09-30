@@ -1,5 +1,5 @@
 """
-A database of games for the scoreboard and allocator tests. Each game has
+A database of games for the scoreboard tests. Each game has
 one game winner pair, with a Kalshi contract, which gives no kickoff, and
 a Polymarket US one, which gives the kickoff and the event its state is
 read from, as the venues do.
@@ -25,7 +25,7 @@ def event(away, home, kickoff, sport="nfl"):
 
 def key(away, home, kickoff, sport="nfl"):
     """
-    The game key the scoreboard and allocator use.
+    The game key the scoreboard uses.
     """
     return (sport, kickoff[:10], away, home)
 

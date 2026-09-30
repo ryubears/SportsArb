@@ -181,7 +181,8 @@ class Trade:
     signal_ts: str          # When the scanner signalled.
     edge: float             # Net dollars per contract at the signal.
     quantity: int           # Contracts wanted on each leg.
-    cap: int | None = field(default=None, kw_only=True)     # The allocator's cap on contracts per trade when this one was sent.
+    cap: int | None = field(default=None, kw_only=True)     # The most contracts it could hold when sent: config.LIVE_MAX_CAP for a live
+                                                            # trade, none for a paper one.
     yes_venue: str
     yes_contract: str
     yes_polarity: str       # The side the contract pays on, so settlement knows whether the leg won.
@@ -284,7 +285,7 @@ class Ledger:
     ts: str
     venue: str
     amount: float           # Dollars in or out, positive when money arrives.
-    reason: str             # 'buy', 'sell', 'payout', 'transfer_out', or 'transfer_in', which is also each venue's opening balance.
+    reason: str             # 'buy', 'sell', 'payout', or 'transfer_in', each venue's opening balance.
     trade_id: int | None = None     # The trade behind a buy, sell, or payout.
     balance: float | None = None    # The venue's balance after this entry, so the newest entry gives the balance.
 
@@ -296,24 +297,9 @@ class Alert:
     """
     id: int | None = row_id()
     ts: str
-    kind: str               # 'rebalance' when the live venues drifted apart, 'set_aside' when a live trade's order had an unknown outcome, 'halt' when live trading stopped,
+    kind: str               # 'halt' when live trading stopped, 'low_cash' when a live venue's cash fell under config.LIVE_LOW_CASH, or
                             # 'attestation' when the Kalshi key's location attestation is about to lapse or has.
     subject: str
     body: str
     sent_at: str | None = None      # When the email went out, None until it has.
     error: str | None = None        # Why it could not be sent.
-
-
-@dataclass
-class Transfer:
-    """
-    A rebalancing transfer between venues.
-    """
-    id: int | None = row_id()
-    from_venue: str
-    to_venue: str
-    amount: float
-    requested_at: str
-    expected_at: str        # When the money should land, business days after the request.
-    reason: str             # 'drift' for the daily check, or 'floor' on transfers from before the any-day top up was dropped.
-    arrived_at: str | None = None   # Set when the money was credited to the receiving venue.

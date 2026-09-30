@@ -296,25 +296,28 @@ def nothing_and_the_money_gone(cash):
     return answer
 
 
-def test_new_trades_leave_five_dollars_on_each_venue_that_flattening_may_use(tmp_path):
+def test_trades_spend_all_the_cash_and_a_venue_running_low_emails_once(tmp_path):
     latest = books()
-    logs = []
+    notifier = FakeNotifier()
     venues = Venues(polymarket_us=[fills()], kalshi=[])
-    conn, cash, ex = executor(tmp_path, venues, latest, logs=logs, balance=8.0)
+    conn, cash, ex = executor(tmp_path, venues, latest, notifier=notifier, balance=8.0)
     venues.scripts["kalshi"] = [nothing_and_the_money_gone(cash), fills()]
-    # 8 dollars less the 5 left untouched is 3 to spend on each venue: 6 contracts at 0.45 or at 0.47.
-    assert cash.spendable("kalshi") == pytest.approx(3.0)
-    assert trade(ex) == [True] and stored(conn, "trades")[0]["quantity"] == 6
-    # Kalshi filled nothing and its cash fell to 5.10 meanwhile, under the floor, yet the 6 missing are still bought there.
-    assert venues.orders[-1] == ("kalshi", "buy", "no", 6, 0.47)
-    assert cash["kalshi"] == pytest.approx(5.10 - 6 * 0.47)
+    # All 8 dollars on each venue may be spent: 17 contracts at 0.45 or at 0.47, but the cap is 10.
+    assert cash.spendable("kalshi") == pytest.approx(8.0)
+    assert trade(ex) == [True] and stored(conn, "trades")[0]["quantity"] == 10
+    # Kalshi filled nothing and its cash fell to 5.10 meanwhile, yet the 10 missing are still bought there.
+    assert venues.orders[-1] == ("kalshi", "buy", "no", 10, 0.47)
+    assert cash["kalshi"] == pytest.approx(5.10 - 10 * 0.47)
     ex.tick(NOW)
-    assert trade(ex) == [False] and len(venues.orders) == 3             # Under the floor, so no new trades.
-    assert logs[-1] == "live kalshi has 2.28$, under its 5.00$ floor, so new trades wait until more arrives"
-    assert "new trades wait on kalshi, under the floor" in ex.summary()
+    ex.tick(NOW)
+    # Once each: Kalshi, and Polymarket US, whose 8 dollars less the 4.50 bought is 3.50.
+    assert [(kind, subject) for kind, subject, _ in notifier.sent] == [("low_cash", "SportsArb live kalshi cash low: 0.40$"),
+                                                                        ("low_cash", "SportsArb live polymarket_us cash low: 3.50$")]
     cash.read["kalshi"] = 20.0                                          # A payout arrives.
     ex.tick(NOW)
-    assert logs[-1] == "live kalshi has 17.18$, back over its 5.00$ floor"         # 20 read, less the 2.82 bought since.
+    cash.read["kalshi"] = 4.0
+    ex.tick(NOW)
+    assert [subject for _, subject, _ in notifier.sent][-1] == "SportsArb live kalshi cash low: -0.70$"     # 4 read, less the 4.70 bought since.
 
 
 def test_both_opening_orders_go_out_at_once(tmp_path):
@@ -360,8 +363,8 @@ def test_a_kalshi_leg_trades_only_with_the_cash_on_its_markets_shard(tmp_path):
         return asyncio.run(scenario())
 
     assert signal() is False and venues.orders == []
-    shards[3] = config.LIVE_CASH_FLOOR + 3 * 0.47 + 0.01     # Room for three contracts above the floor on baseball's shard.
+    shards[3] = 3 * 0.47 + 0.01                     # Room for three contracts on baseball's shard.
     asyncio.run(cash.refresh(NOW))
     assert signal() is True
     assert sorted(venues.orders) == [("kalshi", "buy", "no", 3, 0.47), ("polymarket_us", "buy", "yes", 3, 0.45)]     # Sent together.
-    assert cash.available("kalshi", 3) == pytest.approx(config.LIVE_CASH_FLOOR + 0.01) and cash.available("kalshi", 0) == 1000.0
+    assert cash.available("kalshi", 3) == pytest.approx(0.01) and cash.available("kalshi", 0) == 1000.0

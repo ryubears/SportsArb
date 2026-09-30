@@ -31,6 +31,7 @@ from concurrent.futures import ThreadPoolExecutor
 from api import kalshi, orders, polymarket_us
 from common import jsonutil
 from common.timeutil import now_iso
+from common.venues import VENUES
 from db import database
 from db.models import Order
 from engine.components.trading.brakes import Brakes
@@ -45,21 +46,46 @@ class LiveExecutor(Executor):
     """
     Sends real orders for the trades the shared Executor decides on.
     place maps a venue to its place_order function. notifier is the Notifier
-    from notify.py, which the brakes email a human through when live trading
-    halts.
+    from notify.py, which emails a human when live trading halts and when a
+    venue's cash runs low.
     """
 
     mode = "live"
 
-    def __init__(self, conn, cash, books, log=print, allocator=None, clock=now_iso, place=None, notifier=None):
-        super().__init__(conn, cash, books, log, allocator, clock)
+    def __init__(self, conn, cash, books, log=print, scoreboard=None, clock=now_iso, place=None, notifier=None):
+        super().__init__(conn, cash, books, log, scoreboard, clock)
         self.place = place or PLACE
         self.threads = ThreadPoolExecutor(ORDER_THREADS, thread_name_prefix="orders")
         self.brakes = Brakes(conn, cash, log, notifier, clock)
+        self.notifier = notifier
+        self.low = set()            # Venues whose cash is under config.LIVE_LOW_CASH, once a human has been told.
 
     @property
     def halted(self):
         return self.brakes.halted
+
+    def tick(self, now):
+        """
+        The shared tick, and an email once when a venue's cash falls under
+        config.LIVE_LOW_CASH, again only after it has been back over.
+        """
+        super().tick(now)
+        for venue in VENUES:
+            if not self.cash.known(venue):
+                continue
+            dollars = self.cash[venue]
+            if dollars < config.LIVE_LOW_CASH and venue not in self.low:
+                self.low.add(venue)
+                subject = f"SportsArb live {venue} cash low: {dollars:,.2f}$"
+                body = (f"Live cash on {venue} is {dollars:,.2f}$, under {config.LIVE_LOW_CASH:,.2f}$. Trades there go on as far as it "
+                        f"pays for, so add money to the venue to keep trading.")
+                if self.notifier:
+                    self.notifier.send("low_cash", subject, body, now)
+                else:
+                    self.log(f"live {venue} has {dollars:,.2f}$, under {config.LIVE_LOW_CASH:,.2f}$")
+            elif dollars >= config.LIVE_LOW_CASH and venue in self.low:
+                self.low.discard(venue)
+                self.log(f"live {venue} has {dollars:,.2f}$, back over {config.LIVE_LOW_CASH:,.2f}$")
 
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """

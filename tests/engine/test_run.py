@@ -102,7 +102,7 @@ def test_session_logs_every_components_summary_when_due_and_on_close(tmp_path, m
     def heads(out):
         return [line[9:].split(":")[0].split(",")[0] for line in out.splitlines()]      # Past the timestamp.
     on_tick, on_close = asyncio.run(scenario())
-    assert heads(on_tick) == heads(on_close) == ["scanner", "paper", "paper settled", "paper capital", "tracking 0 books"]
+    assert heads(on_tick) == heads(on_close) == ["scanner", "paper", "paper settled", "tracking 0 books"]
 
 
 def test_a_trading_session_logs_its_settings_when_it_starts(tmp_path, monkeypatch, capsys, fake_stream):
@@ -112,7 +112,7 @@ def test_a_trading_session_logs_its_settings_when_it_starts(tmp_path, monkeypatc
         await s.close()
     asyncio.run(scenario())
     first = capsys.readouterr().out.splitlines()[0]
-    assert first[9:].startswith("settings: min edge 0.05$, fill share 0.5, rejects 3%")
+    assert first[9:].startswith("settings: min edge 0.05$ and 50% a year, fill share 0.5, rejects 3%")
 
 
 def test_a_session_trading_both_modes_keeps_a_desk_for_each_and_offers_live_the_signal_first(tmp_path, monkeypatch, capsys, fake_stream):
@@ -135,9 +135,9 @@ def test_a_session_trading_both_modes_keeps_a_desk_for_each_and_offers_live_the_
     assert s.desks[0].cash.amounts == {"kalshi": 800.0, "polymarket_us": 600.0}
     assert s.desks[1].cash.amounts == {"kalshi": 10000.0, "polymarket_us": 10000.0}         # Paper money is its own.
     out = [line[9:] for line in capsys.readouterr().out.splitlines()]                       # Past the timestamp.
-    live_caps = f"cap {config.LIVE_MIN_CAP} to {config.LIVE_MAX_CAP} contracts"
+    live_caps = f"at most {config.LIVE_MAX_CAP} contracts a trade"
     assert out[0].startswith("settings: min edge") and out[1].startswith(f"LIVE TRADING with real money: {live_caps}")
     assert out[2] == f"no email settings in {tmp_path / 'email.json'}, alerts are only logged and stored"
     assert "live balances read: kalshi 800$, polymarket_us 600$" in out
     heads = [line.split(":")[0] for line in out]
-    assert {"live", "live settled", "live capital", "paper", "paper settled", "paper capital"} <= set(heads)
+    assert {"live", "live settled", "paper", "paper settled"} <= set(heads) and not any(head.endswith("capital") for head in heads)

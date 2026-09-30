@@ -23,11 +23,11 @@ pricing itself lives in pricing.py.
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from common.timeutil import days_between, now_iso, seconds_between
+from common.timeutil import now_iso, seconds_between
 from db import database
 from db.models import Opportunity
 from engine.helper import config
-from engine.helper.game import kickoff, pays_at as payout_time
+from engine.helper.game import books_age, days_until, pays_at as payout_time
 from engine.helper.pricing import Priced, best_trade, fresh, trade_words
 
 
@@ -79,7 +79,7 @@ class Episode:
         live = 1 if start_time and self.peak_ts >= start_time else 0
         # Capital is locked until the slower of the two legs pays, so the later resolution counts.
         pays_at = payout_time((self.peak.yes, self.peak.no), self.pair["sport"])
-        days_held = max(days_between(self.peak_ts, pays_at), 1 / 24) if pays_at else None
+        days_held = days_until(self.peak_ts, pays_at) if pays_at else None
         return_pct = 100 * self.peak.edge / (1 - self.peak.edge)
         return Opportunity(
             pair_id=self.pair["id"],
@@ -158,11 +158,9 @@ class Scanner:
     def price(self, pair, books, now):
         """
         The best trade across the pair's members whose books are fresh, as a Priced, or None. Books age only
-        once their game may have started, see pricing.fresh(): before kickoff a game's markets are open, and a
-        future's until its season settles, so their books may rest unchanged for hours without going stale.
+        once their game may have started, see game.books_age().
         """
-        start = kickoff(pair["members"])
-        aging = pair["game_date"] is not None and (start is None or start <= now)
+        aging = books_age(pair["game_date"], pair["members"], now)
         members = [m for m in pair["members"] if fresh(books.get((m["venue"], m["contract_id"])), now, aging)]
         if len(members) < 2:
             return None

@@ -13,7 +13,8 @@ NO_K_FEES = {"fee_type": "quadratic", "fee_multiplier": 0}      # Kalshi without
 KICKOFF = "2026-09-20T17:00:00+00:00"                           # When the game kicked off.
 NOW = "2026-09-20T17:30:00+00:00"                               # When the tests trade, during the game.
 CLOSE = "2026-09-20T21:00:00+00:00"                             # When both contracts close.
-PAIR = {"id": 1, "sport": "nfl", "label": "nfl game_winner 2026-09-20 CAR@ATL CAR", "kind": "game_winner"}                  # The pair traded.
+PAIR = {"id": 1, "sport": "nfl", "label": "nfl game_winner 2026-09-20 CAR@ATL CAR", "kind": "game_winner",                 # The pair traded.
+        "game_date": "2026-09-20", "team_a": "CAR", "team_b": "ATL"}
 YES = {"venue": "polymarket_us", "contract_id": "pm", "polarity": "yes", "start_time": KICKOFF, "close_time": CLOSE}  # Holds yes.
 NO = {"venue": "kalshi", "contract_id": "k", "polarity": "yes", "start_time": KICKOFF, "close_time": CLOSE}         # Holds no.
 FEES = {("polymarket_us", "pm"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES}    # Each member's fee schedule.

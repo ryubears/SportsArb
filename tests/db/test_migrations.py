@@ -76,6 +76,17 @@ def test_older_episodes_get_the_minimum_edge_stretch_columns_empty(tmp_path):
     assert version(conn) == len(migrations.STEPS)
 
 
+def test_the_transfers_table_is_dropped(tmp_path):
+    path = tmp_path / "t.sqlite"
+    old = sqlite3.connect(path)
+    old.execute("CREATE TABLE transfers (id INTEGER PRIMARY KEY, from_venue TEXT, to_venue TEXT, amount REAL)")
+    old.execute("PRAGMA user_version = 7")
+    old.commit(); old.close()
+    conn = database.connect(path)
+    assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'transfers'").fetchone() is None
+    assert version(conn) == len(migrations.STEPS)
+
+
 def test_the_database_layer_does_not_import_the_live_code():
     import ast, pathlib
     for path in pathlib.Path(database.__file__).parent.glob("*.py"):

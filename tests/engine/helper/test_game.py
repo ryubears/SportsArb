@@ -1,5 +1,5 @@
 """
-Tests for the game timing shared by the scanner, executor, allocator, and recorder.
+Tests for the game timing shared by the scanner, executor, scoreboard, and recorder.
 """
 
 from engine.helper import game

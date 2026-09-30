@@ -103,7 +103,7 @@ def test_an_order_on_a_kalshi_shard_can_spend_only_what_that_shard_has_free():
     cash.reserve("kalshi", 15.0, 3)
     cash.apply(Ledger(NOW, "kalshi", -10.0, "buy", 1), 0)
     assert (cash.available("kalshi", 0), cash.available("kalshi", 3), cash["kalshi"]) == (70.0, 5.0, 75.0)
-    assert cash.spendable("kalshi", 3) == 0.0                                               # Under the floor on that shard.
+    assert cash.spendable("kalshi", 3) == 5.0                                               # All that shard has free.
     shards.update({0: 70.0})                                                               # The venue shows the buy.
     cash.release("kalshi", 15.0, 3)
     asyncio.run(cash.refresh(NOW))

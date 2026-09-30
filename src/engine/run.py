@@ -1,5 +1,5 @@
 """
-Run the live process: follow the books, scan them, trade on paper or with real money, settle, and rebalance.
+Run the live process: follow the books, scan them, trade on paper or with real money, and settle.
 
 What runs, and where it lives in components/: market/ follows the
 venues, trading/ makes the trades, and money/ keeps the cash.
@@ -13,21 +13,19 @@ venues, trading/ makes the trades, and money/ keeps the cash.
   belongs to, stores every episode of positive edge in the opportunities
   table, and offers each episode to the desks.
 - The scoreboard, from market/scoreboard.py, asks Polymarket US how the
-  games under way stand, so trading runs to each game's real final
+  games under way stand, so trading on a game stops at its real final
   whistle.
 - The attestation watch, from trading/notify.py, which emails a human
   before the Kalshi key's location attestation lapses.
-- A Desk for each mode the run trades in, with its own money, allocator,
-  executor, settler, and rebalancer, and its trades stored with its mode,
-  so paper and live never mix. Both can run at once on the same signals,
-  which shows how far the paper fills are from real ones.
+- A Desk for each mode the run trades in, with its own money, executor,
+  and settler, and its trades stored with its mode, so paper and live
+  never mix. Both can run at once on the same signals, which shows how far
+  the paper fills are from real ones.
   - Paper: trading/paper.py fills against the same books with the paper
-    money of money/paper.py, and a PaperRebalancer moves paper money
-    between the venues.
+    money of money/paper.py.
   - Live: trading/live.py sends real orders with the money the venues
-    report through money/live.py, and a LiveRebalancer emails a human,
-    through trading/notify.py, when the venues drift apart, as the
-    executor does when live trading halts.
+    report through money/live.py, and emails a human through
+    trading/notify.py when live trading halts.
 
 The Session ties them together and ticks once a second. Every
 CATALOG_MINUTES the catalog of each sport is refreshed in a child process,
@@ -71,8 +69,7 @@ from engine.components.market.streams import Streams
 from engine.components.money import settle
 from engine.components.money.live import LiveBalances
 from engine.components.money.paper import PaperBalances
-from engine.components.money.rebalance import LiveRebalancer, PaperRebalancer
-from engine.components.trading import allocate, notify
+from engine.components.trading import notify
 from engine.components.trading.live import LiveExecutor
 from engine.components.trading.paper import PaperExecutor
 from engine.helper import config
@@ -119,13 +116,10 @@ def trading_settings():
     """
     c = config
     latency = ", ".join(f"{venue} {median}ms" for venue, (median, _) in c.PAPER_LATENCY_MS.items())
-    return (f"settings: min edge {c.MIN_EDGE:.2f}$, fill share {c.FILL_SHARE}, rejects {c.PAPER_REJECT_PROBABILITY:.0%}, "
-            f"latency {latency}, cap {c.PAPER_MIN_CAP} to {c.PAPER_MAX_CAP}, a contract of cap spending "
-            f"{', '.join(f'{sport} {rate}$' for sport, rate in c.DOLLARS_PER_CAP_HOUR.items())} an hour, "
-            f"planned every {c.BUDGET_MINUTES} minutes over {c.PLAN_HOURS}h, expected game "
+    return (f"settings: min edge {c.MIN_EDGE:.2f}$ and {c.MIN_ANNUAL_PCT}% a year, fill share {c.FILL_SHARE}, "
+            f"rejects {c.PAPER_REJECT_PROBABILITY:.0%}, latency {latency}, expected game "
             f"{', '.join(f'{sport} {hours}h' for sport, hours in c.GAME_HOURS.items())} + settle {c.SETTLE_HOURS}h, "
-            f"start balance {c.PAPER_START_BALANCE:,.0f}$, floor {c.PAPER_CASH_FLOOR:,.0f}$, "
-            f"rebalance daily at {c.PAPER_REBALANCE_HOUR}:00 UTC over {c.REBALANCE_DRIFT:.0%}; {book_waits()}")
+            f"start balance {c.PAPER_START_BALANCE:,.0f}$; {book_waits()}")
 
 
 def live_settings():
@@ -133,56 +127,46 @@ def live_settings():
     The settings that decide what the live trader does, in one line.
     """
     c = config
-    return (f"LIVE TRADING with real money: cap {c.LIVE_MIN_CAP} to {c.LIVE_MAX_CAP} contracts, balances read every "
-            f"{c.LIVE_BALANCE_SECONDS}s, floor {c.LIVE_CASH_FLOOR:,.2f}$; halt at {c.LIVE_UNKNOWN_LIMIT} "
+    return (f"LIVE TRADING with real money: at most {c.LIVE_MAX_CAP} contracts a trade, balances read every "
+            f"{c.LIVE_BALANCE_SECONDS}s, email under {c.LIVE_LOW_CASH:,.2f}$ on a venue; halt at {c.LIVE_UNKNOWN_LIMIT} "
             f"unknown outcomes in {c.LIVE_ORDER_WINDOW} orders, {c.LIVE_REJECT_LIMIT} refusals in a row, or a loss over "
-            f"{c.LIVE_MAX_LOSS_SHARE:.0%} in {c.LIVE_RESULT_HOURS}h; "
-            f"email to rebalance over {c.REBALANCE_DRIFT:.0%} every {c.LIVE_ALERT_HOURS}h; {book_waits()}")
+            f"{c.LIVE_MAX_LOSS_SHARE:.0%} in {c.LIVE_RESULT_HOURS}h; {book_waits()}")
 
 
 class Desk:
     """
     One mode of trading, paper or live: its executor, the money it trades,
-    the allocator that sizes its trades, the settler that pays them out, and
-    the rebalancer that keeps its venues funded, paper or live.
-    books is a function returning the recorder's newest books, and
-    scoreboard the Scoreboard of the games that share the money.
+    and the settler that pays its trades out. books is a function returning
+    the recorder's newest books, and scoreboard the Scoreboard that says
+    which games are over.
     """
 
     def __init__(self, mode, conn, books, notifier, scoreboard):
         self.mode = mode
         if mode == "paper":
             self.cash = PaperBalances(conn)
-            self.allocator = allocate.Allocator(conn, self.cash, scoreboard)
-            self.executor = PaperExecutor(conn, self.cash, books, log, allocator=self.allocator)
-            self.rebalancer = PaperRebalancer(conn, self.cash, log)
+            self.executor = PaperExecutor(conn, self.cash, books, log, scoreboard=scoreboard)
         elif mode == "live":
             self.cash = LiveBalances(log)
-            self.allocator = allocate.Allocator(conn, self.cash, scoreboard)
-            self.executor = LiveExecutor(conn, self.cash, books, log, allocator=self.allocator, notifier=notifier)
-            self.rebalancer = LiveRebalancer(conn, self.cash, notifier, log)
+            self.executor = LiveExecutor(conn, self.cash, books, log, scoreboard=scoreboard, notifier=notifier)
         else:
             raise ValueError(f"unknown mode {mode!r}")
         self.settler = settle.Settler(conn, self.cash, log, executor=self.executor)
 
     def tick(self, now, clock):
         """
-        Read the live balances when due, retry exposed trades, settle, and keep the venues funded.
+        Read the live balances when due, retry exposed trades, and settle.
         """
         if self.mode == "live":
             self.cash.tick(now, clock)
         self.executor.tick(now)
         self.settler.tick(now, clock)
-        self.rebalancer.tick(now)
 
-    def summaries(self, now):
+    def summaries(self):
         """
         One line per component about what it did since the last summary.
         """
-        lines = [self.executor.summary(), self.settler.summary(), self.allocator.summary(now)]
-        if self.mode == "paper" and self.rebalancer.summary():
-            lines.append(self.rebalancer.summary())
-        return lines
+        return [self.executor.summary(), self.settler.summary()]
 
 
 class Session:
@@ -232,13 +216,13 @@ class Session:
         if self.scanner:
             log(self.scanner.summary())
         for desk in self.desks:
-            for line in desk.summaries(now_iso()):
+            for line in desk.summaries():
                 log(line)
 
     def tick(self):
         """
         One pass of the timer: price the open episodes again, let each desk
-        retry, settle, and rebalance, and log the status and summaries when they are due.
+        retry and settle, and log the status and summaries when they are due.
         """
         now = now_iso()
         if self.scanner:
@@ -257,16 +241,13 @@ class Session:
 
     def refreshed(self):
         """
-        After a catalog refresh, apply the new targets to the connections, the scanner, and the plans.
+        After a catalog refresh, apply the new targets to the connections, the scanner, and the scoreboard.
         """
         log(f"subscriptions {self.streams.update(load_targets(self.conn, self.sports))}")
         if self.scanner:
             self.scanner.reload()
         if self.scoreboard:
             self.scoreboard.reload()
-        for desk in self.desks:
-            desk.allocator.reload()
-            log(desk.allocator.summary(now_iso()))
 
     async def close(self):
         """
@@ -311,10 +292,10 @@ async def refresh_in_child(sports, refresh=refresh_catalog):
     """
     Run refresh(sports, log) in a child process and return its line. A
     refresh briefly holds some 300 MB, all freed when it ends, but a thread
-    of this process would not give it back: the allocator keeps what each
-    thread frees for that thread, so each refresh that landed on another
-    thread added some 50 MB for good. A child returns it all when it ends,
-    and its work leaves this process's core to the books. refresh must be
+    of this process would not give it back: the C library's malloc keeps
+    what each thread frees for that thread, so each refresh that landed on
+    another thread added some 50 MB for good. A child returns it all when it
+    ends, and its work leaves this process's core to the books. refresh must be
     importable by name, since the child imports it.
     """
     loop = asyncio.get_running_loop()
