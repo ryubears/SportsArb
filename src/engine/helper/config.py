@@ -54,9 +54,8 @@ LIVE_MAX_LOSS_SHARE = 0.10  # Net loss of the trades decided in the window, as a
 KEY_CHECK_HOURS = 1         # Between readings of when the Kalshi key's location attestation lapses, see notify.AttestationWatch.
 KEY_WARN_HOURS = 48         # How long before it lapses the email goes out, so it comes before the day it does.
 
-# GAMES, game.py, which the recorder, the scanner, and the executor time games by. Game
-# lengths are from the games Polymarket US has recorded as finished, the settling time from the first live game, Atlanta
-# at Green Bay.
+# GAMES, game.py, which the recorder, the scanner, and the executor time games by. Game lengths are from the games
+# Polymarket US has recorded as finished, the settling time from the first live game, Atlanta at Green Bay.
 
 GAME_HOURS = {              # How long a game is expected to last, kickoff to final whistle: three in four of the sport's games end
     "nfl": 3.25,            # by then. 168 NFL games had a median of 3.11 hours, three in four by 3.24, and 382 college games a median

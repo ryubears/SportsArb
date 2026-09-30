@@ -5,7 +5,7 @@ and every award the classifiers read carries the award note.
 """
 
 import pytest
-from catalog import fetch, match
+from catalog import fetch, notes
 from catalog.classify import kalshi, polymarket_us, teams
 from common import timeutil
 from engine.helper import config
@@ -15,8 +15,8 @@ from engine.helper import config
     ("config.GAME_HOURS", config.GAME_HOURS),
     ("teams.ALIASES, the files in classify/aliases/", teams.ALIASES),
     ("polymarket_us.EVENT_PREFIX", polymarket_us.EVENT_PREFIX),
-    ("match.KIND_NOTES", match.KIND_NOTES),
-    ("match.PLAYER_NOTES", match.PLAYER_NOTES),
+    ("notes.KIND_NOTES", notes.KIND_NOTES),
+    ("notes.PLAYER_NOTES", notes.PLAYER_NOTES),
 ])
 def test_table_covers_every_sport(name, table):
     assert set(table) == set(fetch.SPORTS), name
@@ -36,4 +36,4 @@ def test_the_kalshi_series_fetched_are_the_ones_the_kalshi_classifier_reads():
 
 def test_every_award_the_classifiers_read_carries_the_award_note():
     awards = {*kalshi.AWARD_FUTURES.values(), *polymarket_us.AWARD_FUTURES.values()}
-    assert awards == {kind for kind, note in match.FUTURE_NOTES.items() if note == match.AWARD_NOTE}
+    assert awards == {kind for kind, note in notes.FUTURE_NOTES.items() if note == notes.AWARD_NOTE}

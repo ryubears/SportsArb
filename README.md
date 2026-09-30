@@ -283,18 +283,19 @@ whose label starts with the sport, for example `nfl spread 2026-09-20
 CAR@ATL ATL 4.5`. A pair only exists when both venues list the bet, and it
 carries every contract that expresses it, since a game winner can be held
 through either team's contract and a spread through either side. Kinds with
-settlement rules that differ between venues carry a note for their sport.
-For example both venues settle football props to the pre-game price if the
-player never takes a snap, but Polymarket US ignores stat corrections made
-after the game, and a postponed baseball game settles at a fair price on
-Kalshi after two days while Polymarket US waits up to two weeks for it.
-Hockey's rules agree: both venues count overtime, and a shootout as one
-goal for its winner in spreads and totals, but not in a player's goals.
-Basketball's postponed games part as baseball's do: Kalshi settles at a
-fair price after 48 hours, while Polymarket US waits up to two weeks. A
-future's label names its season in place of the game, `nfl champion 2027
-KC`, and an award's pair notes that Polymarket US divides the dollar among
-players who share the award, where Kalshi's rules do not always say.
+settlement rules that differ between venues carry a note for their sport,
+from **notes.py**. For example both venues settle football props to the
+pre-game price if the player never takes a snap, but Polymarket US ignores
+stat corrections made after the game, and a postponed baseball game settles
+at a fair price on Kalshi after two days while Polymarket US waits up to
+two weeks for it. Hockey's rules agree: both venues count overtime, and a
+shootout as one goal for its winner in spreads and totals, but not in a
+player's goals. Basketball's postponed games part as baseball's do: Kalshi
+settles at a fair price after 48 hours, while Polymarket US waits up to two
+weeks. A future's label names its season in place of the game, `nfl
+champion 2027 KC`, and an award's pair notes that Polymarket US divides the
+dollar among players who share the award, where Kalshi's rules do not
+always say.
 
 **pipeline.py** runs fetch, classify, and match in one call. The live
 process runs it every hour in a child process, so new games and props
@@ -312,14 +313,15 @@ is passed on with the venue's own time for it, when the message gives one.
 **kalshi.py** signs each connection and request with RSA-PSS and holds the
 whole catalog on one connection, on the hosts Kalshi dedicates to API
 traders, `external-api`, where a signed call took 17 ms against 27 on the
-old host. It also reads the cash on each exchange shard, moves cash
-between shards and sets the split Kalshi keeps them to, for
+old host. It also reads the cash on each exchange shard, moves cash between
+shards and sets the split Kalshi keeps them to, for
 `tools/kalshi_shards.py`, and reads when the key's location attestation
-lapses, past which Kalshi refuses the key for sports markets. **polymarket_us.py** signs with Ed25519 and subscribes to books in
-requests of up to 100 slugs. The feed takes ten requests on a connection,
-so a connection carries 1,000 markets, and has no unsubscribe, and every
-catalog refresh that adds contracts spends more, however few it adds. So
-new contracts go to a connection with requests left, a new connection opens
+lapses, past which Kalshi refuses the key for sports markets.
+**polymarket_us.py** signs with Ed25519 and subscribes to books in requests
+of up to 100 slugs. The feed takes ten requests on a connection, so a
+connection carries 1,000 markets, and has no unsubscribe, and every catalog
+refresh that adds contracts spends more, however few it adds. So new
+contracts go to a connection with requests left, a new connection opens
 when none has any, and contracts a connection refuses anyway, as one
 request too many, move to another. Updates are not batched, since batching
 held our view of the books behind the venue's. Its trade feed was dropped
@@ -341,9 +343,9 @@ twice. The field names come from the venues' published Python SDKs.
 
 **run.py** is the process that runs. Its `Session` wires the recorder, the
 venue connections, the scanner, and a `Desk` for each mode it trades in
-together, and a one-second timer ticks it, as
-[What happens when](#what-happens-when) describes. A desk is one mode's
-executor, its money, and its settler. `--execute` picks the desks: `paper`, the default,
+together, and a one-second timer ticks it, as [What happens
+when](#what-happens-when) describes. A desk is one mode's executor, its
+money, and its settler. `--execute` picks the desks: `paper`, the default,
 `live`, or `both`, which trades the same signals on paper and for real and
 so measures how far the paper fills are from real ones. The same loop
 starts the hourly catalog refresh in a child process and applies the result
@@ -351,32 +353,31 @@ to the live connections. One run trades every sport given to `--sport`,
 comma separated as in `--sport nfl,ncaaf,mlb,nhl,nba`, since the money is
 one pool and a second process would spend the same dollars. How long a game
 is expected to last is set for each sport in `GAME_HOURS`, which sets when
-the bets on it pay out. The pieces it wires together
-are in `engine/components/`, in three folders by what they do: `market/`
-follows the venues, `trading/` makes the trades, and `money/` keeps the
-cash. What they share is in `engine/helper/`: the settings, game timing,
-pricing, and fees.
+the bets on it pay out. The pieces it wires together are in
+`engine/components/`, in three folders by what they do: `market/` follows
+the venues, `trading/` makes the trades, and `money/` keeps the cash. What
+they share is in `engine/helper/`: the settings, game timing, pricing, and
+fees.
 
 **market/** follows the venues: their books and the edges between them.
-**record.py** holds the newest book for every paired
-contract in memory, five levels a side, which the scanner prices and the
-executors trade against. Books are not stored, only the gaps when a
-venue's feed was down. A game's contracts on both venues are followed
-until five hours after kickoff, whatever their close times say, since
-Kalshi's close is its guess at the final whistle, three hours in, which
-most games outlast. Every minute its status line says, for each venue,
-how many changes came, how far behind the venue they reached us, median
-and 90th percentile, and how much of that was ours.
-**feeds.py** holds a venue's connections, one, or several when the venue
-caps how much one connection may carry, and applies catalog changes to them
-in place, each new contract going to a connection with room. Each venue's
-feed runs in a child process of its own, so receiving, parsing, and keeping
-the books use another core. The child passes each changed book's best
-levels over a pipe, only the newest of a contract when the main process
-falls behind, and a child that dies is started again, with the stretch
-stored as a gap. **streams.py** gives each venue its feed and passes the
-books to the recorder. With `--set feed_processes=false` every feed runs in
-the main process instead.
+**record.py** holds the newest book for every paired contract in memory,
+five levels a side, which the scanner prices and the executors trade
+against. Books are not stored, only the gaps when a venue's feed was down.
+A game's contracts on both venues are followed until five hours after
+kickoff, whatever their close times say, since Kalshi's close is its guess
+at the final whistle, three hours in, which most games outlast. Every
+minute its status line says, for each venue, how many changes came, how far
+behind the venue they reached us, median and 90th percentile, and how much
+of that was ours. **feeds.py** holds a venue's connections, one, or several
+when the venue caps how much one connection may carry, and applies catalog
+changes to them in place, each new contract going to a connection with
+room. Each venue's feed runs in a child process of its own, so receiving,
+parsing, and keeping the books use another core. The child passes each
+changed book's best levels over a pipe, only the newest of a contract when
+the main process falls behind, and a child that dies is started again, with
+the stretch stored as a gap. **streams.py** gives each venue its feed and
+passes the books to the recorder. With `--set feed_processes=false` every
+feed runs in the main process instead.
 
 **scan.py** prices every pair whose member's book just changed. Using
 **pricing.py** it walks the ladders to find the cheapest way to hold yes
@@ -388,14 +389,13 @@ recorded depth would have filled at the peak, and the return on the capital
 tied up, annualized as if held until the bet pays out. While an episode is
 open the scanner offers it to each executor on every update until that
 executor takes a trade, and then not again, so one mispricing makes one
-trade. The live executor is offered it first. The edge coming back after
-it has gone is a new episode. An episode also keeps
-its longest stretch at `MIN_EDGE` or more, and the contracts that stayed
-fillable through all of it, which is what an order sent any time in the
-stretch could have had. A book goes stale after a minute only once its game
-may have started: a future's markets, and a game's before kickoff, can rest
-unchanged for hours while they are open, so their books are priced however
-old they are.
+trade. The live executor is offered it first. The edge coming back after it
+has gone is a new episode. An episode also keeps its longest stretch at
+`MIN_EDGE` or more, and the contracts that stayed fillable through all of
+it, which is what an order sent any time in the stretch could have had. A
+book goes stale after a minute only once its game may have started: a
+future's markets, and a game's before kickoff, can rest unchanged for hours
+while they are open, so their books are priced however old they are.
 
 **trading/** trades the signal. **executor.py** holds what paper and live
 share, which is everything but how an order is filled. Only bets that pay
@@ -499,25 +499,25 @@ the SMTP server in `data/email.json`.
 
 **money/** keeps the cash: paper money in **paper.py** and live money in
 **live.py**, with what they share in **balances.py**, and the settler that
-pays out trades in **settle.py**. Money has
-the same shape in both modes: free cash per venue, `reserve` and `release`
-for an order in flight, and `apply` for a cash movement. Each paper venue
-starts with $10,000. Money for an order in flight is reserved before
-anything is awaited, so two signals in the same moment cannot spend the
-same dollars. Every cash movement is a `Ledger` row that records the
-balance it left behind, starting with a `transfer_in` of each venue's
-opening balance, so the ledger accounts for every dollar and a restart
-reads the newest row instead of replaying history. From kickoff, every 30
-seconds, the settler asks the venues how the contracts of open trades
-resolved, pays the winning leg a dollar a contract, and stores each leg's
-result, payout, and settlement time as the trade's `Settlement`, which is
-what a tax return needs. A trade still exposed on one side is settled as it
-stands, each leg paid for what it holds. The settler skips a trade while an
-order to flatten it is in flight, and once a trade settles the executor
-stops flattening it. The venue holding a winning leg receives the whole
-dollar, so the balances drift apart over time. Nothing moves money between
-venues: paper trades until a venue's cash runs out, and live emails when
-one runs low, for a human to move money by hand.
+pays out trades in **settle.py**. Money has the same shape in both modes:
+free cash per venue, `reserve` and `release` for an order in flight, and
+`apply` for a cash movement. Each paper venue starts with $10,000. Money
+for an order in flight is reserved before anything is awaited, so two
+signals in the same moment cannot spend the same dollars. Every cash
+movement is a `Ledger` row that records the balance it left behind,
+starting with a `transfer_in` of each venue's opening balance, so the
+ledger accounts for every dollar and a restart reads the newest row instead
+of replaying history. From kickoff, every 30 seconds, the settler asks the
+venues how the contracts of open trades resolved, pays the winning leg a
+dollar a contract, and stores each leg's result, payout, and settlement
+time as the trade's `Settlement`, which is what a tax return needs. A trade
+still exposed on one side is settled as it stands, each leg paid for what
+it holds. The settler skips a trade while an order to flatten it is in
+flight, and once a trade settles the executor stops flattening it. The
+venue holding a winning leg receives the whole dollar, so the balances
+drift apart over time. Nothing moves money between venues: paper trades
+until a venue's cash runs out, and live emails when one runs low, for a
+human to move money by hand.
 
 Live money has no ledger of ours. `LiveBalances` reads each venue's balance
 every 15 seconds, which also keeps the venue's kept HTTPS connection warm
@@ -727,16 +727,16 @@ nfl,ncaaf,mlb,nhl,nba` runs them all from one pool of money. `--no-trade`
 scans without trading, `--no-scan` only records, and `--seconds 120` runs a
 short test. `--execute live` trades with real money and `--execute both`
 trades the same signals on paper and for real. The settings a run is tuned
-by, such as the minimum edge, the annual return, and the starting
-balance, are in `src/engine/helper/config.py`. Those only paper trading reads start with
-`PAPER_`, those only live trading reads with `LIVE_`, and the rest hold for
-both. `--set NAME=VALUE` overrides one for a run, for example `python3 -m
-engine.run --sport nfl --set min_edge=0.03`. The run logs every setting
-when it starts. The streams need venue keys in `data/`: `kalshi_key_id.txt`
-and `kalshi_private_key.pem` for Kalshi, `polymarket_us_key_id.txt` and
-`polymarket_us_secret_key.txt` for Polymarket US. Live trading uses the
-same keys, which need trading permission, and emails its alerts through
-`data/email.json`:
+by, such as the minimum edge, the annual return, and the starting balance,
+are in `src/engine/helper/config.py`. Those only paper trading reads start
+with `PAPER_`, those only live trading reads with `LIVE_`, and the rest
+hold for both. `--set NAME=VALUE` overrides one for a run, for example
+`python3 -m engine.run --sport nfl --set min_edge=0.03`. The run logs every
+setting when it starts. The streams need venue keys in `data/`:
+`kalshi_key_id.txt` and `kalshi_private_key.pem` for Kalshi,
+`polymarket_us_key_id.txt` and `polymarket_us_secret_key.txt` for
+Polymarket US. Live trading uses the same keys, which need trading
+permission, and emails its alerts through `data/email.json`:
 
 ```json
 {"host": "smtp.gmail.com", "port": 587, "user": "me@gmail.com",
@@ -769,7 +769,7 @@ python3 -m tools.feed_check --seconds 300 --markets 100
 ```
 src/
   api/        venue clients and the shared websocket book stream
-  catalog/    fetch, classify (one parser per venue), match, pipeline
+  catalog/    fetch, classify (one parser per venue), match, notes, pipeline
   common/     paths, time and json helpers, the venue list, the logger, the timer background work runs on,
               how a child process starts, quantiles
   db/         models, the SQLite schema and its migrations, reads and writes
@@ -778,7 +778,7 @@ src/
       market/    record, feeds, streams, scan: the venues' books and the edges between them
       trading/   executor (what paper and live share), paper, live, brakes, notify
       money/     balances (what paper and live share), paper, live, settle
-    helper/      config (the settings a run is tuned by), game (which game a bet is on and when it is played), pricing, fees
+    helper/      config (the settings a run is tuned by), game (when a game is played and when its bets pay out), pricing, fees
   tools/      summary report, live_check, kalshi_shards, latency_report, feed_check
 tests/        mirrors src, run with pytest, configured in pyproject.toml
   support/    helpers the tests share, and the streams and refreshes a child process can run
@@ -793,6 +793,7 @@ Where to look to change something:
 | how a websocket connects and reconnects | `api/bookstream.py` |
 | which markets are understood | `catalog/classify/` |
 | how bets are paired | `catalog/match.py` |
+| where the venues' rules differ | `catalog/notes.py` |
 | fees | `engine/helper/fees.py` |
 | how an edge is priced | `engine/helper/pricing.py` |
 | game timing | `engine/helper/game.py` |

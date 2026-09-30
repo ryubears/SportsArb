@@ -37,7 +37,6 @@ from db.database import DB_PATH, load_held, read_only
 from engine.helper import config
 
 
-
 def query_rows(conn, sql, params=()):
     """
     Run a query and return the rows as tuples.

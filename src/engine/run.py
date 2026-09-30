@@ -168,9 +168,9 @@ class Desk:
 class Session:
     """
     The recorder and everything that runs on its books, wired together:
-    the venue connections, the scanner, and a Desk for each
-    mode it trades in. Without a scanner only the books are recorded, and
-    without a desk the scanner only stores what it sees.
+    the venue connections, the scanner, and a Desk for each mode it trades
+    in. Without a scanner only the books are recorded, and without a desk
+    the scanner only stores what it sees.
     """
 
     def __init__(self, conn, sports, with_scanner=True, executors=("paper",)):
@@ -286,8 +286,8 @@ async def refresh_in_child(sports, refresh=refresh_catalog):
     of this process would not give it back: the C library's malloc keeps
     what each thread frees for that thread, so each refresh that landed on
     another thread added some 50 MB for good. A child returns it all when it
-    ends, and its work leaves this process's core to the books. refresh must be
-    importable by name, since the child imports it.
+    ends, and its work leaves this process's core to the books. refresh
+    must be importable by name, since the child imports it.
     """
     loop = asyncio.get_running_loop()
     answers, answer = CONTEXT.Pipe(duplex=False)

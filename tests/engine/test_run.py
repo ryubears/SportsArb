@@ -12,7 +12,6 @@ from engine import run
 from engine.components.market import streams
 from engine.components.money import live as money_live
 from engine.components.trading import brakes, notify
-from engine.helper import config
 
 
 def test_run_survives_a_failing_refresh(tmp_path, monkeypatch, capsys, fake_stream):

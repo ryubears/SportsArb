@@ -361,33 +361,21 @@ def load_exposed_trades(conn, mode, now):
     return out
 
 
-def load_open_legs(conn, mode):
-    """
-    Every leg of the unsettled trades of one mode that still holds contracts,
-    as [(game key, venue, dollars paid for what it holds)]. The game key is
-    (sport, game_date, team_a, team_b), or None for a bet with no game.
-    load_held sums them by venue, and the brakes in all.
-    """
-    rows = conn.execute("""
-        SELECT p.sport, p.game_date, p.team_a, p.team_b, t.yes_venue, t.yes_cost
-        FROM trades t LEFT JOIN pairs p ON p.id = t.pair_id
-        WHERE t.mode = ? AND t.yes_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)
-        UNION ALL
-        SELECT p.sport, p.game_date, p.team_a, p.team_b, t.no_venue, t.no_cost
-        FROM trades t LEFT JOIN pairs p ON p.id = t.pair_id
-        WHERE t.mode = ? AND t.no_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""", (mode, mode))
-    return [((sport, game_date, team_a, team_b) if game_date else None, venue, cost) for sport, game_date, team_a, team_b, venue, cost in rows]
-
-
 def load_held(conn, mode):
     """
     Dollars the unsettled trades of one mode hold on each venue, at what
-    their legs paid, as {venue: dollars}, for the summary.
+    their legs paid for the contracts they still hold, as {venue: dollars},
+    for the brakes and the summary.
     """
-    held = {}
-    for _, venue, cost in load_open_legs(conn, mode):
-        held[venue] = held.get(venue, 0.0) + cost
-    return held
+    rows = conn.execute("""
+        SELECT venue, SUM(cost) FROM (
+            SELECT yes_venue AS venue, yes_cost AS cost FROM trades t
+            WHERE mode = ? AND yes_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)
+            UNION ALL
+            SELECT no_venue, no_cost FROM trades t
+            WHERE mode = ? AND no_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id))
+        GROUP BY venue""", (mode, mode))
+    return {venue: dollars for venue, dollars in rows}
 
 
 def insert_settlement(conn, settlement):

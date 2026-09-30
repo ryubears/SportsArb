@@ -30,7 +30,7 @@ import random
 from common.timeutil import now_iso
 from engine.components.trading.executor import Executor, Fill
 from engine.helper import config
-from engine.helper.pricing import ladder, sell_ladder, sweep, takes
+from engine.helper.pricing import book_level, ladder, sell_ladder, sweep, takes
 
 
 class PaperExecutor(Executor):
@@ -55,33 +55,35 @@ class PaperExecutor(Executor):
         ours = self.taken.get(key)
         if book is None or not ours:
             return book
+        still = {}                  # What we took from the levels still there, no more than each holds now.
         sides = {}
         for side in ("bids", "asks"):
-            kept = []
+            sides[side] = []
             for price, size in getattr(book, side):
                 level = (side, round(price, 4))
-                took = min(ours.pop(level, 0), size)
-                if took > 0:
-                    ours[level] = took
-                if size - took > 0:
-                    kept.append([price, size - took])
-            sides[side] = kept
-        for level in [level for level in ours if not any(round(p, 4) == level[1] for p, _ in getattr(book, level[0]))]:
-            del ours[level]
-        if not ours:
+                mine = min(ours.get(level, 0), size)
+                if mine > 0:
+                    still[level] = mine
+                if size > mine:
+                    sides[side].append([price, size - mine])
+        if still:
+            self.taken[key] = still
+        else:
             del self.taken[key]
         return dataclasses.replace(book, **sides)
 
-    def took(self, key, side, levels, quantity, limit=None):
+    def take(self, leg, levels, quantity, limit=None, selling=False):
         """
-        Remember what an order for quantity took from one side of a book,
-        'asks' or 'bids', walking the ladder of costs made from it as the
-        order did. A cost from the bids is one less the bid.
+        Fill an order for quantity of a leg from levels, the ladder made from
+        its book, or the sell_ladder() when selling, as pricing.sweep() does,
+        and remember what it took from each level of the book. Returns
+        (contracts, dollars).
         """
-        ours = self.taken.setdefault(key, {})
-        for cost, contracts in takes(levels, quantity, config.FILL_SHARE, limit):
-            level = (side, round(cost if side == "asks" else 1 - cost, 4))
+        ours = self.taken.setdefault(leg.key, {})
+        for price, contracts in takes(levels, quantity, config.FILL_SHARE, limit):
+            level = book_level(leg.polarity, leg.side, price, selling)
             ours[level] = ours.get(level, 0) + contracts
+        return sweep(levels, quantity, leg.venue, leg.fee_info, config.FILL_SHARE, limit=limit, selling=selling)
 
     def latency(self, venue):
         median, sigma = config.PAPER_LATENCY_MS[venue]
@@ -105,9 +107,7 @@ class PaperExecutor(Executor):
         book = self.fresh_book(leg.key, self.aging(trade))
         if book is None:
             return Fill(ms=ms, ts=ts, note="no book")
-        levels = ladder(book, leg.polarity, leg.side)
-        filled, dollars = sweep(levels, leg.quantity, leg.venue, leg.fee_info, config.FILL_SHARE, limit=leg.limit)
-        self.took(leg.key, "asks" if leg.side == leg.polarity else "bids", levels, leg.quantity, leg.limit)
+        filled, dollars = self.take(leg, ladder(book, leg.polarity, leg.side), leg.quantity, leg.limit)
         return Fill(filled, dollars, ms, ts)
 
     async def sell_back(self, trade, leg, quantity, floor):
@@ -118,7 +118,5 @@ class PaperExecutor(Executor):
         book = self.fresh_book(leg.key, self.aging(trade))
         if book is None:
             return Fill(ms=ms, ts=ts)
-        levels = sell_ladder(book, leg.polarity, leg.side)
-        filled, dollars = sweep(levels, quantity, leg.venue, leg.fee_info, config.FILL_SHARE, selling=True)
-        self.took(leg.key, "bids" if leg.side == leg.polarity else "asks", levels, quantity)
+        filled, dollars = self.take(leg, sell_ladder(book, leg.polarity, leg.side), quantity, selling=True)
         return Fill(filled, dollars, ms, ts)

@@ -113,6 +113,18 @@ def test_paper_orders_leave_the_contracts_they_took_out_of_later_books(tmp_path,
     assert ex.book(("polymarket_us", "pm")).asks == [[0.45, 100]]
 
 
+@pytest.mark.parametrize("gone, sold, side, left", [
+    (("kalshi", "k"), ("polymarket_us", "pm"), "bids", [[0.44, 50]]),     # Yes, the side its contract pays on, sold into the bid.
+    (("polymarket_us", "pm"), ("kalshi", "k"), "asks", [[0.54, 50]]),     # No, the other side, sold as yes bought at the ask.
+])
+def test_a_sale_back_leaves_the_contracts_it_took_out_of_later_books(tmp_path, quick, gone, sold, side, left):
+    latest = books()
+    conn, cash, ex = executor(tmp_path, latest)
+    run(ex, lambda: latest.pop(gone))
+    assert stored(conn)[0]["hedge"].startswith(f"sold back 50 of 50 on {sold[0]}")
+    assert getattr(ex.book(sold), side) == left         # The sale took 50 of the 100 at the level it sold into.
+
+
 def test_a_leg_with_no_book_is_flattened_by_selling_the_other_back(tmp_path, quick):
     latest = books()
     conn, cash, ex = executor(tmp_path, latest)

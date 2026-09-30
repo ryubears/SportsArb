@@ -10,9 +10,9 @@ waits behind a settlement lookup or a catalog refresh. A buy's limit is
 the leg's limit, and an order that flattens sells no lower than the
 deepest price the books said it would reach, so a book that moved leaves
 the rest exposed for the next tick rather than filling far from where it
-was priced. Every order is stored in the orders table
-before it is sent and updated with the venue's answer, and the money is
-the venues' own, through LiveBalances from money/live.py.
+was priced. Every order is stored in the orders table before it is sent
+and updated with the venue's answer, and the money is the venues' own,
+through LiveBalances from money/live.py.
 
 An order whose outcome cannot be known, because no answer came, the venue
 failed on its side, or its answer cannot be read, leaves what its trade
@@ -64,20 +64,6 @@ class LiveExecutor(Executor):
     def halted(self):
         return self.brakes.halted
 
-    def tick(self, now):
-        """
-        The shared tick, and an email once when a venue's cash falls under
-        config.LIVE_LOW_CASH, again only after it has been back over. A venue
-        with shards in config.LIVE_SHARDS is watched shard by shard, since an
-        order spends only its own shard's cash.
-        """
-        super().tick(now)
-        for venue in VENUES:
-            if not self.cash.known(venue):
-                continue
-            for part in config.LIVE_SHARDS.get(venue) or (None,):
-                self.watch_cash(venue, part, now)
-
     def watch_cash(self, venue, part, now):
         """
         Email once when the cash on a venue, or on its shard part, falls under config.LIVE_LOW_CASH, and log when it is back over.
@@ -97,6 +83,20 @@ class LiveExecutor(Executor):
         elif dollars >= config.LIVE_LOW_CASH and (venue, part) in self.low:
             self.low.discard((venue, part))
             self.log(f"live {where} has {dollars:,.2f}$, back over {config.LIVE_LOW_CASH:,.2f}$")
+
+    def tick(self, now):
+        """
+        The shared tick, and an email once when a venue's cash falls under
+        config.LIVE_LOW_CASH, again only after it has been back over. A venue
+        with shards in config.LIVE_SHARDS is watched shard by shard, since an
+        order spends only its own shard's cash.
+        """
+        super().tick(now)
+        for venue in VENUES:
+            if not self.cash.known(venue):
+                continue
+            for part in config.LIVE_SHARDS.get(venue) or (None,):
+                self.watch_cash(venue, part, now)
 
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """

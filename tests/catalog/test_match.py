@@ -2,7 +2,7 @@
 Tests for pairing up bets across venues.
 """
 
-from catalog import match
+from catalog import match, notes
 
 
 def bet(venue, contract_id, kind="game_winner", subject="CAR", polarity="yes", line=None,
@@ -36,7 +36,7 @@ def test_a_futures_label_names_the_season_in_place_of_the_game():
 def test_an_award_pair_notes_how_each_venue_settles_a_shared_award():
     pair = match.make_pair([bet("kalshi", "k", kind="mvp", game_date=None, team_a=None, team_b=None, subject="josh allen"),
                             bet("polymarket_us", "p", kind="mvp", game_date=None, team_a=None, team_b=None, subject="josh allen")], "nfl")
-    assert pair.flags == [match.AWARD_NOTE]
+    assert pair.flags == [notes.AWARD_NOTE]
 
 
 def test_the_same_bet_in_two_sports_has_two_labels():
@@ -87,7 +87,7 @@ def test_player_props_pair_across_venues_and_carry_the_rules_note():
                                     bet("polymarket_us", "us50", **dict(prop, line=49.5))], "nfl")
     assert len(pairs) == 1 and [b["contract_id"] for b in unmatched] == ["us50"]
     assert pairs[0].label == "nfl player_receiving_yards 2026-09-24 ATL@GB bijan robinson 39.5"
-    assert match.PLAYER_NOTES["nfl"] in pairs[0].flags
+    assert notes.PLAYER_NOTES["nfl"] in pairs[0].flags
 
 
 def test_baseball_pairs_carry_baseballs_notes_not_footballs():
@@ -96,7 +96,7 @@ def test_baseball_pairs_carry_baseballs_notes_not_footballs():
     pairs, _ = match.match([bet("kalshi", "k", **game), bet("polymarket_us", "us", **game),
                             bet("kalshi", "kp", **prop), bet("polymarket_us", "usp", **prop)], "mlb")
     winner, strikeouts = sorted(pairs, key=lambda p: p.kind)
-    assert winner.flags == [match.BASEBALL_POSTPONED] and strikeouts.flags == [match.PLAYER_NOTES["mlb"]]
+    assert winner.flags == [notes.BASEBALL_POSTPONED] and strikeouts.flags == [notes.PLAYER_NOTES["mlb"]]
 
 
 def test_hockey_pairs_carry_hockeys_notes():
@@ -108,8 +108,8 @@ def test_hockey_pairs_carry_hockeys_notes():
                             bet("kalshi", "kp", **prop), bet("polymarket_us", "usp", **prop)], "nhl")
     winner, goals, covers = sorted(pairs, key=lambda p: p.kind)
     assert winner.label == "nhl game_winner 2026-09-29 FLA@CAR FLA"
-    assert winner.flags == [match.HOCKEY_NOTES["game_winner"]] and covers.flags == [match.HOCKEY_GOALS]
-    assert goals.flags == [match.PLAYER_NOTES["nhl"]]
+    assert winner.flags == [notes.HOCKEY_NOTES["game_winner"]] and covers.flags == [notes.HOCKEY_GOALS]
+    assert goals.flags == [notes.PLAYER_NOTES["nhl"]]
 
 
 def test_basketball_pairs_carry_basketballs_notes():
@@ -118,4 +118,4 @@ def test_basketball_pairs_carry_basketballs_notes():
     pairs, _ = match.match([bet("kalshi", "k", subject="NYK", **game), bet("polymarket_us", "us", subject="NYK", **game),
                             bet("kalshi", "kp", **prop), bet("polymarket_us", "usp", **prop)], "nba")
     winner, points = sorted(pairs, key=lambda p: p.kind)
-    assert winner.flags == [match.BASKETBALL_POSTPONED] and points.flags == [match.PLAYER_NOTES["nba"]]
+    assert winner.flags == [notes.BASKETBALL_POSTPONED] and points.flags == [notes.PLAYER_NOTES["nba"]]

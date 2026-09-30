@@ -27,8 +27,8 @@ from common.timeutil import now_iso, seconds_between
 from db import database
 from db.models import Opportunity
 from engine.helper import config
-from engine.helper.game import books_age, days_until, pays_at as payout_time
-from engine.helper.pricing import Priced, best_trade, fresh, trade_words
+from engine.helper.game import days_until, pays_at as payout_time, started
+from engine.helper.pricing import Priced, annual_pct, best_trade, fresh, return_pct, trade_words
 
 
 @dataclass
@@ -80,7 +80,6 @@ class Episode:
         # Capital is locked until the slower of the two legs pays, so the later resolution counts.
         pays_at = payout_time((self.peak.yes, self.peak.no), self.pair["sport"])
         days_held = days_until(self.peak_ts, pays_at) if pays_at else None
-        return_pct = 100 * self.peak.edge / (1 - self.peak.edge)
         return Opportunity(
             pair_id=self.pair["id"],
             trade=trade_words(self.peak.yes, self.peak.no),
@@ -97,8 +96,8 @@ class Episode:
             peak_profit=self.peak.profit,
             live=live,
             days_held=days_held,
-            return_pct=return_pct,
-            annual_pct=return_pct * 365 / days_held if days_held else None,
+            return_pct=return_pct(self.peak.edge),
+            annual_pct=annual_pct(self.peak.edge, days_held) if days_held else None,
             min_edge_seconds=worth_seconds,
             min_edge_size=worth_size,
             min_edge_profit=worth_profit,
@@ -158,9 +157,9 @@ class Scanner:
     def price(self, pair, books, now):
         """
         The best trade across the pair's members whose books are fresh, as a Priced, or None. Books age only
-        once their game may have started, see game.books_age().
+        once their game may have started, see game.started().
         """
-        aging = books_age(pair["game_date"], pair["members"], now)
+        aging = started(pair["game_date"], pair["members"], now)
         members = [m for m in pair["members"] if fresh(books.get((m["venue"], m["contract_id"])), now, aging)]
         if len(members) < 2:
             return None
