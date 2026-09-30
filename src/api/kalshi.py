@@ -242,13 +242,6 @@ def set_shard_split(percents):
         "allocations": [{"exchange_index": shard, "percent": percent} for shard, percent in percents.items()]})
 
 
-def shard_split():
-    """
-    The split across exchange shards Kalshi keeps the account's cash to, as it answers.
-    """
-    return signed_request("GET", "/portfolio/target_balance_allocation")
-
-
 # STREAMING
 
 def update_frame(message_id, sid, tickers, action):

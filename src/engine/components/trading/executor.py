@@ -37,10 +37,10 @@ config.MIN_ANNUAL_PCT a year or more until then. Near a game and during
 it, faster traders take an edge before our Polymarket US leg lands.
 A trade asks for config.FILL_SHARE of what the books show at that edge,
 the share we expect to get, as far as the cash free on each venue pays
-for, live as on paper. Every trade is
-stored in the trades table as soon as it is sent and updated when it is
-done, and every dollar moved goes through the cash the executor was
-given. Settling what was bought is money/settle.py's job.
+for, live as on paper. Every trade is stored in the trades table as soon
+as it is sent and updated when it is done, and every dollar moved goes
+through the cash the executor was given. Settling what was bought is
+money/settle.py's job.
 """
 
 import asyncio
@@ -51,7 +51,7 @@ from common.timeutil import epoch, hours_between, now_iso
 from db import database
 from db.models import Ledger, Leg, Trade
 from engine.helper import config, game
-from engine.helper.pricing import depth, fresh, ladder, reach, sell_ladder, sweep, trade_words
+from engine.helper.pricing import annual_pct, depth, fresh, ladder, reach, sell_ladder, sweep, trade_words
 
 
 def shard(leg):
@@ -118,7 +118,7 @@ class Executor:
     def fresh_book(self, key, aging=True):
         """
         The newest book for a contract, or None when there is none or, when its
-        books age, it is too old to trade, see pricing.fresh() and game.books_age().
+        books age, it is too old to trade, see pricing.fresh() and game.started().
         """
         book = self.book(key)
         return book if fresh(book, self.clock(), aging) else None
@@ -130,7 +130,7 @@ class Executor:
         game's already begun, the stricter way.
         """
         kept = self.games.get(trade.id)
-        return game.books_age(*kept, self.clock()) if kept else True
+        return game.started(*kept, self.clock()) if kept else True
 
     async def fill(self, trade, leg):
         """
@@ -214,6 +214,13 @@ class Executor:
         trade.matched = min(yes.filled, no.filled)
         trade.profit = trade.matched * (1 - yes.average - no.average)
 
+    def forget(self, trade_id):
+        """
+        Stop flattening a trade, and forget its game.
+        """
+        self.exposed.pop(trade_id, None)
+        self.games.pop(trade_id, None)
+
     async def run_trade(self, trade, legs):
         """
         Fill both legs, flatten any mismatch, and record the result.
@@ -237,7 +244,7 @@ class Executor:
         if legs[0].held != legs[1].held and trade.id not in self.set_aside:
             self.exposed[trade.id] = (trade, legs)
         else:
-            self.games.pop(trade.id, None)
+            self.forget(trade.id)
         self.totals["trades"] += 1
         self.totals["profit"] += trade.profit
         self.totals["hedge"] += trade.hedge_pnl
@@ -249,8 +256,7 @@ class Executor:
         """
         Called by the settler when a trade has settled. Its contracts have resolved, so it is not flattened any more.
         """
-        self.exposed.pop(trade_id, None)
-        self.games.pop(trade_id, None)
+        self.forget(trade_id)
 
     def reload_exposed(self):
         """
@@ -273,12 +279,10 @@ class Executor:
             if trade_id not in self.exposed:
                 continue        # Settled while an earlier trade was being flattened.
             if now >= trade.pays_at:
-                del self.exposed[trade_id]
-                self.games.pop(trade_id, None)
+                self.forget(trade_id)
                 continue
             if trade_id in self.set_aside:
-                del self.exposed[trade_id]
-                self.games.pop(trade_id, None)
+                self.forget(trade_id)
                 trade.hedge += f", then {self.set_aside[trade_id]}"
                 database.update_trade(self.conn, trade)
                 continue
@@ -297,8 +301,7 @@ class Executor:
             self.totals["hedge"] += trade.hedge_pnl - before
             self.log(f"{self.mode} flattened {trade.label}: {note}, {left} still exposed, hedge {trade.hedge_pnl:+.2f}$")
             if not left:
-                del self.exposed[trade_id]
-                self.games.pop(trade_id, None)
+                self.forget(trade_id)
 
     def summary(self):
         """
@@ -328,17 +331,6 @@ class Executor:
         return task
 
     @staticmethod
-    def before_kickoff(pair, members, now):
-        """
-        Whether the pair is a future, or on a game that has not kicked off. A
-        game none of the members gives the kickoff of is taken as under way.
-        """
-        if game.game_key(pair) is None:
-            return True
-        kickoff = game.kickoff(members)
-        return kickoff is not None and now < kickoff
-
-    @staticmethod
     def pays_enough(edge, now, pays_at):
         """
         Whether an edge is worth the capital it ties up until the bet pays at
@@ -347,7 +339,7 @@ class Executor:
         """
         if not pays_at or hours_between(now, pays_at) < config.MIN_PAYOUT_HOURS:
             return False
-        return 100 * edge / (1 - edge) * 365 / game.days_until(now, pays_at) >= config.MIN_ANNUAL_PCT
+        return annual_pct(edge, game.days_until(now, pays_at)) >= config.MIN_ANNUAL_PCT
 
     def confirmed(self, yes, no, now):
         """
@@ -398,19 +390,19 @@ class Executor:
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """
         Called by the scanner when a pair shows an edge. Sends the two legs
-        when the edge, the game not having kicked off, the time until the bet
-        pays, its return a year, and the balances allow. Returns True when orders were sent, so the scanner
-        sends no more for this episode. The scanner's size counts every level
-        with a positive edge, while the legs are sized from the levels that
-        keep config.MIN_EDGE, see quantity_for(). The cost is reserved here,
-        before anything is awaited, so a second signal in the same moment
-        sees what is left.
+        when the edge, the game not having started, the time until the bet
+        pays, its return a year, and the balances allow. Returns True when
+        orders were sent, so the scanner sends no more for this episode. The
+        scanner's size counts every level with a positive edge, while the
+        legs are sized from the levels that keep config.MIN_EDGE, see
+        quantity_for(). The cost is reserved here, before anything is
+        awaited, so a second signal in the same moment sees what is left.
         """
         if edge < config.MIN_EDGE:
             return False
-        if not self.before_kickoff(pair, (yes, no), now):
+        if game.started(pair.get("game_date"), (yes, no), now):
             return False
-        pays_at = game.pays_at((yes, no), pair["sport"], now)
+        pays_at = game.pays_at((yes, no), pair["sport"])
         if not self.pays_enough(edge, now, pays_at):
             return False
         if not self.confirmed(yes, no, now):

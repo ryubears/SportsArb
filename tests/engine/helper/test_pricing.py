@@ -24,6 +24,17 @@ def test_ladder_depends_on_which_side_the_contract_pays():
     assert pricing.ladder(q, "no", "yes") == [(0.47, 100)]
 
 
+@pytest.mark.parametrize("polarity, side", [("yes", "yes"), ("yes", "no"), ("no", "no"), ("no", "yes")])
+@pytest.mark.parametrize("selling", [False, True])
+def test_book_level_finds_the_book_level_each_ladder_level_came_from(polarity, side, selling):
+    q = Book("kalshi", "k", "t", bids=[[0.53, 100], [0.52, 10]], asks=[[0.54, 50], [0.57, 5]])
+    levels = (pricing.sell_ladder if selling else pricing.ladder)(q, polarity, side)
+    found = [(*pricing.book_level(polarity, side, price, selling), size) for price, size in levels]
+    book_side = found[0][0]
+    assert book_side == ("bids" if selling == (side == polarity) else "asks")
+    assert [(price, size) for _, price, size in found] == [tuple(level) for level in getattr(q, book_side)]
+
+
 def test_depth_stops_where_the_edge_falls_under_the_floor():
     fee = ("polymarket_us", {"feeCoefficient": 0})
     leg_a = [(0.45, 1), (0.46, 100), (0.50, 100)]     # Hold yes: 8, 7, then 3 cents against 0.47 on the other leg.

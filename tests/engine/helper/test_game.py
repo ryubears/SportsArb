@@ -25,7 +25,8 @@ def test_payout_is_the_slowest_member_and_skips_members_without_times():
     assert game.kickoff([FUTURE]) is None
 
 
-def test_a_trade_pays_no_sooner_than_the_settling_time_after_it():
-    assert game.pays_at([GAME], "nfl", "2026-09-20T18:00:00+00:00") == "2026-09-20T20:45:00+00:00"      # The expected payout is later.
-    assert game.pays_at([GAME], "nfl", "2026-09-20T20:40:00+00:00") == "2026-09-20T21:10:00+00:00"      # A game running long.
-    assert game.pays_at([UNKNOWN], "nfl", "2026-09-20T20:40:00+00:00") is None
+def test_a_game_starts_at_its_kickoff_or_at_once_when_no_member_gives_one_and_a_future_never_does():
+    assert not game.started("2026-09-20", [GAME], "2026-09-20T16:59:59+00:00")
+    assert game.started("2026-09-20", [GAME], KICKOFF)
+    assert game.started("2026-09-20", [UNKNOWN], "2026-09-19T00:00:00+00:00")
+    assert not game.started(None, [FUTURE], "2027-03-01T00:00:00+00:00")

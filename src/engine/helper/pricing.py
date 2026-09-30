@@ -65,6 +65,17 @@ def sell_ladder(book, polarity, side):
     return [(round(1 - price, 4), size) for price, size in book.asks]
 
 
+def book_level(polarity, side, price, selling=False):
+    """
+    The level of the contract's book that a level of ladder() came from, or
+    of sell_ladder() when selling, as (book side, book price). The side the
+    contract pays on is bought at the asks and sold at the bids, and the
+    other side the other way round, at one minus the book's price.
+    """
+    own = side == polarity
+    return "asks" if own != selling else "bids", round(price if own else 1 - price, 4)
+
+
 def takes(levels, quantity, share=1.0, limit=None):
     """
     The contracts an order for quantity takes from each level of one ladder,
@@ -238,3 +249,18 @@ def trade_words(yes, no):
         action = "buy" if member["polarity"] == side else "buy other side"
         return f"{side}: {SHORT_NAMES.get(member['venue'], member['venue'])} {action}"
     return f"{leg(yes, 'yes')}, {leg(no, 'no')}"
+
+
+def return_pct(edge):
+    """
+    What an edge returns on the capital it ties up, as a percent: both legs
+    cost a dollar less the edge, and together they pay a dollar.
+    """
+    return 100 * edge / (1 - edge)
+
+
+def annual_pct(edge, days):
+    """
+    An edge's return_pct() scaled to a year, without compounding, over the days until the bet pays.
+    """
+    return return_pct(edge) * 365 / days

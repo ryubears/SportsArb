@@ -21,12 +21,12 @@ filled while the balance was being read may not show in it yet, so it
 stays counted until the next reading. Before the first reading every
 venue holds nothing, so nothing is traded.
 
-Kalshi splits its cash by exchange shard, baseball's on shard 3 and
-football's on 0, and an order spends only its market's shard's. Its
-balance call gives each shard's with the whole, and each shard is kept
-the same way, read, moved, and reserved, so an order on a shard can
-spend no more than that shard has free, whatever the venue as a whole
-has. Payouts are left to the next reading there.
+Kalshi splits its cash by exchange shard, football's and hockey's on
+shard 0 and baseball's and basketball's on 3, and an order spends only
+its market's shard's. Its balance call gives each shard's with the whole,
+and each shard is kept the same way, read, moved, and reserved, so an
+order on a shard can spend no more than that shard has free, whatever the
+venue as a whole has. Payouts are left to the next reading there.
 """
 
 import asyncio
@@ -83,7 +83,6 @@ class LiveBalances(Balances):
             return free
         key = (venue, shard)
         return min(free, self.shard_read.get(key, 0.0) + self.shard_moved[key] - self.shard_reserved[key])
-
 
     def total(self):
         """

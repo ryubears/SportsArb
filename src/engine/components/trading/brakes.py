@@ -124,7 +124,7 @@ class Brakes:
         """
         The live money in all: the cash on both venues, what is held back for orders in flight included, and what open live trades hold, at cost.
         """
-        return self.cash.total() + sum(cost for _, _, cost in database.load_open_legs(self.conn, self.cash.mode))
+        return self.cash.total() + sum(database.load_held(self.conn, self.cash.mode).values())
 
     # RESULTS
 

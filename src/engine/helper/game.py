@@ -1,34 +1,18 @@
 """
-Which game a bet is on, when the game is played, and when the bets on it pay out.
+When a game is played, whether it has started, and when the bets on it pay out.
 
 Every timing assumption about games lives here, so the recorder, the
 scanner, and the executor agree on them: when a game is expected to end,
 when its money comes back, how long after kickoff it may still be under
-way, and when its books go stale if they stop changing. How long a game
-is expected to last depends on the sport, see config.GAME_HOURS: three in
-four of the sport's past games had ended by then. Both venues settled the
-first live game, Atlanta at Green Bay, within half an hour of its final
-whistle.
+way, and whether it has started, after which its pairs are not traded and
+their books go stale if they stop changing. How long a game is expected
+to last depends on the sport, see config.GAME_HOURS: three in four of the
+sport's past games had ended by then. Both venues settled the first live
+game, Atlanta at Green Bay, within half an hour of its final whistle.
 """
 
 from common.timeutil import days_between, shift
 from engine.helper import config
-
-
-def game_key(pair):
-    """
-    What identifies a game across its pairs, or None for a bet with no game.
-    The sport is part of it, since team codes repeat across leagues.
-    """
-    return (pair["sport"], pair["game_date"], pair["team_a"], pair["team_b"]) if pair.get("game_date") else None
-
-
-def game_label(key):
-    """
-    A game key in words, for log lines, for example 'nfl 2026-09-20 CAR@ATL'.
-    """
-    sport, game_date, away, home = key
-    return f"{sport} {game_date} {away}@{home}"
 
 
 def expected_end(kickoff, sport):
@@ -70,13 +54,15 @@ def kickoff(members):
     return max((m["start_time"] for m in members if m["start_time"]), default=None)
 
 
-def books_age(game_date, members, now):
+def started(game_date, members, now):
     """
-    Whether the books of a pair on the game of game_date, None for a future,
-    with these members go stale when they stop changing, see pricing.fresh():
-    once its game may have started, or at once when no member gives the
-    kickoff. Before kickoff a game's markets are open, and a future's until
-    its season settles, so their books may rest unchanged for hours.
+    Whether the game of game_date that a pair with these members is on may
+    have started by now: its kickoff has passed, or no member gives it. A
+    future, whose game_date is None, never starts. A pair is traded only
+    until its game starts, and only then do its books go stale when they
+    stop changing, see pricing.fresh(): before kickoff a game's markets are
+    open, and a future's until its season settles, so their books may rest
+    unchanged for hours.
     """
     if game_date is None:
         return False
@@ -91,13 +77,8 @@ def days_until(now, pays_at):
     return max(days_between(now, pays_at), 1 / 24)
 
 
-def pays_at(members, sport, now=None):
+def pays_at(members, sport):
     """
     When the slowest of a pair's members pays out, since capital is locked until then. None when none of them says.
-    Given now, a trade's time, it is no sooner than config.SETTLE_HOURS after it: a game still being traded has not
-    ended, even one that runs past its expected length.
     """
-    times = [t for t in (resolution_time(m["start_time"], m["close_time"], sport) for m in members) if t]
-    if times and now:
-        times.append(money_back(now))
-    return max(times, default=None)
+    return max((t for t in (resolution_time(m["start_time"], m["close_time"], sport) for m in members) if t), default=None)
