@@ -7,8 +7,12 @@ trades made, paper and live apart. Live game opportunities, during a
 game, are shown apart from before game and futures ones, whose money is
 tied up longer. Each group shows all its episodes, then only those whose
 edge reached config.MIN_EDGE: how long each held there, and what it could
-have taken at full size, locked in, and returned. Reads only, so it is
-safe to run while the live process is writing.
+have taken at full size, locked in, and returned. Before game and futures
+ones are shown a third time, only those the executors' rules trade:
+paying config.MIN_PAYOUT_HOURS or more out and config.MIN_ANNUAL_PCT a
+year or more. Games are not traded once they kick off. Open trades show
+the money they hold and when it comes back. Reads only, so it is safe to
+run while the live process is writing.
 
 The script sets its own import path, so it runs from any folder. The live
 money is not in the database but on the venues, so it is read from each
@@ -117,7 +121,7 @@ def print_all_episodes(conn, since, hours, live, name):
     print(f"\n{name}: {count:,} episodes in the last {hours} hours")
     if not count:
         return
-    target = config.TARGET_ANNUAL_PCT
+    target = config.MIN_ANNUAL_PCT
     body = query_rows(conn, """
         SELECT p.sport, p.kind, COUNT(*), ROUND(100 * MAX(peak_edge), 1), ROUND(MAX(peak_profit), 2), MAX(peak_size * (1 - peak_edge)),
                MAX(annual_pct), ROUND(AVG(days_held), 1), SUM(annual_pct >= ?)
@@ -151,21 +155,23 @@ def percent(value):
     return "-" if value is None else f"{value:,.1f}"
 
 
-def print_min_edge_episodes(conn, since, hours, live, name):
+def print_min_edge_episodes(conn, since, hours, live, name, rules=False):
     """
     The episodes of one group whose edge reached config.MIN_EDGE: how long each held there, and what it could have
     taken at full size and locked in, overall, by kind, and the largest. Capital is what buying every contract
     fillable at that edge through the longest stretch at it would have cost with fees, and profit what it locks in.
-    The annual rates weight each episode by its capital, over the days until it pays.
+    The annual rates weight each episode by its capital, over the days until it pays. With rules, only those the
+    executors trade: at their peak, paying config.MIN_PAYOUT_HOURS or more out and config.MIN_ANNUAL_PCT a year or more.
     """
     cents = f"{100 * config.MIN_EDGE:.0f}c"
-    title = f"{name} at {cents}+"
-    rows = query_rows(conn, """
+    title = f"{name} {'within the rules' if rules else f'at {cents}+'}"
+    within = " AND days_held * 24 >= ? AND annual_pct >= ?" if rules else ""
+    rows = query_rows(conn, f"""
         SELECT p.sport, p.kind, p.label, trade, 100 * peak_edge, min_edge_seconds, min_edge_size, min_edge_size - min_edge_profit,
                min_edge_profit, days_held
         FROM opportunities o JOIN pairs p ON p.id = o.pair_id
-        WHERE start_ts >= ? AND live = ? AND peak_edge >= ? AND min_edge_seconds IS NOT NULL ORDER BY min_edge_profit DESC""",
-        (since, live, config.MIN_EDGE))
+        WHERE start_ts >= ? AND live = ? AND peak_edge >= ? AND min_edge_seconds IS NOT NULL{within} ORDER BY min_edge_profit DESC""",
+        (since, live, config.MIN_EDGE) + ((config.MIN_PAYOUT_HOURS, config.MIN_ANNUAL_PCT) if rules else ()))
     if not rows:
         print(f"\n{title}: none in the last {hours} hours")
         return
@@ -197,9 +203,13 @@ def print_min_edge_episodes(conn, since, hours, live, name):
                         f"{d:,.1f}" if d else "-"))
     print_table(f"{title}, largest, last {hours} hours",
                 ("bet", "trade", "peak c", f"{cents}+ s", "size", "capital $", "profit $", "return %", "annual %", "days held"), largest)
-    print(f"  {cents}+ s is how long the edge held at {cents} or more without a break. Capital is every contract fillable at {cents} or more "
-          f"through all of that, at its cost with fees, and profit what that locks in, at full size. An edge that comes and goes counts "
-          f"again each time it does.")
+    if rules:
+        print(f"  Within the rules is what the executors trade: {cents} or more, paying {config.MIN_PAYOUT_HOURS}h or more out and "
+              f"{config.MIN_ANNUAL_PCT}% a year or more, both at the peak.")
+    else:
+        print(f"  {cents}+ s is how long the edge held at {cents} or more without a break. Capital is every contract fillable at {cents} or "
+              f"more through all of that, at its cost with fees, and profit what that locks in, at full size. An edge that comes and goes "
+              f"counts again each time it does.")
 
 
 def print_opportunities(conn, since, hours):
@@ -217,6 +227,10 @@ def print_opportunities(conn, since, hours):
         for live, name in ((1, "live game opportunities"), (0, "before game/futures opportunities")):
             print_all_episodes(conn, since, hours, live, name)
             print_min_edge_episodes(conn, since, hours, live, name)
+            if live:
+                print("  Live game opportunities are not traded: a game is traded only before it kicks off.")
+            else:
+                print_min_edge_episodes(conn, since, hours, live, name, rules=True)
 
 
 def print_paper_money(conn):
@@ -252,10 +266,12 @@ def print_mode_trades(conn, since, hours, mode):
         print_table(f"{mode} by outcome, last {hours} hours", ("status", "trades", "wanted", "matched", "locked in $", "hedges $", "net $"), body)
         body = query_rows(conn, """
             SELECT p.sport, p.kind, COUNT(*), ROUND(AVG(100 * edge), 1), ROUND(100.0 * SUM(matched) / SUM(quantity), 0),
-                   ROUND(SUM(profit + hedge_pnl), 2), ROUND(AVG(yes_latency_ms)), ROUND(AVG(no_latency_ms))
+                   ROUND(SUM(profit + hedge_pnl), 2), ROUND(AVG(julianday(pays_at) - julianday(signal_ts)), 1),
+                   ROUND(AVG(yes_latency_ms)), ROUND(AVG(no_latency_ms))
             FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ? AND signal_ts >= ? GROUP BY p.sport, p.kind ORDER BY p.sport, p.kind""",
             (mode, since))
-        print_table(f"{mode} by kind, last {hours} hours", ("sport", "kind", "trades", "avg edge c", "fill %", "net $", "avg yes ms", "avg no ms"), body)
+        print_table(f"{mode} by kind, last {hours} hours",
+                    ("sport", "kind", "trades", "avg edge c", "fill %", "net $", "avg days held", "avg yes ms", "avg no ms"), body)
         best = query_rows(conn, """
             SELECT p.label, trade, quantity, yes_filled, no_filled, ROUND(profit + hedge_pnl, 2), hedge, substr(signal_ts, 12, 8)
             FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ? AND signal_ts >= ? ORDER BY profit + hedge_pnl DESC LIMIT 5""", (mode, since))
@@ -281,10 +297,12 @@ def print_mode_trades(conn, since, hours, mode):
         GROUP BY venue ORDER BY venue""", (mode, since, since, mode, since, since))
     if settled:
         print_table(f"{mode} settled legs by venue, last {hours} hours", ("venue", "legs", "contracts", "cost $", "payout $", "realized $"), settled)
-    open_count = first_value(conn, """
-        SELECT COUNT(*) FROM trades t WHERE mode = ? AND yes_held + no_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""",
-        (mode,))
-    print(f"  {open_count:,} {mode} trades still open")
+    open_count, first_payout, last_payout = conn.execute("""
+        SELECT COUNT(*), MIN(pays_at), MAX(pays_at) FROM trades t
+        WHERE mode = ? AND yes_held + no_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""", (mode,)).fetchone()
+    held = ", ".join(f"{venue} {amount:,.2f}$" for venue, amount in sorted(load_held(conn, mode).items()))
+    print(f"  {open_count:,} {mode} trades still open" + (f", holding {held}, paying out from {first_payout[:10]} to {last_payout[:10]}"
+                                                          if open_count else ""))
     if mode == "paper":
         print_paper_money(conn)
     else:
@@ -293,9 +311,9 @@ def print_mode_trades(conn, since, hours, mode):
 
 def read_live_balances(readers=None):
     """
-    Each venue's live balance as {venue: dollars, or the reason it could not be read}. readers maps a venue
-    to a function returning its dollars and each exchange shard's; by default the live process's own, which
-    need the keys in data/. They are loaded only here, so the rest of the report runs without the venue clients.
+    Each venue's live balance as {venue: (dollars, {exchange shard: dollars}), or the reason it could not be read}.
+    readers maps a venue to a function returning those; by default the live process's own, which need the keys in
+    data/. They are loaded only here, so the rest of the report runs without the venue clients.
     """
     if readers is None:
         try:
@@ -305,22 +323,26 @@ def read_live_balances(readers=None):
     out = {}
     for venue, read in readers.items():
         try:
-            out[venue] = read()[0]
+            out[venue] = read()
         except Exception as e:
             out[venue] = f"not read ({str(e)[:120]})"
     return out
 
 
-def print_live_money(conn, balances):
+def print_live_money(balances):
     """
-    The live balances on the venues, read now, and the dollars on each venue in live trades still open.
+    The live balances on the venues, read now, with the exchange shards live trading uses, config.LIVE_SHARDS, and
+    any other holding money. What open live trades hold is with the live trades.
     """
-    held = load_held(conn, "live")
+    def money(venue, reading):
+        if isinstance(reading, str):
+            return f"{venue} {reading}"
+        dollars, shards = reading
+        parts = [f"shard {s} {a:,.2f}$" for s, a in sorted(shards.items()) if a or s in config.LIVE_SHARDS.get(venue, ())]
+        return f"{venue} {dollars:,.2f}$" + (f" ({', '.join(parts)})" if parts else "")
+
     print("\nlive money")
-    print("  live balances on the venues, read now: " + ", ".join(
-        f"{venue} {amount:,.2f}$" if isinstance(amount, (int, float)) else f"{venue} {amount}" for venue, amount in balances.items()))
-    if held:
-        print("  in open live trades: " + ", ".join(f"{venue} {amount:,.2f}$" for venue, amount in sorted(held.items())))
+    print("  live balances on the venues, read now: " + ", ".join(money(venue, reading) for venue, reading in balances.items()))
 
 
 def print_trades(conn, since, hours):
@@ -352,4 +374,4 @@ if __name__ == "__main__":
     print_opportunities(conn, since, args.hours)
     print_trades(conn, since, args.hours)
     if not args.no_live:
-        print_live_money(conn, read_live_balances())
+        print_live_money(read_live_balances())

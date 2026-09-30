@@ -108,17 +108,18 @@ def test_both_legs_are_sent_as_real_orders_and_every_order_is_stored(tmp_path):
     assert stored(conn, "ledger") == []                                 # Live money keeps no ledger of ours.
 
 
-def test_a_leg_that_filled_short_is_flattened_no_higher_than_the_books_said(tmp_path):
-    venues = Venues(polymarket_us=[fills()], kalshi=[fills(4), fills()])
+def test_a_leg_that_filled_short_is_evened_by_selling_the_other_back_no_lower_than_the_books_said(tmp_path):
+    venues = Venues(polymarket_us=[fills(), fills()], kalshi=[fills(4)])
     logs = []
     conn, cash, ex = executor(tmp_path, venues, logs=logs)
     trade(ex)
     t = stored(conn, "trades")[0]
-    # Buying the 6 missing on Kalshi at 0.47 earns 8 cents each, selling 6 back at 0.44 loses one, so the rest is bought.
-    assert venues.orders[-1] == ("kalshi", "buy", "no", 6, 0.47)
-    assert (t["yes_held"], t["no_held"], t["matched"], t["status"], t["hedge"]) == (10, 10, 10, "filled", "bought 6 of 6 on kalshi")
-    assert [(o["purpose"], o["quantity"], o["limit_price"]) for o in stored(conn, "orders")][-1] == ("flatten", 6, 0.47)
-    assert logs[-1].startswith("live filled: nfl game_winner 2026-09-20 CAR@ATL CAR")
+    # Buying the 6 missing on Kalshi at 0.47 would earn 8 cents each but hold the money until the game pays, so the 6 extra yes
+    # are sold back at the 0.44 bid, a cent under what they cost.
+    assert venues.orders[-1] == ("polymarket_us", "sell", "yes", 6, 0.44)
+    assert (t["yes_held"], t["no_held"], t["matched"], t["status"], t["hedge"]) == (4, 4, 4, "partial", "sold back 6 of 6 on polymarket_us")
+    assert [(o["purpose"], o["quantity"], o["limit_price"]) for o in stored(conn, "orders")][-1] == ("flatten", 6, 0.44)
+    assert logs[-1].startswith("live partial: nfl game_winner 2026-09-22 CAR@ATL CAR")
 
 
 def bids_gone(latest):
@@ -246,15 +247,16 @@ def test_a_halt_outlasts_a_restart_until_a_human_removes_the_file_and_then_start
     from engine.components.trading import notify
     conn = database.connect(tmp_path / "t.sqlite")
     notifier = notify.Notifier(conn, lambda m: None, sender=lambda *args: None)     # Halts are stored as alerts, as the session wires them.
+    no_bids = {**books(), ("polymarket_us", "pm"): Book("polymarket_us", "pm", NOW, [], [[0.45, 100]])}     # Nothing to sell into.
     venues = Venues(polymarket_us=[fills()] * 3, kalshi=[REFUSED] * 3)
-    conn, cash, ex = executor(tmp_path, venues, notifier=notifier)
+    conn, cash, ex = executor(tmp_path, venues, no_bids, notifier=notifier)
     trade(ex, 3)
     assert halt_file.read_text().startswith("2026-09-20T17:30:00 UTC every order stopped: kalshi refused 3 orders in a row")
     logs = []
     venues = Venues(polymarket_us=[fills(), fills()], kalshi=[REFUSED, fills()])
     conn, cash, again = executor(tmp_path, venues, logs=logs)           # A crash or a deploy restarts the process.
     assert again.halted.startswith(f"halted before this start, remove {halt_file} to resume: ")
-    assert logs[0] == "live trades left exposed before this start, flattening again: 1, 2"
+    assert logs[0] == "live trades left exposed before this start, flattening again: 1, 2, 3"
     assert logs[1].startswith("live trading halted before this start") and trade(again) == [False] and venues.orders == []
     halt_file.unlink()                                                  # Checked and cleared by a human.
     conn, cash, resumed = executor(tmp_path, venues)
@@ -286,38 +288,37 @@ def test_orders_the_latency_stopgap_turned_away_do_not_count_as_refusals(tmp_pat
     assert "yes leg unfilled: latency stopgap" in stored(conn, "trades")[0]["hedge"]
 
 
-def nothing_and_the_money_gone(cash):
-    """
-    A scripted Kalshi answer that fills nothing while the venue's cash falls to 5.10, as a reading would show.
-    """
-    def answer(quantity, price):
-        cash.read["kalshi"] = 5.10
-        return fills(0)(quantity, price)
-    return answer
+def test_trades_spend_all_the_cash_and_a_venue_or_kalshi_shard_running_low_emails_once(tmp_path):
+    shards = {0: 8.0, 3: 20.0}                          # Football's shard and baseball's.
+    cash = LiveBalances(lambda m: None, {"kalshi": lambda: (sum(shards.values()), dict(shards)), "polymarket_us": lambda: (8.0, {})})
+    asyncio.run(cash.refresh(NOW))
+    notifier, logs = FakeNotifier(), []
+    venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
+    conn = database.connect(tmp_path / "t.sqlite")
+    ex = LiveExecutor(conn, cash, lambda: books(), logs.append, clock=lambda: NOW, place=venues.place(), notifier=notifier)
+    football = {("polymarket_us", "pm"): NO_PM_FEES, ("kalshi", "k"): dict(NO_K_FEES, exchange_index=0)}
 
-
-def test_trades_spend_all_the_cash_and_a_venue_running_low_emails_once(tmp_path):
-    latest = books()
-    notifier = FakeNotifier()
-    venues = Venues(polymarket_us=[fills()], kalshi=[])
-    conn, cash, ex = executor(tmp_path, venues, latest, notifier=notifier, balance=8.0)
-    venues.scripts["kalshi"] = [nothing_and_the_money_gone(cash), fills()]
-    # All 8 dollars on each venue may be spent: 17 contracts at 0.45 or at 0.47, but the cap is 10.
-    assert cash.spendable("kalshi") == pytest.approx(8.0)
-    assert trade(ex) == [True] and stored(conn, "trades")[0]["quantity"] == 10
-    # Kalshi filled nothing and its cash fell to 5.10 meanwhile, yet the 10 missing are still bought there.
-    assert venues.orders[-1] == ("kalshi", "buy", "no", 10, 0.47)
-    assert cash["kalshi"] == pytest.approx(5.10 - 10 * 0.47)
+    async def scenario():
+        sent = ex.signal(PAIR, YES, NO, 1 - 0.45 - 0.47, 100, football, NOW)
+        await asyncio.gather(*ex.tasks)
+        return sent
+    # All 8 dollars on Polymarket US and on Kalshi's shard 0 may be spent: 17 contracts at 0.45 or at 0.47, but the cap is 10.
+    assert cash.spendable("kalshi", 0) == pytest.approx(8.0)
+    assert asyncio.run(scenario()) is True and stored(conn, "trades")[0]["quantity"] == 10
     ex.tick(NOW)
     ex.tick(NOW)
-    # Once each: Kalshi, and Polymarket US, whose 8 dollars less the 4.50 bought is 3.50.
-    assert [(kind, subject) for kind, subject, _ in notifier.sent] == [("low_cash", "SportsArb live kalshi cash low: 0.40$"),
+    # Once each: Kalshi's shard 0, whose 8 dollars less the 4.70 bought is 3.30, and Polymarket US, 8 less 4.50. Shard 3 has plenty.
+    assert [(kind, subject) for kind, subject, _ in notifier.sent] == [("low_cash", "SportsArb live kalshi shard 0 cash low: 3.30$"),
                                                                         ("low_cash", "SportsArb live polymarket_us cash low: 3.50$")]
-    cash.read["kalshi"] = 20.0                                          # A payout arrives.
+    assert "move some to the shard with python3 -m tools.kalshi_shards" in notifier.sent[0][2]
+    cash.shard_read[("kalshi", 0)] = 20.0                               # A payout arrives.
     ex.tick(NOW)
-    cash.read["kalshi"] = 4.0
+    assert logs[-1] == "live kalshi shard 0 has 15.30$, back over 5.00$"
+    cash.shard_read[("kalshi", 0)] = 4.0
+    cash.shard_read[("kalshi", 3)] = 1.0
     ex.tick(NOW)
-    assert [subject for _, subject, _ in notifier.sent][-1] == "SportsArb live kalshi cash low: -0.70$"     # 4 read, less the 4.70 bought since.
+    assert [subject for _, subject, _ in notifier.sent][-2:] == ["SportsArb live kalshi shard 0 cash low: -0.70$",     # 4 read, less 4.70.
+                                                                  "SportsArb live kalshi shard 3 cash low: 1.00$"]
 
 
 def test_both_opening_orders_go_out_at_once(tmp_path):
@@ -335,15 +336,6 @@ def test_both_opening_orders_go_out_at_once(tmp_path):
     assert trade(ex) == [True]
     t = stored(conn, "trades")[0]
     assert (t["yes_filled"], t["no_filled"], t["status"]) == (10, 10, "filled")
-
-
-def test_live_trading_takes_no_signal_on_a_sport_outside_its_list(tmp_path):
-    venues = Venues()
-    conn, cash, ex = executor(tmp_path, venues)
-
-    async def scenario():
-        return ex.signal(dict(PAIR, sport="nba"), YES, NO, 1 - 0.45 - 0.47, 100, FEES, NOW)
-    assert asyncio.run(scenario()) is False and venues.orders == [] and stored(conn, "trades") == []
 
 
 def test_a_kalshi_leg_trades_only_with_the_cash_on_its_markets_shard(tmp_path):

@@ -94,9 +94,8 @@ def test_the_same_matchup_in_two_sports_is_two_games(tmp_path):
         database.replace_bets(conn, sport, bets)
         database.replace_pairs(conn, sport, [Pair(f"{sport} game_winner 2026-11-01 DAL@DEN DAL", "game_winner", 2027, "2026-11-01",
                                                   "DAL", "DEN", "DAL", None, bets, [], sport=sport)], "2026-10-01T00:00:00+00:00")
-    assert set(database.load_games(conn)) == {("nfl", "2026-11-01", "DAL", "DEN"), ("nba", "2026-11-01", "DAL", "DEN")}
-    assert database.load_games(conn, ("nba",)) == {("nba", "2026-11-01", "DAL", "DEN"): ("2026-11-01T18:00:00+00:00", "ev")}
     assert [p["sport"] for p in database.load_pairs(conn, "nba").values()] == ["nba"]
+    assert [p["sport"] for p in database.load_pairs(conn, "nfl").values()] == ["nfl"]
 
 
 def test_gaps_are_stored_in_time_order_and_filtered_by_since(tmp_path):

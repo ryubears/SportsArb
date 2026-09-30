@@ -1,5 +1,5 @@
 """
-Tests for the game timing shared by the scanner, executor, scoreboard, and recorder.
+Tests for the game timing shared by the scanner, executor, and recorder.
 """
 
 from engine.helper import game
@@ -10,15 +10,9 @@ FUTURE = {"start_time": None, "close_time": "2027-02-14T00:00:00+00:00"}
 UNKNOWN = {"start_time": None, "close_time": None}
 
 
-def test_a_game_is_expected_in_play_from_kickoff_for_its_expected_length():
-    assert not game.in_play(KICKOFF, "2026-09-20T16:59:59+00:00", "nfl")
-    assert game.in_play(KICKOFF, KICKOFF, "nfl")
-    assert not game.in_play(KICKOFF, "2026-09-20T20:15:00+00:00", "nfl")
-
-
 def test_how_long_a_game_lasts_is_the_sports_own(monkeypatch):
     monkeypatch.setitem(game.config.GAME_HOURS, "nba", 2.5)
-    assert game.in_play(KICKOFF, "2026-09-20T19:00:00+00:00", "nfl") and not game.in_play(KICKOFF, "2026-09-20T19:30:00+00:00", "nba")
+    assert game.expected_end(KICKOFF, "nfl") == "2026-09-20T20:15:00+00:00" and game.expected_end(KICKOFF, "nba") == "2026-09-20T19:30:00+00:00"
     assert game.pays_at([GAME], "nba") == "2026-09-20T20:00:00+00:00"
 
 

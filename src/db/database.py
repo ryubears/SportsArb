@@ -161,10 +161,9 @@ def event_ids(conn, venue, contract_ids):
 
 
 # Every paired game with its kickoff, the latest start time any of its contracts gives, which is Polymarket US's since
-# Kalshi gives none, and the event of the contracts that give one, which is where that venue reports how the game stands.
+# Kalshi gives none.
 GAMES = """
-    SELECT p.sport, p.game_date, p.team_a, p.team_b, MAX(c.start_time) AS kickoff,
-           MAX(CASE WHEN c.start_time IS NOT NULL THEN c.event_id END) AS event_id
+    SELECT p.sport, p.game_date, p.team_a, p.team_b, MAX(c.start_time) AS kickoff
     FROM pairs p JOIN bets b ON b.pair_id = p.id JOIN contracts c ON c.venue = b.venue AND c.contract_id = b.contract_id
     WHERE p.game_date IS NOT NULL GROUP BY 1, 2, 3, 4"""
 
@@ -269,16 +268,6 @@ def load_pairs(conn, sport):
         WHERE c.sport = ? AND b.pair_id IS NOT NULL""", (sport,)):
         members.setdefault(r["pair_id"], []).append(dict(r))
     return {r["id"]: dict(r, members=members[r["id"]]) for r in conn.execute("SELECT * FROM pairs") if r["id"] in members}
-
-
-def load_games(conn, sports=None):
-    """
-    Return {(sport, game_date, team_a, team_b): (kickoff, event_id)} for every
-    game with a current pair and a kickoff, of the sports when given, from GAMES.
-    """
-    games = {(s, d, a, b): (kickoff, event) for s, d, a, b, kickoff, event in conn.execute(f"""
-        WITH games AS ({GAMES}) SELECT sport, game_date, team_a, team_b, kickoff, event_id FROM games WHERE kickoff IS NOT NULL""")}
-    return {key: game for key, game in games.items() if sports is None or key[0] in sports}
 
 
 # GAPS

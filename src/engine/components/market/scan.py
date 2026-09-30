@@ -209,7 +209,7 @@ class Scanner:
         parts = []
         for kind, os in sorted(by_kind.items()):
             best = max(os, key=lambda o: o.peak_profit)
-            beat = sum(1 for o in os if o.annual_pct is not None and o.annual_pct >= config.TARGET_ANNUAL_PCT)
+            beat = sum(1 for o in os if o.annual_pct is not None and o.annual_pct >= config.MIN_ANNUAL_PCT)
             parts.append(f"{kind} {len(os)} episodes, {beat} beat target, best {best.peak_profit:.2f}$ for {best.seconds:.0f}s")
         self.finished = []
         return f"scanner: {'; '.join(parts) if parts else 'no episodes'}; {len(self.episodes)} open"

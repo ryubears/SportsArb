@@ -1,12 +1,13 @@
 """
 Tell a human by email.
 
-Live trading asks for a person in three cases: the live venues have
-drifted apart and money should be moved between them by hand, live
-trading has halted, and the Kalshi key's location attestation is about to
-lapse, which AttestationWatch checks. Every alert is logged and stored in the alerts table as it is
-raised, and emailed in a background thread, so the loop never waits on the
-mail server. Whether the email went out, or why not, is written back to
+Live trading asks for a person in three cases: the cash on a live venue,
+or on one of Kalshi's exchange shards, has run low and money should be
+added or moved by hand, live trading has halted, and the Kalshi key's
+location attestation is about to lapse, which AttestationWatch checks.
+Every alert is logged and stored in the alerts table as it is raised, and
+emailed in a background thread, so the loop never waits on the mail
+server. Whether the email went out, or why not, is written back to
 the alert.
 
 The mail server and addresses are in data/email.json, gitignored like the

@@ -7,10 +7,10 @@ each leg, and how to flatten a leg that filled short. Only the orders
 differ. Each is a real immediate or cancel limit order, sent through the
 venue client's place_order() on a thread of its own, so an order never
 waits behind a settlement lookup or a catalog refresh. A buy's limit is
-the leg's limit, and an order that flattens sells no lower, or buys no
-higher, than the deepest price the books said it would reach, so a book
-that moved leaves the rest exposed for the next tick rather than filling
-far from where it was priced. Every order is stored in the orders table
+the leg's limit, and an order that flattens sells no lower than the
+deepest price the books said it would reach, so a book that moved leaves
+the rest exposed for the next tick rather than filling far from where it
+was priced. Every order is stored in the orders table
 before it is sent and updated with the venue's answer, and the money is
 the venues' own, through LiveBalances from money/live.py.
 
@@ -47,18 +47,18 @@ class LiveExecutor(Executor):
     Sends real orders for the trades the shared Executor decides on.
     place maps a venue to its place_order function. notifier is the Notifier
     from notify.py, which emails a human when live trading halts and when a
-    venue's cash runs low.
+    venue's cash, or one of its shards' in config.LIVE_SHARDS, runs low.
     """
 
     mode = "live"
 
-    def __init__(self, conn, cash, books, log=print, scoreboard=None, clock=now_iso, place=None, notifier=None):
-        super().__init__(conn, cash, books, log, scoreboard, clock)
+    def __init__(self, conn, cash, books, log=print, clock=now_iso, place=None, notifier=None):
+        super().__init__(conn, cash, books, log, clock)
         self.place = place or PLACE
         self.threads = ThreadPoolExecutor(ORDER_THREADS, thread_name_prefix="orders")
         self.brakes = Brakes(conn, cash, log, notifier, clock)
         self.notifier = notifier
-        self.low = set()            # Venues whose cash is under config.LIVE_LOW_CASH, once a human has been told.
+        self.low = set()            # (venue, shard or None) whose cash is under config.LIVE_LOW_CASH, once a human has been told.
 
     @property
     def halted(self):
@@ -67,32 +67,42 @@ class LiveExecutor(Executor):
     def tick(self, now):
         """
         The shared tick, and an email once when a venue's cash falls under
-        config.LIVE_LOW_CASH, again only after it has been back over.
+        config.LIVE_LOW_CASH, again only after it has been back over. A venue
+        with shards in config.LIVE_SHARDS is watched shard by shard, since an
+        order spends only its own shard's cash.
         """
         super().tick(now)
         for venue in VENUES:
             if not self.cash.known(venue):
                 continue
-            dollars = self.cash[venue]
-            if dollars < config.LIVE_LOW_CASH and venue not in self.low:
-                self.low.add(venue)
-                subject = f"SportsArb live {venue} cash low: {dollars:,.2f}$"
-                body = (f"Live cash on {venue} is {dollars:,.2f}$, under {config.LIVE_LOW_CASH:,.2f}$. Trades there go on as far as it "
-                        f"pays for, so add money to the venue to keep trading.")
-                if self.notifier:
-                    self.notifier.send("low_cash", subject, body, now)
-                else:
-                    self.log(f"live {venue} has {dollars:,.2f}$, under {config.LIVE_LOW_CASH:,.2f}$")
-            elif dollars >= config.LIVE_LOW_CASH and venue in self.low:
-                self.low.discard(venue)
-                self.log(f"live {venue} has {dollars:,.2f}$, back over {config.LIVE_LOW_CASH:,.2f}$")
+            for part in config.LIVE_SHARDS.get(venue) or (None,):
+                self.watch_cash(venue, part, now)
+
+    def watch_cash(self, venue, part, now):
+        """
+        Email once when the cash on a venue, or on its shard part, falls under config.LIVE_LOW_CASH, and log when it is back over.
+        """
+        dollars = self.cash.available(venue, part)
+        where = venue if part is None else f"{venue} shard {part}"
+        if dollars < config.LIVE_LOW_CASH and (venue, part) not in self.low:
+            self.low.add((venue, part))
+            subject = f"SportsArb live {where} cash low: {dollars:,.2f}$"
+            body = (f"Live cash on {where} is {dollars:,.2f}$, under {config.LIVE_LOW_CASH:,.2f}$. Trades there go on as far as it "
+                    f"pays for, so add money to the venue to keep trading"
+                    + (", or move some to the shard with python3 -m tools.kalshi_shards." if part is not None else "."))
+            if self.notifier:
+                self.notifier.send("low_cash", subject, body, now)
+            else:
+                self.log(f"live {where} has {dollars:,.2f}$, under {config.LIVE_LOW_CASH:,.2f}$")
+        elif dollars >= config.LIVE_LOW_CASH and (venue, part) in self.low:
+            self.low.discard((venue, part))
+            self.log(f"live {where} has {dollars:,.2f}$, back over {config.LIVE_LOW_CASH:,.2f}$")
 
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """
-        Take the signal as the paper executor would, unless live trading has
-        halted or the pair's sport is not one live trading takes, config.LIVE_SPORTS.
+        Take the signal as the paper executor would, unless live trading has halted.
         """
-        if self.halted or pair["sport"] not in config.LIVE_SPORTS:
+        if self.halted:
             return False
         return super().signal(pair, yes, no, edge, size, fee_infos, now)
 
@@ -141,17 +151,11 @@ class LiveExecutor(Executor):
         note = f"{answer.status}: {answer.note}" if answer.note else ""
         return Fill(answer.filled, answer.dollars, order.latency_ms, order.answered_at, note)
 
-    async def fill(self, trade, leg, purpose):
-        return await self.send(trade, leg, purpose, "buy", leg.quantity, leg.limit)
+    async def fill(self, trade, leg):
+        return await self.send(trade, leg, "open", "buy", leg.quantity, leg.limit)
 
     async def sell_back(self, trade, leg, quantity, floor):
         return await self.send(trade, leg, "flatten", "sell", quantity, floor)
-
-    def flatten_limit(self, reached):
-        """
-        No higher than the deepest price the books said the order would pay.
-        """
-        return reached
 
     # RESULTS, which the brakes check whenever a trade may have been decided.
 

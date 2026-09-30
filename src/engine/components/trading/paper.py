@@ -40,8 +40,8 @@ class PaperExecutor(Executor):
 
     mode = "paper"
 
-    def __init__(self, conn, cash, books, log=print, rng=None, scoreboard=None, clock=now_iso):
-        super().__init__(conn, cash, books, log, scoreboard, clock)
+    def __init__(self, conn, cash, books, log=print, rng=None, clock=now_iso):
+        super().__init__(conn, cash, books, log, clock)
         self.rng = rng or random.Random()
         self.taken = {}             # (venue, contract_id) maps to {(book side, price): contracts our orders took from that level}.
 
@@ -95,7 +95,7 @@ class PaperExecutor(Executor):
         await asyncio.sleep(ms / 1000)
         return ms, self.clock()
 
-    async def fill(self, trade, leg, purpose):
+    async def fill(self, trade, leg):
         """
         Send one leg's buy order and fill it against the book as it is when the order arrives.
         """
@@ -122,9 +122,3 @@ class PaperExecutor(Executor):
         filled, dollars = sweep(levels, quantity, leg.venue, leg.fee_info, config.FILL_SHARE, selling=True)
         self.took(leg.key, "bids" if leg.side == leg.polarity else "asks", levels, quantity)
         return Fill(filled, dollars, ms, ts)
-
-    def flatten_limit(self, reached):
-        """
-        No limit: a paper order to flatten takes what the book has when it arrives.
-        """
-        return 1.0

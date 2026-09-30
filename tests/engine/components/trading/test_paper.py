@@ -14,7 +14,7 @@ from engine.components.money import settle
 from engine.components.money.paper import PaperBalances
 from engine.components.trading.paper import PaperExecutor
 from engine.helper import config
-from trade_setup import FEES, KICKOFF, NO, NO_K_FEES, NO_PM_FEES, NOW, PAIR, YES, books, stored
+from trade_setup import CLOSE, FEES, KICKOFF, NO, NO_K_FEES, NO_PM_FEES, NOW, PAIR, PAYS_AT, YES, books, stored
 
 
 @pytest.fixture
@@ -53,11 +53,11 @@ def test_unchanged_books_fill_both_legs_and_lock_in_the_edge(tmp_path, quick):
     assert (t["yes_limit"], t["no_limit"], t["yes_polarity"], t["no_polarity"]) == (0.45, 0.47, "yes", "yes")
     assert t["profit"] == pytest.approx(50 * (1 - 0.45 - 0.47))
     assert (t["hedge"], t["hedge_pnl"], t["yes_held"], t["no_held"]) == ("none", 0, 50, 50)
-    assert t["pays_at"] == "2026-09-20T20:45:00+00:00"            # Kickoff plus the game and the venues settling.
+    assert t["pays_at"] == PAYS_AT
     assert cash.amounts == pytest.approx({"polymarket_us": 10000 - 50 * 0.45, "kalshi": 10000 - 50 * 0.47})
     assert [tuple(r) for r in conn.execute("SELECT venue, amount, reason, trade_id FROM ledger ORDER BY id")][2:] == [
         ("polymarket_us", pytest.approx(-22.5), "buy", 1), ("kalshi", pytest.approx(-23.5), "buy", 1)]      # After the two openings.
-    assert logs[0].startswith("paper filled: nfl game_winner 2026-09-20 CAR@ATL CAR")
+    assert logs[0].startswith("paper filled: nfl game_winner 2026-09-22 CAR@ATL CAR")
     assert ex.summary().startswith("paper: 1 trades (1 filled, 0 partial, 0 failed), locked in 4.00$, hedges +0.00$; total 1 trades, 4.00$")
 
 
@@ -74,7 +74,7 @@ def test_an_order_sweeps_the_levels_that_keep_the_edge_floor_and_skips_a_one_lot
     assert t["yes_cost"] == pytest.approx(50 * 0.46) and t["profit"] == pytest.approx(50 * (1 - 0.46 - 0.47))
 
 
-def test_a_shrunken_leg_is_completed_on_the_other_venue_when_that_is_cheaper(tmp_path, quick):
+def test_a_shrunken_leg_is_evened_by_selling_the_other_back_though_buying_the_rest_would_cost_less(tmp_path, quick):
     latest = books()
     conn, cash, ex = executor(tmp_path, latest)
 
@@ -84,12 +84,13 @@ def test_a_shrunken_leg_is_completed_on_the_other_venue_when_that_is_cheaper(tmp
     run(ex, kalshi_thins_out)
     t = stored(conn)[0]
     assert (t["yes_filled"], t["no_filled"]) == (50, 20)
-    # Selling 30 yes back at the 0.44 bid loses a cent each. Buying more no on Kalshi at 0.47 still earns 8 cents each, so it wins,
-    # but the opening order took 20 of the 40 there, and half of the 20 left are for us, leaving 20 exposed.
-    assert t["hedge"] == "bought 10 of 30 on kalshi, 20 exposed"
-    assert t["hedge_pnl"] == pytest.approx(10 * (1 - 0.45 - 0.47))
-    assert (t["matched"], t["status"], t["yes_held"], t["no_held"]) == (30, "partial", 50, 30)
-    assert cash["kalshi"] == pytest.approx(10000 - 30 * 0.47)
+    # Buying 30 more no on Kalshi at 0.47 would still earn 8 cents each, but it would hold the money until the game pays. Selling
+    # the 30 yes back at the 0.44 bid loses a cent each and frees the money at once.
+    assert t["hedge"] == "sold back 30 of 30 on polymarket_us"
+    assert t["hedge_pnl"] == pytest.approx(30 * (0.44 - 0.45))
+    assert (t["matched"], t["status"], t["yes_held"], t["no_held"]) == (20, "partial", 20, 20)
+    assert cash["polymarket_us"] == pytest.approx(10000 - 50 * 0.45 + 30 * 0.44)
+    assert cash["kalshi"] == pytest.approx(10000 - 20 * 0.47)
 
 
 def test_paper_orders_leave_the_contracts_they_took_out_of_later_books(tmp_path, quick):
@@ -140,21 +141,23 @@ def test_exposure_is_flattened_on_a_later_tick_once_a_book_allows_it(tmp_path, q
     assert list(ex.exposed) == [t["id"]]
 
     async def later():
-        ex.tick(NOW)                                            # Still no book, nothing to do.
+        ex.tick(NOW)                                            # Still no bids, nothing to do.
         await asyncio.gather(*ex.tasks)
-        latest.update(books(k_bid=0.53, k_ask=0.54, size=40))   # Kalshi is back with 40 on the ask, 20 for us.
+        latest.update(books(k_bid=0.53, k_ask=0.54))            # Kalshi is back, but buying no there would hold the money.
+        latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [[0.43, 40]], [[0.45, 100]])     # 40 bid, 20 for us.
         ex.tick("2026-09-20T17:31:00+00:00")
         await asyncio.gather(*ex.tasks)
-        ex.tick("2026-09-20T21:30:00+00:00")                    # Past the payout, the rest is left to settle.
+        ex.tick("2026-09-22T21:30:00+00:00")                    # Past the payout, the rest is left to settle.
         await asyncio.gather(*ex.tasks)
     asyncio.run(later())
     t = stored(conn)[0]
-    assert (t["yes_held"], t["no_held"], t["matched"], t["status"]) == (50, 20, 20, "partial")
-    assert t["hedge"] == "50 exposed, no book to flatten, no leg no book, then bought 20 of 50 on kalshi, 30 exposed at 17:31:00"
-    assert t["hedge_pnl"] == pytest.approx(20 * (1 - 0.45 - 0.47))
-    assert logs[-1] == "paper flattened nfl game_winner 2026-09-20 CAR@ATL CAR: bought 20 of 50 on kalshi, 30 exposed, 30 still exposed, hedge +1.60$"
+    assert (t["yes_held"], t["no_held"], t["matched"], t["status"]) == (30, 0, 0, "failed")
+    assert t["hedge"] == "50 exposed, no book to flatten, no leg no book, then sold back 20 of 50 on polymarket_us, 30 exposed at 17:31:00"
+    assert t["hedge_pnl"] == pytest.approx(20 * (0.43 - 0.45))
+    assert logs[-1] == ("paper flattened nfl game_winner 2026-09-22 CAR@ATL CAR: sold back 20 of 50 on polymarket_us, 30 exposed, "
+                        "30 still exposed, hedge -0.40$")
     assert ex.exposed == {}
-    assert cash["kalshi"] == pytest.approx(10000 - 20 * 0.47)
+    assert cash["polymarket_us"] == pytest.approx(10000 - 50 * 0.45 + 20 * 0.43) and cash["kalshi"] == pytest.approx(10000)
 
 
 def test_a_settled_trade_is_not_flattened_any_more(tmp_path, quick):
@@ -163,7 +166,7 @@ def test_a_settled_trade_is_not_flattened_any_more(tmp_path, quick):
     conn, cash, ex = executor(tmp_path, latest)
     database.upsert_contracts(conn, [Contract(venue=v, contract_id=c, market_id=c, event_id="e", series_id=None, sport="nfl", event_title=None,
                                               title="t", outcome="Yes", market_type=None, line=None, rules=None, start_time=KICKOFF,
-                                              close_time="2026-09-20T21:00:00+00:00", fee_info=None) for v, c in (("kalshi", "k"), ("polymarket_us", "pm"))], NOW)
+                                              close_time=CLOSE, fee_info=None) for v, c in (("kalshi", "k"), ("polymarket_us", "pm"))], NOW)
     conn.execute("INSERT INTO pairs (id, label, kind, venues, contracts, flags, matched_at) VALUES (1, ?, 'game_winner', '', 2, '[]', ?)", (PAIR["label"], NOW))
 
     def kalshi_vanishes_and_polymarket_loses_its_bids():
@@ -173,18 +176,20 @@ def test_a_settled_trade_is_not_flattened_any_more(tmp_path, quick):
     run(ex, kalshi_vanishes_and_polymarket_loses_its_bids)
     assert list(ex.exposed) == [stored(conn)[0]["id"]]                  # 50 yes held, with nothing to flatten against.
     s = settle.Settler(conn, cash, lambda m: None, executor=ex)
-    s.results = {"polymarket_us": lambda events: {"pm": ("yes", "2026-09-20T17:40:00+00:00")}}
-    latest.update(books())                                              # Kalshi is back and could flatten the rest.
+    s.results = {"polymarket_us": lambda events: {"pm": ("yes", "2026-09-22T17:40:00+00:00")}}
+    # Polymarket US has bids again, which could sell the rest back.
+    latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", "2026-09-22T17:45:30+00:00", [[0.44, 100]], [[0.45, 100]])
 
     async def later():
-        await s.settle("2026-09-20T17:45:00+00:00")                     # The contract was decided during the game and has settled.
-        ex.tick("2026-09-20T17:46:00+00:00")
+        await s.settle("2026-09-22T17:45:00+00:00")                     # The contract was decided during the game and has settled.
+        ex.tick("2026-09-22T17:46:00+00:00")
         await asyncio.gather(*ex.tasks)
+    ex.clock = lambda: "2026-09-22T17:46:00+00:00"
     asyncio.run(later())
     t = stored(conn)[0]
     settlement = conn.execute("SELECT yes_payout, settled_at FROM settlements WHERE trade_id = ?", (t["id"],)).fetchone()
     assert ex.exposed == {} and ex.tasks == set()
-    assert (t["yes_held"], t["no_held"], *settlement) == (50, 0, 50, "2026-09-20T17:40:00+00:00")
+    assert (t["yes_held"], t["no_held"], *settlement) == (50, 0, 50, "2026-09-22T17:40:00+00:00")
     assert [r[0] for r in conn.execute("SELECT reason FROM ledger ORDER BY id")][2:] == ["buy", "payout"]     # No sale after the payout.
 
 
@@ -205,15 +210,16 @@ def test_a_stale_book_is_not_flattened_against(tmp_path, quick):
         ex.tick(now)
         await asyncio.gather(*ex.tasks)
 
-    # Kalshi's book comes back from 17:30, but by 17:32 it has not changed for two minutes, as a closed market's would not.
-    latest.update({("kalshi", "k"): books()[("kalshi", "k")]})
-    asyncio.run(at("2026-09-20T17:32:00+00:00"))
-    assert stored(conn)[0]["no_held"] == 0 and list(ex.exposed) == [stored(conn)[0]["id"]]
-    # Once the book changes again it is fresh, and the rest is flattened against it.
-    latest[("kalshi", "k")] = Book("kalshi", "k", "2026-09-20T17:32:00+00:00", [[0.53, 100]], [[0.54, 100]])
-    asyncio.run(at("2026-09-20T17:32:00+00:00"))
+    # Once the game is on, a book goes stale when it stops changing. Polymarket US's bids come back at 17:30, but by 17:32 the
+    # book has not changed for two minutes, as a closed market's would not.
+    latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", "2026-09-22T17:30:00+00:00", [[0.44, 100]], [[0.45, 100]])
+    asyncio.run(at("2026-09-22T17:32:00+00:00"))
+    assert stored(conn)[0]["yes_held"] == 50 and list(ex.exposed) == [stored(conn)[0]["id"]]
+    # Once the book changes again it is fresh, and the rest is sold back into it.
+    latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", "2026-09-22T17:32:00+00:00", [[0.44, 100]], [[0.45, 100]])
+    asyncio.run(at("2026-09-22T17:32:00+00:00"))
     t = stored(conn)[0]
-    assert (t["yes_held"], t["no_held"], t["matched"]) == (50, 50, 50) and ex.exposed == {}
+    assert (t["yes_held"], t["no_held"], t["matched"]) == (0, 0, 0) and ex.exposed == {}
 
 
 def test_rejected_orders_fail_without_a_hedge(tmp_path, quick, monkeypatch):
@@ -231,12 +237,16 @@ SEASON_END = "2027-02-14T00:00:00+00:00"            # When the future's contract
 FUTURE_YES, FUTURE_NO = (dict(m, start_time=None, close_time=SEASON_END) for m in (YES, NO))
 
 
-def test_signal_is_refused_for_thin_edges_poor_returns_and_games_that_are_over(tmp_path, quick):
+def test_signal_is_refused_for_thin_edges_poor_returns_payouts_within_a_day_and_games_under_way(tmp_path, quick):
     latest = books()
     conn, cash, ex = executor(tmp_path, latest)
     assert ex.signal(PAIR, YES, NO, 0.015, 100, FEES, NOW) is False
-    assert ex.signal(FUTURE, FUTURE_YES, FUTURE_NO, 0.08, 100, FEES, NOW) is False     # 8.7% until February is 21% a year, under 50.
-    assert ex.signal(PAIR, YES, NO, 0.08, 100, FEES, "2026-09-20T20:16:00+00:00") is False        # After the final whistle.
+    assert ex.signal(FUTURE, FUTURE_YES, FUTURE_NO, 0.20, 100, FEES, NOW) is False     # 25% until February is 62% a year, under 100.
+    assert ex.signal(PAIR, YES, NO, 0.50, 100, FEES, "2026-09-21T21:00:00+00:00") is False        # Pays out in under 24 hours.
+    assert ex.signal(PAIR, YES, NO, 0.50, 100, FEES, "2026-09-22T17:30:00+00:00") is False        # Under way.
+    # A game none of the members gives the kickoff of pays at its close time, but could be under way, so it is not traded.
+    unknown = [dict(m, start_time=None, close_time="2026-10-06T21:00:00+00:00") for m in (YES, NO)]
+    assert ex.signal(PAIR, *unknown, 0.50, 100, FEES, NOW) is False
     assert ex.tasks == set() and stored(conn) == []
 
 
@@ -253,37 +263,18 @@ def at(ex, pair, yes, no, edge, now, fees=FEES):
 
 def test_edges_before_kickoff_and_on_futures_that_pay_enough_are_traded(tmp_path, quick):
     conn, cash, ex = executor(tmp_path, books())
-    assert at(ex, PAIR, YES, NO, 0.08, "2026-09-20T16:00:00+00:00") is True      # An hour before kickoff, paying that night.
-    ex.books = lambda: books(pm_bid=0.34, pm_ask=0.35, k_bid=0.55, k_ask=0.56)   # 20 cents: 25% until February, 62% a year.
-    assert at(ex, FUTURE, FUTURE_YES, FUTURE_NO, 0.20, NOW) is True
+    assert at(ex, PAIR, YES, NO, 0.08, "2026-09-21T20:00:00+00:00") is True      # The day before, paying 24.75 hours on.
+    ex.books = lambda: books(pm_bid=0.24, pm_ask=0.25, k_bid=0.55, k_ask=0.56)   # 30 cents: 43% until February, 107% a year.
+    assert at(ex, FUTURE, FUTURE_YES, FUTURE_NO, 0.30, NOW) is True
     before_game, future = stored(conn)
-    assert (before_game["status"], before_game["quantity"], before_game["pays_at"]) == ("filled", 50, "2026-09-20T20:45:00+00:00")
+    assert (before_game["status"], before_game["quantity"], before_game["pays_at"]) == ("filled", 50, PAYS_AT)
     assert (future["status"], future["quantity"], future["pays_at"], future["cap"]) == ("filled", 50, SEASON_END, None)   # Paper has no cap.
     assert ex.games == {}                   # Both filled evenly, so neither is kept for flattening.
 
 
-class Scoreboard:
-    """
-    A stand in for the scoreboard, which says whether a game is over.
-    """
-
-    def __init__(self, over=False):
-        self.called_over = over
-
-    def over(self, key, now):
-        return self.called_over
-
-
-def test_a_trade_takes_half_the_book_as_far_as_the_cash_goes_until_the_scoreboard_calls_the_game_over(tmp_path, quick):
+def test_a_trade_takes_half_the_book_with_no_cap(tmp_path, quick):
     conn, cash, ex = executor(tmp_path, books(size=5000))
-    ex.scoreboard = Scoreboard()
-    assert at(ex, PAIR, YES, NO, 0.08, NOW) is True and stored(conn)[0]["quantity"] == 2500       # Half the 5,000 shown, with no cap.
-    ex.scoreboard = Scoreboard(over=True)
-    assert at(ex, PAIR, YES, NO, 0.08, NOW) is False                           # The venue has called the game over.
-    # Past its expected end, a game the scoreboard says is not over is traded, and pays no sooner than half an hour on.
-    ex.scoreboard = Scoreboard()
-    assert at(ex, PAIR, YES, NO, 0.08, "2026-09-20T20:40:00+00:00") is True
-    assert stored(conn)[-1]["pays_at"] == "2026-09-20T21:10:00+00:00"
+    assert at(ex, PAIR, YES, NO, 0.08, NOW) is True and stored(conn)[0]["quantity"] == 2500       # Half the 5,000 shown.
 
 
 def test_legs_on_one_venue_share_its_cash(tmp_path, quick):
@@ -343,10 +334,10 @@ def test_scanner_signals_once_per_episode(tmp_path):
     members = [("kalshi", "k", NO_K_FEES), ("polymarket_us", "pm", NO_PM_FEES)]
     database.upsert_contracts(conn, [Contract(venue=v, contract_id=c, market_id=c, event_id="e", series_id=None, sport="nfl", event_title=None,
                                               title="t", outcome="Yes", market_type=None, line=None, rules=None, start_time=KICKOFF,
-                                              close_time="2026-09-20T21:00:00+00:00", fee_info=f) for v, c, f in members], NOW)
-    bets = [Bet(v, c, "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, "yes") for v, c, _ in members]
+                                              close_time=CLOSE, fee_info=f) for v, c, f in members], NOW)
+    bets = [Bet(v, c, "game_winner", 2027, PAIR["game_date"], "CAR", "ATL", "CAR", None, "yes") for v, c, _ in members]
     database.replace_bets(conn, "nfl", bets)
-    database.replace_pairs(conn, "nfl", [Pair(PAIR["label"], "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, bets, [], sport="nfl")], NOW)
+    database.replace_pairs(conn, "nfl", [Pair(PAIR["label"], "game_winner", 2027, PAIR["game_date"], "CAR", "ATL", "CAR", None, bets, [], sport="nfl")], NOW)
     calls = []
     s = scan.Scanner(conn, ("nfl",), lambda m: None,
                      on_signals=[lambda pair, yes, no, edge, size, fee_infos, now: calls.append((pair["label"], round(edge, 2), now)) or True])
@@ -371,10 +362,10 @@ def test_each_executor_is_offered_the_episode_until_it_takes_a_trade(tmp_path):
     members = [("kalshi", "k", NO_K_FEES), ("polymarket_us", "pm", NO_PM_FEES)]
     database.upsert_contracts(conn, [Contract(venue=v, contract_id=c, market_id=c, event_id="e", series_id=None, sport="nfl", event_title=None,
                                               title="t", outcome="Yes", market_type=None, line=None, rules=None, start_time=KICKOFF,
-                                              close_time="2026-09-20T21:00:00+00:00", fee_info=f) for v, c, f in members], NOW)
-    bets = [Bet(v, c, "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, "yes") for v, c, _ in members]
+                                              close_time=CLOSE, fee_info=f) for v, c, f in members], NOW)
+    bets = [Bet(v, c, "game_winner", 2027, PAIR["game_date"], "CAR", "ATL", "CAR", None, "yes") for v, c, _ in members]
     database.replace_bets(conn, "nfl", bets)
-    database.replace_pairs(conn, "nfl", [Pair(PAIR["label"], "game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, bets, [], sport="nfl")], NOW)
+    database.replace_pairs(conn, "nfl", [Pair(PAIR["label"], "game_winner", 2027, PAIR["game_date"], "CAR", "ATL", "CAR", None, bets, [], sport="nfl")], NOW)
     live, paper = [], []
     busy = [True]           # The live executor turns the first moment down, say while its balance has not been read.
     s = scan.Scanner(conn, ("nfl",), lambda m: None, on_signals=[lambda *args: live.append(args[-1]) or not busy[0],

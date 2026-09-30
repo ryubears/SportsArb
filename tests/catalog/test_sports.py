@@ -23,7 +23,6 @@ def test_table_covers_every_sport(name, table):
 
 
 @pytest.mark.parametrize("name, sports", [
-    ("config.LIVE_SPORTS", config.LIVE_SPORTS),
     ("timeutil.CALENDAR_SEASONS", timeutil.CALENDAR_SEASONS),
 ])
 def test_sports_named_apart_are_ones_the_catalog_fetches(name, sports):

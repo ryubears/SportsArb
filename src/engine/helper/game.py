@@ -2,15 +2,13 @@
 Which game a bet is on, when the game is played, and when the bets on it pay out.
 
 Every timing assumption about games lives here, so the recorder, the
-scoreboard, the scanner, and the executor agree on them: when a game is
-expected to end, when its money comes back, how long after kickoff it may
-still be under way, and when its books go stale if they stop changing. How long a game
+scanner, and the executor agree on them: when a game is expected to end,
+when its money comes back, how long after kickoff it may still be under
+way, and when its books go stale if they stop changing. How long a game
 is expected to last depends on the sport, see config.GAME_HOURS: three in
-four of the sport's past games had ended by then. The scoreboard in
-market/scoreboard.py knows when each game under way really ends, and
-falls back on the expected length here when the venue says nothing. Both
-venues settled the first live game, Atlanta at Green Bay, within half an
-hour of its final whistle.
+four of the sport's past games had ended by then. Both venues settled the
+first live game, Atlanta at Green Bay, within half an hour of its final
+whistle.
 """
 
 from common.timeutil import days_between, shift
@@ -53,13 +51,6 @@ def recorded_since(now):
     until then, whatever its contracts' close times say.
     """
     return shift(now, hours=-config.RECORD_HOURS)
-
-
-def in_play(kickoff, now, sport):
-    """
-    Whether a game of the sport that kicked off at kickoff is expected to be being played at now, by its expected length.
-    """
-    return kickoff <= now < expected_end(kickoff, sport)
 
 
 def resolution_time(start_time, close_time, sport):

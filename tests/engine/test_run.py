@@ -112,7 +112,8 @@ def test_a_trading_session_logs_its_settings_when_it_starts(tmp_path, monkeypatc
         await s.close()
     asyncio.run(scenario())
     first = capsys.readouterr().out.splitlines()[0]
-    assert first[9:].startswith("settings: min edge 0.05$ and 50% a year, fill share 0.5, rejects 3%")
+    assert first[9:].startswith("settings: min edge 0.05$, paying 24h or more out and 100% a year, no game once kicked off, fill share 0.5, "
+                                "rejects 3%")
 
 
 def test_a_session_trading_both_modes_keeps_a_desk_for_each_and_offers_live_the_signal_first(tmp_path, monkeypatch, capsys, fake_stream):

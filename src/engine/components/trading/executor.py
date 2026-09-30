@@ -19,19 +19,22 @@ that any reaction to it would have reached us. The scanner offers the edge
 again at the next change or tick, so one that is real is taken then. Once
 it is taken, both legs' orders go out at once.
 
-When the two legs fill unevenly the executor goes flat at once. It either
-sells the excess back on its own venue or buys the missing amount on the
-other venue, whichever the books say leaves more money, and records the
-result with fees. What it cannot flatten stays on a list and is tried
-again on every tick, against the books as they are then, until it is
-flat, the bet pays out, or the settler says its contracts have resolved.
-The list is read back from the trades table when the process starts, so a
-restart does not leave a trade exposed. The settler leaves alone a trade
-while an order to flatten it is in flight.
-Any pair is traded, before its game, during it, or a season's future,
-while its edge is config.MIN_EDGE or more and pays config.MIN_ANNUAL_PCT a
-year or more until the bet pays out, but not once its game is over, as
-the scoreboard says, when its books may linger while the venues settle.
+When the two legs fill unevenly the executor goes flat at once by selling
+the excess back on its own venue, and records the result with fees. A
+sale frees the money at once, where buying the missing amount on the
+other venue, though it may cost less, would tie it up until the bet pays.
+What it cannot sell stays on a list and is tried again on every tick,
+against the books as they are then, until it is flat, the bet pays out,
+or the settler says its contracts have resolved. The list is read back
+from the trades table when the process starts, so a restart does not
+leave a trade exposed. The settler leaves alone a trade while an order to
+flatten it is in flight.
+
+A pair is traded before its game or on a season's future, never once its
+game has kicked off, while its edge is config.MIN_EDGE or more, the bet
+pays out config.MIN_PAYOUT_HOURS or more away, and the edge returns
+config.MIN_ANNUAL_PCT a year or more until then. Near a game and during
+it, faster traders take an edge before our Polymarket US leg lands.
 A trade asks for config.FILL_SHARE of what the books show at that edge,
 the share we expect to get, as far as the cash free on each venue pays
 for, and a live one for no more than config.LIVE_MAX_CAP. Every trade is
@@ -44,7 +47,7 @@ import asyncio
 import dataclasses
 from dataclasses import dataclass
 from common.log import on_failure
-from common.timeutil import epoch, now_iso
+from common.timeutil import epoch, hours_between, now_iso
 from db import database
 from db.models import Ledger, Leg, Trade
 from engine.helper import config, game
@@ -81,13 +84,11 @@ class Executor:
     subclass says how an order is filled, through fill() and sell_back().
     books is a function returning the newest Book of each contract, keyed by (venue, contract_id).
     cash is the money on each venue, with reserve(), release(), and apply().
-    scoreboard says which games are over, see market/scoreboard.py. Without
-    one, a game is over at its expected length.
     """
 
     mode = None     # 'paper' or 'live', set by each subclass. It starts every log line.
 
-    def __init__(self, conn, cash, books, log=print, scoreboard=None, clock=now_iso):
+    def __init__(self, conn, cash, books, log=print, clock=now_iso):
         if cash.mode != self.mode:
             raise ValueError(f"a {self.mode} executor cannot trade {cash.mode} money")
         self.conn = conn
@@ -95,7 +96,6 @@ class Executor:
         self.books = books
         self.clock = clock          # The current time in ISO 8601 UTC, for fills and for how old a book is.
         self.log = log
-        self.scoreboard = scoreboard
         self.games = {}             # Trade id maps to its pair's game date and members, for when its books go stale while it is flattened.
         self.tasks = set()          # Trades in flight, and the retry of exposed ones while it runs.
         self.done = []              # Trades finished since the last summary.
@@ -132,11 +132,10 @@ class Executor:
         kept = self.games.get(trade.id)
         return game.books_age(*kept, self.clock()) if kept else True
 
-    async def fill(self, trade, leg, purpose):
+    async def fill(self, trade, leg):
         """
         Buy leg.quantity contracts of one leg of a trade at no more than
-        leg.limit each, to open the trade or to flatten it, as purpose says.
-        Returns a Fill.
+        leg.limit each, to open the trade. Returns a Fill.
         """
         raise NotImplementedError
 
@@ -145,13 +144,6 @@ class Executor:
         Sell back contracts held through a leg of a trade at no less than
         floor each, where the books said they would sell. Returns a Fill whose
         dollars are the proceeds after fees.
-        """
-        raise NotImplementedError
-
-    def flatten_limit(self, reached):
-        """
-        The limit for an order that buys the missing side of an exposed trade,
-        given the deepest price the books said it would pay.
         """
         raise NotImplementedError
 
@@ -165,37 +157,18 @@ class Executor:
         trade.yes_cost, trade.no_cost = legs[0].cost, legs[1].cost
         trade.status = "failed" if trade.matched == 0 else "partial" if trade.matched < trade.quantity else "filled"
 
-    def sale_value(self, leg, excess, average, aging=True):
+    def sale_ladder(self, leg, excess, aging=True):
         """
-        What selling the excess back on its own venue would bring, from the
-        leg's fresh book, as (ladder, gain): the ladder it would sell into,
-        and the proceeds after fees less what those contracts cost at the
-        average price. The gain is None when there is no fresh book or
-        nothing would sell.
+        The ladder selling the excess back on the leg's own venue would sell
+        into, from its fresh book, or an empty one when there is no fresh
+        book or nothing would sell.
         """
         book = self.fresh_book(leg.key, aging)
         if not book:
-            return [], None
+            return []
         selling = sell_ladder(book, leg.polarity, leg.side)
-        sold, proceeds = sweep(selling, excess, leg.venue, leg.fee_info, config.FILL_SHARE, selling=True)
-        return selling, (proceeds - sold * average if sold else None)
-
-    def purchase_value(self, leg, excess, average, aging=True):
-        """
-        What buying the missing side on the other venue would bring, from
-        the leg's fresh book, as (ladder, affordable, gain): the ladder it
-        would buy from, how many of the excess that venue's cash can pay for,
-        and the gain, a dollar for each pair it completes less what the
-        excess contracts cost at the average price and what the purchase
-        costs with fees. The gain is None when nothing would fill.
-        """
-        book = self.fresh_book(leg.key, aging)
-        if not book:
-            return [], 0, None
-        buying = ladder(book, leg.polarity, leg.side)
-        affordable = min(excess, int(self.cash.available(leg.venue, shard(leg)) // buying[0][0])) if buying else 0
-        bought, cost = sweep(buying, affordable, leg.venue, leg.fee_info, config.FILL_SHARE)
-        return buying, affordable, (bought * (1 - average) - cost if bought else None)
+        sold, _ = sweep(selling, excess, leg.venue, leg.fee_info, config.FILL_SHARE, selling=True)
+        return selling if sold else []
 
     async def sell_excess(self, trade, leg, excess, average, selling):
         """
@@ -210,46 +183,21 @@ class Executor:
         trade.hedge_pnl += fill.dollars - fill.filled * average
         return fill.filled, f"sold back {fill.filled} of {excess} on {leg.venue}"
 
-    async def buy_missing(self, trade, leg, excess, average, buying, affordable):
-        """
-        Buy the missing side on the other venue, up to what its cash can
-        pay for, and record what it cost. Its limit comes from the subclass's
-        flatten_limit(). Returns (contracts bought, note).
-        """
-        limit = self.flatten_limit(reach(buying, affordable, config.FILL_SHARE))
-        self.cash.reserve(leg.venue, affordable * limit, shard(leg))
-        fill = await self.fill(trade, dataclasses.replace(leg, quantity=affordable, limit=limit), "flatten")
-        self.cash.release(leg.venue, affordable * limit, shard(leg))
-        if fill.filled:
-            self.cash.apply(Ledger(fill.ts, leg.venue, -fill.dollars, "buy", trade.id), shard(leg))
-        leg.held += fill.filled
-        leg.cost += fill.dollars
-        trade.hedge_pnl += fill.filled * (1 - average) - fill.dollars
-        trade.matched += fill.filled
-        return fill.filled, f"bought {fill.filled} of {excess} on {leg.venue}"
-
     async def flatten(self, trade, legs):
         """
-        Undo the excess on the leg holding more, by selling it back on its
-        venue or buying the missing amount on the other venue, whichever the
-        books say leaves more money. The chosen order is sent like any other.
-        Returns what was done in words, or None when no fresh book allowed
-        anything or the trade has been set aside.
+        Sell the excess on the leg holding more back on its own venue, sent
+        like any other order. Returns what was done in words, or None when no
+        fresh book would take the sale or the trade has been set aside.
         """
         if trade.id in self.set_aside:
             return None
         long_leg, short_leg = sorted(legs, key=lambda leg: leg.held, reverse=True)
         excess = long_leg.held - short_leg.held
         average = long_leg.cost / long_leg.held         # What each contract the long leg holds cost.
-        aging = self.aging(trade)
-        selling, sale_gain = self.sale_value(long_leg, excess, average, aging)
-        buying, affordable, purchase_gain = self.purchase_value(short_leg, excess, average, aging)
-        if sale_gain is None and purchase_gain is None:
+        selling = self.sale_ladder(long_leg, excess, self.aging(trade))
+        if not selling:
             return None
-        if purchase_gain is None or (sale_gain is not None and sale_gain >= purchase_gain):
-            done, note = await self.sell_excess(trade, long_leg, excess, average, selling)
-        else:
-            done, note = await self.buy_missing(trade, short_leg, excess, average, buying, affordable)
+        done, note = await self.sell_excess(trade, long_leg, excess, average, selling)
         if done < excess:
             note += f", {excess - done} exposed"
         return note
@@ -270,7 +218,7 @@ class Executor:
         """
         Fill both legs, flatten any mismatch, and record the result.
         """
-        fills = await asyncio.gather(*(self.fill(trade, leg, "open") for leg in legs))
+        fills = await asyncio.gather(*(self.fill(trade, leg) for leg in legs))
         for leg, fill in zip(legs, fills):
             self.cash.release(leg.venue, leg.quantity * leg.limit, shard(leg))
             leg.held, leg.cost = fill.filled, fill.dollars
@@ -340,7 +288,7 @@ class Executor:
                 note = await self.flatten(trade, legs)
             finally:
                 self.flattening.discard(trade_id)
-            if not note or note.startswith(("sold back 0", "bought 0")):
+            if not note or note.startswith("sold back 0"):
                 continue
             self.record_holdings(trade, legs)
             left = abs(legs[0].held - legs[1].held)
@@ -379,25 +327,25 @@ class Executor:
         task.add_done_callback(on_failure(self.log, f"{self.mode} trade task"))
         return task
 
-    def open_for_trading(self, pair, members, now):
+    @staticmethod
+    def before_kickoff(pair, members, now):
         """
-        Whether the pair may still be traded: a future, or a game not over, as
-        the scoreboard says, or without one by the game's expected length.
+        Whether the pair is a future, or on a game that has not kicked off. A
+        game none of the members gives the kickoff of is taken as under way.
         """
-        key = game.game_key(pair)
-        if key is None:
+        if game.game_key(pair) is None:
             return True
-        if self.scoreboard:
-            return not self.scoreboard.over(key, now)
         kickoff = game.kickoff(members)
-        return not kickoff or now < game.expected_end(kickoff, pair["sport"])
+        return kickoff is not None and now < kickoff
 
     @staticmethod
     def pays_enough(edge, now, pays_at):
         """
-        Whether an edge returns config.MIN_ANNUAL_PCT a year or more on the capital it ties up, until the bet pays at pays_at.
+        Whether an edge is worth the capital it ties up until the bet pays at
+        pays_at: config.MIN_PAYOUT_HOURS or more away, and returning
+        config.MIN_ANNUAL_PCT a year or more until then.
         """
-        if not pays_at:
+        if not pays_at or hours_between(now, pays_at) < config.MIN_PAYOUT_HOURS:
             return False
         return 100 * edge / (1 - edge) * 365 / game.days_until(now, pays_at) >= config.MIN_ANNUAL_PCT
 
@@ -452,8 +400,8 @@ class Executor:
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """
         Called by the scanner when a pair shows an edge. Sends the two legs
-        when the edge, its return a year, the game not being over, and the
-        balances allow. Returns True when orders were sent, so the scanner
+        when the edge, the game not having kicked off, the time until the bet
+        pays, its return a year, and the balances allow. Returns True when orders were sent, so the scanner
         sends no more for this episode. The scanner's size counts every level
         with a positive edge, while the legs are sized from the levels that
         keep config.MIN_EDGE, see quantity_for(). The cost is reserved here,
@@ -462,7 +410,7 @@ class Executor:
         """
         if edge < config.MIN_EDGE:
             return False
-        if not self.open_for_trading(pair, (yes, no), now):
+        if not self.before_kickoff(pair, (yes, no), now):
             return False
         pays_at = game.pays_at((yes, no), pair["sport"], now)
         if not self.pays_enough(edge, now, pays_at):

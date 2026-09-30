@@ -222,6 +222,33 @@ def balances():
     return dollars, {int(entry["exchange_index"]): float_or_zero(entry["balance"]) for entry in answer.get("balance_breakdown") or []}
 
 
+def move_between_shards(dollars, source, destination):
+    """
+    Move dollars of the account's cash from one exchange shard to another.
+    Kalshi counts the amount in hundredths of a cent. Returns its answer.
+    """
+    return signed_request("POST", "/portfolio/intra_exchange_instance_transfer", {
+        "source": "event_contract", "destination": "event_contract", "amount": round(dollars * 10000),
+        "source_exchange_shard": source, "destination_exchange_shard": destination})
+
+
+def set_shard_split(percents):
+    """
+    Have Kalshi keep the account's cash split across exchange shards by
+    whole percents adding to 100, {shard: percent}, which it rebalances to
+    every 10 seconds, payouts included. Returns its answer.
+    """
+    return signed_request("POST", "/portfolio/target_balance_allocation", {
+        "allocations": [{"exchange_index": shard, "percent": percent} for shard, percent in percents.items()]})
+
+
+def shard_split():
+    """
+    The split across exchange shards Kalshi keeps the account's cash to, as it answers.
+    """
+    return signed_request("GET", "/portfolio/target_balance_allocation")
+
+
 # STREAMING
 
 def update_frame(message_id, sid, tickers, action):

@@ -12,9 +12,6 @@ venues, trading/ makes the trades, and money/ keeps the cash.
 - The scanner, from market/scan.py, prices each pair a changed book
   belongs to, stores every episode of positive edge in the opportunities
   table, and offers each episode to the desks.
-- The scoreboard, from market/scoreboard.py, asks Polymarket US how the
-  games under way stand, so trading on a game stops at its real final
-  whistle.
 - The attestation watch, from trading/notify.py, which emails a human
   before the Kalshi key's location attestation lapses.
 - A Desk for each mode the run trades in, with its own money, executor,
@@ -44,7 +41,7 @@ Run with:
     python3 -m engine.run --sport nfl --no-trade
     python3 -m engine.run --sport nfl --execute live
     python3 -m engine.run --sport nfl --execute both
-    python3 -m engine.run --sport nfl --set min_edge=0.03 --set paper_max_cap=100
+    python3 -m engine.run --sport nfl --set min_edge=0.03 --set min_annual_pct=50
 
 For a long run on a laptop, stop the Mac from sleeping while it runs:
     caffeinate -i -s python3 -m engine.run --sport nfl
@@ -64,7 +61,6 @@ from common.timeutil import now_iso
 from db import database
 from engine.components.market import scan
 from engine.components.market.record import Recorder, load_targets
-from engine.components.market.scoreboard import Scoreboard
 from engine.components.market.streams import Streams
 from engine.components.money import settle
 from engine.components.money.live import LiveBalances
@@ -116,7 +112,8 @@ def trading_settings():
     """
     c = config
     latency = ", ".join(f"{venue} {median}ms" for venue, (median, _) in c.PAPER_LATENCY_MS.items())
-    return (f"settings: min edge {c.MIN_EDGE:.2f}$ and {c.MIN_ANNUAL_PCT}% a year, fill share {c.FILL_SHARE}, "
+    return (f"settings: min edge {c.MIN_EDGE:.2f}$, paying {c.MIN_PAYOUT_HOURS}h or more out and {c.MIN_ANNUAL_PCT}% a year, "
+            f"no game once kicked off, fill share {c.FILL_SHARE}, "
             f"rejects {c.PAPER_REJECT_PROBABILITY:.0%}, latency {latency}, expected game "
             f"{', '.join(f'{sport} {hours}h' for sport, hours in c.GAME_HOURS.items())} + settle {c.SETTLE_HOURS}h, "
             f"start balance {c.PAPER_START_BALANCE:,.0f}$; {book_waits()}")
@@ -128,7 +125,7 @@ def live_settings():
     """
     c = config
     return (f"LIVE TRADING with real money: at most {c.LIVE_MAX_CAP} contracts a trade, balances read every "
-            f"{c.LIVE_BALANCE_SECONDS}s, email under {c.LIVE_LOW_CASH:,.2f}$ on a venue; halt at {c.LIVE_UNKNOWN_LIMIT} "
+            f"{c.LIVE_BALANCE_SECONDS}s, email under {c.LIVE_LOW_CASH:,.2f}$ on a venue or shard; halt at {c.LIVE_UNKNOWN_LIMIT} "
             f"unknown outcomes in {c.LIVE_ORDER_WINDOW} orders, {c.LIVE_REJECT_LIMIT} refusals in a row, or a loss over "
             f"{c.LIVE_MAX_LOSS_SHARE:.0%} in {c.LIVE_RESULT_HOURS}h; {book_waits()}")
 
@@ -137,18 +134,17 @@ class Desk:
     """
     One mode of trading, paper or live: its executor, the money it trades,
     and the settler that pays its trades out. books is a function returning
-    the recorder's newest books, and scoreboard the Scoreboard that says
-    which games are over.
+    the recorder's newest books.
     """
 
-    def __init__(self, mode, conn, books, notifier, scoreboard):
+    def __init__(self, mode, conn, books, notifier):
         self.mode = mode
         if mode == "paper":
             self.cash = PaperBalances(conn)
-            self.executor = PaperExecutor(conn, self.cash, books, log, scoreboard=scoreboard)
+            self.executor = PaperExecutor(conn, self.cash, books, log)
         elif mode == "live":
             self.cash = LiveBalances(log)
-            self.executor = LiveExecutor(conn, self.cash, books, log, scoreboard=scoreboard, notifier=notifier)
+            self.executor = LiveExecutor(conn, self.cash, books, log, notifier=notifier)
         else:
             raise ValueError(f"unknown mode {mode!r}")
         self.settler = settle.Settler(conn, self.cash, log, executor=self.executor)
@@ -172,7 +168,7 @@ class Desk:
 class Session:
     """
     The recorder and everything that runs on its books, wired together:
-    the venue connections, the scanner, the scoreboard, and a Desk for each
+    the venue connections, the scanner, and a Desk for each
     mode it trades in. Without a scanner only the books are recorded, and
     without a desk the scanner only stores what it sees.
     """
@@ -182,9 +178,8 @@ class Session:
         self.sports = sports
         self.notifier = notify.Notifier(conn, log)
         self.attestation = notify.AttestationWatch(conn, self.notifier, log)
-        self.scoreboard = Scoreboard(conn, sports, log) if with_scanner and executors else None
         # The executors trade against the recorder's books, which exist once the recorder does, below.
-        self.desks = [Desk(mode, conn, lambda: self.recorder.books, self.notifier, self.scoreboard) for mode in executors] if with_scanner else []
+        self.desks = [Desk(mode, conn, lambda: self.recorder.books, self.notifier) for mode in executors] if with_scanner else []
         self.scanner = scan.Scanner(conn, sports, log, [d.executor.signal for d in self.desks]) if with_scanner else None
         self.recorder = Recorder(conn, self.scanner)
         self.streams = Streams(self.recorder)
@@ -227,8 +222,6 @@ class Session:
         now = now_iso()
         if self.scanner:
             self.scanner.tick(self.recorder.books, now)
-        if self.scoreboard:
-            self.scoreboard.tick(now, time.time())
         self.attestation.tick(now, time.time())
         for desk in self.desks:
             desk.tick(now, time.time())
@@ -241,13 +234,11 @@ class Session:
 
     def refreshed(self):
         """
-        After a catalog refresh, apply the new targets to the connections, the scanner, and the scoreboard.
+        After a catalog refresh, apply the new targets to the connections and the scanner.
         """
         log(f"subscriptions {self.streams.update(load_targets(self.conn, self.sports))}")
         if self.scanner:
             self.scanner.reload()
-        if self.scoreboard:
-            self.scoreboard.reload()
 
     async def close(self):
         """

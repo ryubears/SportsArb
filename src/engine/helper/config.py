@@ -16,18 +16,16 @@ Override one for a run with --set, for example:
 
 MIN_EDGE = 0.05             # Net dollars per contract at the top before orders are sent, and the floor for the deeper levels they sweep.
                             # In-game, 2 to 3 cent edges lost money after hedging.
-MIN_ANNUAL_PCT = 50         # The least an edge must return a year on the capital it ties up until the bet pays, before or during a
-                            # game or on a future. A 5 cent edge clears it if it pays within about 3.5 months.
+MIN_PAYOUT_HOURS = 24       # The soonest a bet may pay out and still be traded, so no game is traded once it is near or under way.
+                            # There the fast traders take an edge before our Polymarket US leg lands, and the leg is missed.
+MIN_ANNUAL_PCT = 100        # The least an edge must return a year on the capital it ties up until the bet pays, before a game or on
+                            # a future. A 5 cent edge clears it if it pays within 19 days, 10 cents within 40, and 20 within 91.
 FILL_SHARE = 0.5            # The share of visible size at a level a trade asks for. Other takers get the rest.
 # A leg on a venue here trades only once its book is current: newer, by the venues' own clocks, than the other leg's last
 # change, or else that change is this many seconds old, time for any reaction to it on this venue to reach us. Polymarket US
 # books reached us 85 ms after the venue changed them at the median, 160 at the 90th percentile, so a price that moved on
 # Kalshi sat next to Polymarket US's old one, and on 2026-09-28 only 4 of 72 orders there filled.
 CONFIRM_SECONDS = {"polymarket_us": 0.3}
-LIVE_SPORTS = ("nfl", "ncaaf", "mlb")  # The sports live trading takes signals on. Kalshi keeps baseball on exchange shard 3, whose
-                                        # cash is its own, so live baseball trades only with cash moved to that shard. Hockey is on
-                                        # shard 0 with football, and basketball on 3 with baseball, and both trade on paper only
-                                        # until their paper trades have settled.
 
 # PAPER, trading/paper.py and money/paper.py. How paper orders fill, and the paper money.
 
@@ -44,8 +42,11 @@ PAPER_START_BALANCE = 10000.0   # Paper dollars per venue at the start.
 LIVE_MAX_CAP = 5            # The most contracts one live trade may hold, whatever the books and the cash would allow.
 LIVE_BALANCE_SECONDS = 15   # Between readings of the venues' balances. Under http.IDLE_SECONDS, so each reading also keeps the
                             # venue's kept connection open for the next order: one opened afresh took Polymarket US 11 ms longer.
-LIVE_LOW_CASH = 5.0         # Dollars on a live venue under which a human is emailed, once until it is back over. Trades there go on as
-                            # far as the cash pays for.
+LIVE_LOW_CASH = 5.0         # Dollars on a live venue, or on one of its shards in LIVE_SHARDS, under which a human is emailed, once until
+                            # it is back over. Trades there go on as far as the cash pays for.
+LIVE_SHARDS = {"kalshi": (0, 3)}    # The exchange shards a venue splits its cash by that live trading keeps cash on, each with its own
+                                    # low cash email. Kalshi trades football and hockey on shard 0 and baseball and basketball on 3,
+                                    # and tools/kalshi_shards.py splits its cash evenly between them.
 LIVE_ORDER_WINDOW = 20      # The newest orders the unknown outcome brake looks at.
 LIVE_UNKNOWN_LIMIT = 3      # Orders with an unknown outcome among the newest LIVE_ORDER_WINDOW at which live trading halts.
 LIVE_REJECT_LIMIT = 3       # Orders one venue refuses in a row at which live trading halts.
@@ -54,7 +55,7 @@ LIVE_MAX_LOSS_SHARE = 0.10  # Net loss of the trades decided in the window, as a
 KEY_CHECK_HOURS = 1         # Between readings of when the Kalshi key's location attestation lapses, see notify.AttestationWatch.
 KEY_WARN_HOURS = 48         # How long before it lapses the email goes out, so it comes before the day it does.
 
-# GAMES, game.py, which the recorder, the scoreboard, the scanner, and the executor time games by. Game
+# GAMES, game.py, which the recorder, the scanner, and the executor time games by. Game
 # lengths are from the games Polymarket US has recorded as finished, the settling time from the first live game, Atlanta
 # at Green Bay.
 
@@ -63,8 +64,8 @@ GAME_HOURS = {              # How long a game is expected to last, kickoff to fi
     "ncaaf": 3.75,          # of 3.48, three in four by 3.71. 2,399 baseball games had a median of 2.83, three in four by 3.09,
     "mlb": 3.25,            # 475 hockey games a median of 2.75, three in four by 2.88, and 418 basketball games a median of 2.53,
     "nhl": 3.0,             # three in four by 2.71, and all three get more for playoff games, which run longer: three in four of 79
-    "nba": 3.0,             # hockey playoff games ended by 3.17, of 96 basketball ones by 2.87. Trading follows the scoreboard, to
-}                           # the real end of each game, so this is the end only when Polymarket US says nothing.
+    "nba": 3.0,             # hockey playoff games ended by 3.17, of 96 basketball ones by 2.87. A game's bets are taken to pay
+}                           # SETTLE_HOURS after it.
 SETTLE_HOURS = 0.5          # Final whistle to the venues settling. A game's money is back SETTLE_HOURS after it ends.
 RECORD_HOURS = 5            # Kickoff to when a game's contracts stop being recorded, whatever their close time says. The kickoff
                             # is Polymarket US's, since Kalshi gives none, and holds for both venues' contracts.
@@ -78,16 +79,14 @@ GAME_WINDOW_DAYS = 7        # Games further out than this are not recorded.
 # SCANNING, market/scan.py and pricing.py
 
 MAX_BOOK_AGE = 60           # Seconds. A book older than this is neither priced nor traded, see pricing.fresh(): its market may have closed.
-TARGET_ANNUAL_PCT = 10      # The return an opportunity must beat to be worth the risk.
 LOG_PROFIT_DOLLARS = 10     # Live episodes worth at least this at the peak are logged as they end.
 
-# TIMERS, run.py, money/settle.py, and market/scoreboard.py
+# TIMERS, run.py and money/settle.py
 
 TICK_SECONDS = 1.0          # How often the session ticks, pricing open episodes again and running each desk.
 STATUS_SECONDS = 60         # How often a status line is logged.
 SUMMARY_SECONDS = 600       # How often each component logs its summary.
 SETTLE_CHECK_SECONDS = 30   # Between passes over the open trades whose game has started.
-SCOREBOARD_SECONDS = 30     # Between asking Polymarket US how the games under way stand.
 
 
 def override(assignments):
