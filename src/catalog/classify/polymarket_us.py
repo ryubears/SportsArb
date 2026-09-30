@@ -23,9 +23,10 @@ Polymarket US's slug layout.
 
 import math
 import re
-from catalog.classify.teams import ALIASES, player_key, team_from_code
+from catalog.classify.teams import ALIASES, player_key, team_from_code, venue_codes
 from collections import defaultdict
 from common.timeutil import eastern_date, season_from_date
+from common.venues import VENUES
 from db.models import Bet
 
 EVENT_PREFIX = {"nfl": "nfl", "ncaaf": "cfb", "mlb": "mlb", "nhl": "nhl", "nba": "nba"}     # How each sport's event slugs start.
@@ -128,54 +129,6 @@ def team(code, sport):
     return team_from_code(code, sport, "polymarket_us")
 
 
-def classify(row):
-    """
-    The Bet a Polymarket US contract row describes, or None when it is not one we trade.
-    """
-    base = dict(venue=row["venue"], contract_id=row["contract_id"])
-    sport = row["sport"]
-    if row["market_type"] == "futures":
-        # Before the games, since a future's slug can read like one: 'nfl-wins-ou-2027-01-10'.
-        prefixed = sport in EVENT_PREFIX and row["event_id"].startswith(EVENT_PREFIX[sport] + "-")
-        return classify_future(row, sport, base) if prefixed else None
-    m = GAME_EVENTS[sport].match(row["event_id"]) if sport in GAME_EVENTS else None
-    if m:
-        away, home = team(m.group(1), sport), team(m.group(2), sport)
-        kind = GAME_KINDS.get(row["market_type"]) or PLAYER_KINDS.get(row["market_type"])
-        if not (away and home and kind and row["start_time"]):
-            return None
-        game_date = eastern_date(row["start_time"])
-        common = dict(season=season_from_date(game_date, sport), game_date=game_date, team_a=away, team_b=home, **base)
-        if kind in PLAYER_KINDS.values():
-            # 'At least N' pays on N or more, which is strictly more than N minus a half.
-            name = PLAYER_TITLE.match(row["title"] or "")
-            if not name:
-                return None
-            if kind == "player_first_touchdown":
-                return Bet(kind=kind, subject=player_key(name.group(1)), line=None, polarity="yes", **common)
-            if row["line"] is None:
-                return None
-            return Bet(kind=kind, subject=player_key(name.group(1)), line=row["line"] - 0.5, polarity="yes", **common)
-        if kind == "game_winner":
-            return Bet(kind=kind, subject=away, line=None, polarity="yes", **common)
-        if row["line"] is None:
-            return None
-        if kind == "team_total":
-            # Yes pays when the team scores more than the line.
-            code = TEAM_TOTAL.search(row["contract_id"])
-            subject = team(code.group(1), sport) if code else None
-            return Bet(kind=kind, subject=subject, line=row["line"], polarity="yes", **common) if subject in (away, home) else None
-        if kind == "spread":
-            # Yes pays when the away team covers the line.
-            # A negative line means the away team wins by more than it.
-            # A positive line means the home team fails to win by more than it.
-            if row["line"] < 0:
-                return Bet(kind=kind, subject=away, line=-row["line"], polarity="yes", **common)
-            return Bet(kind=kind, subject=home, line=row["line"], polarity="no", **common)
-        return Bet(kind=kind, subject=None, line=row["line"], polarity="yes", **common)
-    return None
-
-
 def letters(text):
     """
     Text reduced to its lower case letters and digits, to compare names however they are spelled out.
@@ -196,9 +149,9 @@ GLUED_TO_TEAM = {sport: {glued_code(entry["names"][0]): code for code, entry in 
 
 def team_words(code, entry):
     """
-    What a title may start with to name a team: its codes and the first word of each of its names.
+    What a title may start with to name a team: its codes on either venue and the first word of each of its names.
     """
-    codes = entry["codes"] if isinstance(entry["codes"], list) else [c for cs in entry["codes"].values() for c in cs]
+    codes = [c for venue in VENUES for c in venue_codes(entry, venue)]
     return {letters(w) for w in [code, *codes, *(name.split()[0] for name in entry["names"] if name.split())]}
 
 
@@ -279,6 +232,54 @@ def classify_future(row, sport, base):
     subject = future_team(row, sport) if shape in TEAM_FUTURES else None
     if subject:
         return Bet(kind=TEAM_FUTURES[shape], team_a=None, team_b=None, subject=subject, line=None, **future)
+    return None
+
+
+def classify(row):
+    """
+    The Bet a Polymarket US contract row describes, or None when it is not one we trade.
+    """
+    base = dict(venue=row["venue"], contract_id=row["contract_id"])
+    sport = row["sport"]
+    if row["market_type"] == "futures":
+        # Before the games, since a future's slug can read like one: 'nfl-wins-ou-2027-01-10'.
+        prefixed = sport in EVENT_PREFIX and row["event_id"].startswith(EVENT_PREFIX[sport] + "-")
+        return classify_future(row, sport, base) if prefixed else None
+    m = GAME_EVENTS[sport].match(row["event_id"]) if sport in GAME_EVENTS else None
+    if m:
+        away, home = team(m.group(1), sport), team(m.group(2), sport)
+        kind = GAME_KINDS.get(row["market_type"]) or PLAYER_KINDS.get(row["market_type"])
+        if not (away and home and kind and row["start_time"]):
+            return None
+        game_date = eastern_date(row["start_time"])
+        common = dict(season=season_from_date(game_date, sport), game_date=game_date, team_a=away, team_b=home, **base)
+        if kind in PLAYER_KINDS.values():
+            # 'At least N' pays on N or more, which is strictly more than N minus a half.
+            name = PLAYER_TITLE.match(row["title"] or "")
+            if not name:
+                return None
+            if kind == "player_first_touchdown":
+                return Bet(kind=kind, subject=player_key(name.group(1)), line=None, polarity="yes", **common)
+            if row["line"] is None:
+                return None
+            return Bet(kind=kind, subject=player_key(name.group(1)), line=row["line"] - 0.5, polarity="yes", **common)
+        if kind == "game_winner":
+            return Bet(kind=kind, subject=away, line=None, polarity="yes", **common)
+        if row["line"] is None:
+            return None
+        if kind == "team_total":
+            # Yes pays when the team scores more than the line.
+            code = TEAM_TOTAL.search(row["contract_id"])
+            subject = team(code.group(1), sport) if code else None
+            return Bet(kind=kind, subject=subject, line=row["line"], polarity="yes", **common) if subject in (away, home) else None
+        if kind == "spread":
+            # Yes pays when the away team covers the line.
+            # A negative line means the away team wins by more than it.
+            # A positive line means the home team fails to win by more than it.
+            if row["line"] < 0:
+                return Bet(kind=kind, subject=away, line=-row["line"], polarity="yes", **common)
+            return Bet(kind=kind, subject=home, line=row["line"], polarity="no", **common)
+        return Bet(kind=kind, subject=None, line=row["line"], polarity="yes", **common)
     return None
 
 

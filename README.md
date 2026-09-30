@@ -20,11 +20,11 @@ real ones.
 Everything lives in `src/`, in two programs.
 
 **The catalog** (`src/catalog`) works out what can be traded. It fetches
-the open NFL, college football, MLB, NHL, and NBA game markets from both
-venues, restates each one as a `Bet` in venue neutral terms, and pairs up
-the bets both venues list. The pairs go into the database. You can run it
-on its own (`python3 -m catalog.pipeline`), and the live process reruns it
-every hour.
+the open NFL, college football, MLB, NHL, and NBA game markets and futures
+from both venues, restates each one as a `Bet` in venue neutral terms, and
+pairs up the bets both venues list. The pairs go into the database. You can
+run it on its own (`python3 -m catalog.pipeline`), and the live process
+reruns it every hour.
 
 **The live process** (`src/engine/run.py`) trades the pairs. It follows
 every paired contract's order book, prices each pair as its books change,
@@ -233,19 +233,19 @@ and writes.
 takes only those classified: the game winner, spread, and total,
 baseball's, hockey's, and basketball's team totals, and player props: the
 NFL's and MLB's, the NHL's goals and points, and the NBA's points,
-rebounds, assists, threes, and blocks. Kalshi is read through its public
-REST catalog, paged under the rate limit, and each series brings the
-exchange shard its markets trade on. Polymarket US is read through its
-gateway, one call per tag, deduplicated across tags, baseball through the
-`mlb` tag, since `baseball` brings Korean and Japanese league games too. An
-event there is a game, whose start time is its kickoff, when it has a game
-id, the venue's own or Sportradar's, which NHL preseason games and many
-small college games carry alone. A future's start time is left out.
+rebounds, assists, threes, and blocks, and each sport's futures. Kalshi is
+read through its public REST catalog, paged under the rate limit, and each
+series brings the exchange shard its markets trade on. Polymarket US is
+read through its gateway, one call per tag, deduplicated across tags,
+baseball through the `mlb` tag, since `baseball` brings Korean and Japanese
+league games too. An event there is a game, whose start time is its
+kickoff, when it has a game id, the venue's own or Sportradar's, which NHL
+preseason games and many small college games carry alone. A future's start
+time is left out.
 
 **classify/** turns each contract into a `Bet`, a venue neutral statement
 of what the contract is about: kind, season, game date, the two teams, a
-subject, and a line. Only games are read, since only games are traded, so
-futures are left out. Each venue has its own parser, since the two describe
+subject, and a line. Each venue has its own parser, since the two describe
 the same thing very differently. Kalshi encodes the game in the ticker,
 `KXNFLGAME-26SEP24ATLGB-GB`, and the prop in a series code and a title like
 *Player: 100+ receiving yards*. Polymarket US encodes it in a slug and a
@@ -272,7 +272,16 @@ the year it ends, a baseball season for the year it is played. Player names
 are normalized to a key that ignores accents, punctuation, and suffixes, so
 Kalshi's *Ronald Acuña Jr.* is Polymarket US's *Ronald Acuna*, and lines
 are made strict, so *100+* on one venue and *over 99.5* on the other become
-the same bet. Contracts no parser understands are counted and left out.
+the same bet. Futures, bets on a season rather than a game, are read too:
+champions, conference and division winners, top seeds, playoff places,
+awards, and season win and point totals. Kalshi gives each kind a series of
+its own, and Polymarket US tells them apart by the shape of the event slug,
+`nfl-afceast-D-w` being a division winner. The venues number seasons
+differently, so a future's season is the one it settles in. Polymarket US's
+futures do not always use its games' team codes, gluing city and nickname,
+`bufbil`, or borrowing Kalshi's, `gsw`, so a future's team is the code
+whose team its market title could name. Contracts no parser understands are
+counted and left out.
 
 **match.py** groups a sport's bets whose identity agrees into a `Pair`,
 whose label starts with the sport, for example `nfl spread 2026-09-20
@@ -287,7 +296,10 @@ Kalshi after two days while Polymarket US waits up to two weeks for it.
 Hockey's rules agree: both venues count overtime, and a shootout as one
 goal for its winner in spreads and totals, but not in a player's goals.
 Basketball's postponed games part as baseball's do: Kalshi settles at a
-fair price after 48 hours, while Polymarket US waits up to two weeks.
+fair price after 48 hours, while Polymarket US waits up to two weeks. A
+future's label names its season in place of the game, `nfl champion 2027
+KC`, and an award's pair notes that Polymarket US divides the dollar among
+players who share the award, where Kalshi's rules do not always say.
 
 **pipeline.py** runs fetch, classify, and match in one call. The live
 process runs it every hour in a child process, so new games and props
@@ -307,17 +319,18 @@ whole catalog on one connection, on the hosts Kalshi dedicates to API
 traders, `external-api`, where a signed call took 17 ms against 27 on the
 old host. It also reads the cash on each exchange shard, and when the key's
 location attestation lapses, past which Kalshi refuses the key for sports
-markets. **polymarket_us.py** signs with Ed25519 and subscribes in requests
-of up to 100 slugs, each slug to both the book and the trade feed. The feed
-takes ten requests on a connection, so a connection carries 500 markets,
-and has no unsubscribe, and every catalog refresh that adds contracts
-spends more, however few it adds. So new contracts go to a connection with
-requests left, a new connection opens when none has any, and contracts a
-connection refuses anyway, as one request too many, move to another.
-Updates are not batched, since batching held our view of the books behind
-the venue's. Both clients also report how a contract resolved, which the
-settler uses, and carry the live trading calls: the account's balance, and
-an immediate or cancel limit order whose answer they turn into an `Answer`,
+markets. **polymarket_us.py** signs with Ed25519 and subscribes to books in
+requests of up to 100 slugs. The feed takes ten requests on a connection,
+so a connection carries 1,000 markets, and has no unsubscribe, and every
+catalog refresh that adds contracts spends more, however few it adds. So
+new contracts go to a connection with requests left, a new connection opens
+when none has any, and contracts a connection refuses anyway, as one
+request too many, move to another. Updates are not batched, since batching
+held our view of the books behind the venue's. Its trade feed was dropped
+on September 30, since trades came no sooner than the book that showed
+them. Both clients also report how a contract resolved, which the settler
+uses, and carry the live trading calls: the account's balance, and an
+immediate or cancel limit order whose answer they turn into an `Answer`,
 the same for both venues. Polymarket US prices every order on the long
 side, so a short side order at p is sent at 1 - p, and when its answer does
 not say how an order ended, the order itself is looked up, since a returned
@@ -382,7 +395,13 @@ open the scanner offers it to each executor on every update until that
 executor takes a trade, and then not again: paper orders take nothing out
 of the books they fill against, so a second trade on the same books would
 count the same contracts twice. The live executor is offered it first. The
-edge coming back after it has gone is a new episode.
+edge coming back after it has gone is a new episode. An episode also keeps
+its longest stretch at `MIN_EDGE` or more, and the contracts that stayed
+fillable through all of it, which is what an order sent any time in the
+stretch could have had. A book goes stale after a minute only once its game
+may have started: a future's markets, and a game's before kickoff, can rest
+unchanged for hours while they are open, so their books are priced however
+old they are.
 
 **scoreboard.py** says which games are being played. The books do not say
 when a game ends, and games run long or short: three in four NFL games end
@@ -422,16 +441,16 @@ settler settles it. A restart takes back from the trades table whatever is
 still exposed, so a crash or a deploy does not leave it unhedged. A live
 order that flattens is limited to the deepest price the books said it would
 reach, so a book that moved leaves the rest for the next tick rather than
-filling far from its price. Orders and flattening, like the scanner, only
-use a book that has changed within the last minute (`pricing.fresh`), since
-a market that has closed may stop changing rather than empty its book, and
-its last book cannot be traded. Signals need a net edge of at least five
-cents per contract, and only games being played are traded, so the money
-comes back the same day. New trades leave a floor of cash untouched on each
-venue, $500 on paper and $5 live, so the money is never run down to nothing
-and flattening, which may use it, still can; a venue under its floor makes
-new trades wait until more arrives. Every trade is stored as soon as it is
-sent and updated when it is done.
+filling far from its price. Orders and flattening only use a book that has
+changed within the last minute (`pricing.fresh`), as the scanner does once
+a game has started, since a market that has closed may stop changing rather
+than empty its book, and its last book cannot be traded. Signals need a net
+edge of at least five cents per contract, and only games being played are
+traded, so the money comes back the same day. New trades leave a floor of
+cash untouched on each venue, $500 on paper and $5 live, so the money is
+never run down to nothing and flattening, which may use it, still can; a
+venue under its floor makes new trades wait until more arrives. Every trade
+is stored as soon as it is sent and updated when it is done.
 
 A leg on Polymarket US trades only on a current book. That venue's books
 reached us about 85 ms after it changed them at the median, 160 at the
@@ -604,13 +623,15 @@ to move where, and again each day while they stay apart.
 ### Tools
 
 `src/tools/summary.py` prints a report from the database: row counts, pairs
-by sport and kind, feed drops, opportunities by sport and kind with the
-largest that beat a 10% annual return, and for paper and live apart the
-trades by outcome, the trades by sport and kind, and the settled legs by
-venue, then the paper balances with any transfer in transit, the real
-orders sent by venue and what came back, and the live balances read from
-the venues now, with what open live trades hold on each. `--hours` sets
-the window, and `--no-live` leaves out the live balances.
+by sport and kind, feed drops, opportunities during games and apart from
+them, before games and on futures, each by sport and kind with the largest
+that beat a 10% annual return and those whose edge stayed at `MIN_EDGE` or
+more for over a second, and for paper and live apart the trades by outcome,
+the trades by sport and kind, and the settled legs by venue, then the paper
+balances with any transfer in transit, the real orders sent by venue and
+what came back, and the live balances read from the venues now, with what
+open live trades hold on each. `--hours` sets the window, and `--no-live`
+leaves out the live balances.
 
 `src/tools/live_check.py` reads both venues' balances with the keys in
 `data/` and says when the Kalshi key's location attestation lapses, and
@@ -733,16 +754,16 @@ the edge floor instead of only the top level, and a level too small for a
 whole contract no longer ends a ladder walk, which is what had turned
 most of the one-sided positions into "no book to flatten".
 
-**The first real orders.** On September 28, the first game traded with
-real money, only 4 of the 72 orders sent to Polymarket US filled, while
-Kalshi's filled 50 times. Polymarket US's books reached us about 85 ms
-after the venue changed them at the median, 160 at the 90th percentile,
-and Kalshi's in about 12, so after a score an edge often paired Kalshi's
-new price with Polymarket US's old one, already gone. Since then the
-Polymarket US feed is no longer batched, its trade feed brings each trade
-about 30 ms before the book that shows it, a Polymarket US leg waits for
-a current book, and Kalshi is reached on the hosts it dedicates to API
-traders.
+**The first real orders.** On September 28, the first game traded with real
+money, only 4 of the 72 orders sent to Polymarket US filled, while Kalshi's
+filled 50 times. Polymarket US's books reached us about 85 ms after the
+venue changed them at the median, 160 at the 90th percentile, and Kalshi's
+in about 12, so after a score an edge often paired Kalshi's new price with
+Polymarket US's old one, already gone. Since then the Polymarket US feed is
+no longer batched, a Polymarket US leg waits for a current book, and Kalshi
+is reached on the hosts it dedicates to API traders. A trade feed, tried
+for a day, was dropped, since trades came no sooner than the book that
+showed them.
 
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.

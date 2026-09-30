@@ -3,7 +3,6 @@ Tests for the shared stream loop, driven by a scripted fake connection.
 """
 
 import asyncio
-import pytest
 from api import bookstream
 
 

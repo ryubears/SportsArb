@@ -275,6 +275,13 @@ class PolymarketUSBookStream(BookStream):
         self.remove(slugs)
         self.on_refused(slugs)
 
+    def show(self, slug, sent):
+        """
+        Pass a market's book on, its best self.depth levels a side, with the venue's time for it.
+        """
+        book = self.books[slug]
+        self.on_book(slug, book["bids"][:self.depth], book["asks"][:self.depth], sent)
+
     def handle(self, raw):
         m = json.loads(raw)
         data = m.get("marketData")
@@ -293,13 +300,6 @@ class PolymarketUSBookStream(BookStream):
         self.show(slug, at if slug in self.seen else None)
         self.seen.add(slug)
         return True
-
-    def show(self, slug, sent):
-        """
-        Pass a market's book on, its best self.depth levels a side, with the venue's time for it.
-        """
-        book = self.books[slug]
-        self.on_book(slug, book["bids"][:self.depth], book["asks"][:self.depth], sent)
 
 
 # TRADING
