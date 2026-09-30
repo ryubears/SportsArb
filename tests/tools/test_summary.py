@@ -82,8 +82,9 @@ def test_live_game_episodes_are_shown_apart_from_the_rest_with_those_at_the_mini
             "9.9% on capital, 30.1% a year, held 120.0 days on average") in out
     assert table(out, "before game/futures opportunities at 5c+, largest, last 12 hours") == [
         ["the", "bet", "t", "9.0", "3,600.0", "40.0", "36", "3.60", "9.9", "30.1", "120.0"]]
-    # 30.1% a year is under the 100% the rules ask, so none is within them.
-    assert "before game/futures opportunities within the rules: none in the last 12 hours" in out
+    # 30.1% a year clears the 30% the rules ask, so the future is within them too.
+    assert ("before game/futures opportunities within the rules: 1 episodes in the last 12 hours could have taken 36$ and locked in "
+            "3.60$, 9.9% on capital, 30.1% a year, held 120.0 days on average") in out
     assert "Live game opportunities are not traded: a game is traded only before it kicks off." in out
 
 
@@ -98,7 +99,7 @@ def test_before_game_episodes_within_the_rules_pay_a_day_or_more_out_and_enough_
         database.insert_opportunities(conn, [
             episode("2026-09-27T13:00:00+00:00", 2, 0.06, 100),       # 6 cents paying in two days, 1,165% a year.
             episode("2026-09-27T14:00:00+00:00", 0.5, 0.10, 100),     # Pays out in 12 hours, too soon.
-            episode("2026-09-27T15:00:00+00:00", 60, 0.10, 100)])     # 10 cents over 60 days, 68% a year, too little.
+            episode("2026-09-27T15:00:00+00:00", 150, 0.10, 100)])    # 10 cents over 150 days, 27% a year, too little.
     out = report(tmp_path, monkeypatch, capsys, fill)
     assert "before game/futures opportunities at 5c+: 3 episodes" in out
     assert ("before game/futures opportunities within the rules: 1 episodes in the last 12 hours could have taken 94$ and locked in "

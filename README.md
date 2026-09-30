@@ -404,9 +404,9 @@ future, and never a game once it has kicked off: near a game and during
 it, faster traders take an edge before our Polymarket US order lands, and
 the leg is missed. A signal needs a net edge of at least five cents per
 contract (`MIN_EDGE`), a payout at least 24 hours away
-(`MIN_PAYOUT_HOURS`), and a return of at least 100% a year on the money it
+(`MIN_PAYOUT_HOURS`), and a return of at least 30% a year on the money it
 ties up until then (`MIN_ANNUAL_PCT`). Five cents clears that for a bet
-paying within 19 days, ten cents within 40, twenty within 91. One limit
+paying within 64 days, ten cents within 135, twenty within 304. One limit
 order is sent per leg, both at once. Both ladders are walked together and
 each leg's limit is set at the deepest level that still leaves the minimum
 edge, so an order sweeps every level above the floor rather than only the
@@ -694,9 +694,11 @@ the bot looks for edges that last and pay enough for the time their money
 is tied up, which faster traders tend to leave alone. Futures came back
 into the catalog, every episode records how long its edge stayed at five
 cents or more, and the executors stopped trading games in play. They take
-only bets paying a day or more away that return 100% a year, sell back a
-missed leg rather than buy the other side, and size by the books and the
-cash alone.
+only bets paying a day or more away that return enough a year, at first
+100% and from October 1 30%, sell back a missed leg rather than buy the
+other side, and size by the books and the cash alone. At 100% a year one
+edge in the first 24 hours of live trading qualified, and it lasted an
+instant.
 
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.

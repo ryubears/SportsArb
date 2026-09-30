@@ -253,7 +253,7 @@ def test_signal_is_refused_for_thin_edges_poor_returns_payouts_within_a_day_and_
     latest = books()
     conn, cash, ex = executor(tmp_path, latest)
     assert ex.signal(PAIR, YES, NO, 0.015, 100, FEES, NOW) is False
-    assert ex.signal(FUTURE, FUTURE_YES, FUTURE_NO, 0.20, 100, FEES, NOW) is False     # 25% until February is 62% a year, under 100.
+    assert ex.signal(FUTURE, FUTURE_YES, FUTURE_NO, 0.08, 100, FEES, NOW) is False     # 8.7% until February is 22% a year, under 30.
     assert ex.signal(PAIR, YES, NO, 0.50, 100, FEES, "2026-09-21T21:00:00+00:00") is False        # Pays out in under 24 hours.
     assert ex.signal(PAIR, YES, NO, 0.50, 100, FEES, "2026-09-22T17:30:00+00:00") is False        # Under way.
     # A game none of the members gives the kickoff of pays at its close time, but could be under way, so it is not traded.
@@ -276,8 +276,8 @@ def at(ex, pair, yes, no, edge, now, fees=FEES):
 def test_edges_before_kickoff_and_on_futures_that_pay_enough_are_traded(tmp_path, quick):
     conn, cash, ex = executor(tmp_path, books())
     assert at(ex, PAIR, YES, NO, 0.08, "2026-09-21T20:00:00+00:00") is True      # The day before, paying 24.75 hours on.
-    ex.books = lambda: books(pm_bid=0.24, pm_ask=0.25, k_bid=0.55, k_ask=0.56)   # 30 cents: 43% until February, 107% a year.
-    assert at(ex, FUTURE, FUTURE_YES, FUTURE_NO, 0.30, NOW) is True
+    ex.books = lambda: books(pm_bid=0.34, pm_ask=0.35, k_bid=0.55, k_ask=0.56)   # 20 cents: 25% until February, 62% a year.
+    assert at(ex, FUTURE, FUTURE_YES, FUTURE_NO, 0.20, NOW) is True
     before_game, future = stored(conn)
     assert (before_game["status"], before_game["quantity"], before_game["pays_at"]) == ("filled", 50, PAYS_AT)
     assert (future["status"], future["quantity"], future["pays_at"]) == ("filled", 50, SEASON_END)
