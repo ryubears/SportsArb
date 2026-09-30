@@ -222,6 +222,23 @@ def balances():
     return dollars, {int(entry["exchange_index"]): float_or_zero(entry["balance"]) for entry in answer.get("balance_breakdown") or []}
 
 
+def positions():
+    """
+    The contracts the account holds, as {ticker: contracts}, positive for
+    yes and negative for no, followed through every page.
+    """
+    held, cursor = {}, None
+    while True:
+        answer = signed_request("GET", "/portfolio/positions", params={"limit": 1000, **({"cursor": cursor} if cursor else {})})
+        for p in answer.get("market_positions") or []:
+            contracts = float_or_zero(p.get("position_fp", p.get("position")))
+            if contracts:
+                held[p["ticker"]] = contracts
+        cursor = answer.get("cursor")
+        if not cursor:
+            return held
+
+
 def move_between_shards(dollars, source, destination):
     """
     Move dollars of the account's cash from one exchange shard to another.

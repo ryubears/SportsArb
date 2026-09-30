@@ -161,6 +161,42 @@ def test_an_order_is_costed_from_its_executions(monkeypatch):
     assert calls[0][2] == "POST /v1/orders"
 
 
+def piece(kind, shares, long_price, fee):
+    """
+    One execution of an answer, as Polymarket US gives it, trimmed to what is read.
+    """
+    return {"type": f"EXECUTION_TYPE_{kind}", "lastShares": shares, "lastPx": {"value": long_price, "currency": "USD"},
+            "commissionNotionalCollected": {"value": fee, "currency": "USD"}}
+
+
+def test_an_order_filled_in_pieces_of_a_contract_counts_them_together(monkeypatch):
+    # A live answer from 2026-09-30: no on Michigan State 4.5 wins, 1 contract, filled as 0.1, 0.89, and 0.01 of one at a yes price
+    # of 0.58. Each piece cut to a whole contract on its own read as none filled, with a fee for it.
+    executions = [piece("NEW", "0.0000", "0.0000", "0.0000"), piece("PARTIAL_FILL", "0.1000", "0.5800", "0.0000"),
+                  piece("PARTIAL_FILL", "0.8900", "0.5800", "0.0200"), piece("FILL", "0.0100", "0.5800", "0.0000")]
+    fake_api(monkeypatch, {("POST", "/orders"): {"id": "CTGB5ATN8YBE", "executions": executions}})
+    answer = polymarket_us.place_order("aachc-cfb-wins-ou-2026-11-28-mst", "buy", "no", 1, 0.45, "c11")
+    assert (answer.status, answer.filled, answer.note) == ("filled", 1, None)
+    assert answer.dollars == pytest.approx(1 - 0.58 + 0.02) and answer.fees == pytest.approx(0.02)
+
+
+def test_a_fraction_of_a_contract_over_is_left_out_and_noted(monkeypatch):
+    executions = [piece("PARTIAL_FILL", "0.1000", "0.5000", "0.0000"), piece("PARTIAL_FILL", "2.8000", "0.5000", "0.0300"),
+                  {"type": "EXECUTION_TYPE_CANCELED"}]
+    fake_api(monkeypatch, {("POST", "/orders"): {"id": "p12", "executions": executions}})
+    answer = polymarket_us.place_order("slug", "buy", "yes", 3, 0.5, "c12")
+    # 2.9 filled: the 2 whole contracts are ours, and their share of the cost and the fee.
+    assert (answer.status, answer.filled, answer.note) == ("partial", 2, "fractional fill of 2.9 contracts")
+    assert answer.dollars == pytest.approx(2 * 0.5 + 0.03 * 2 / 2.9) and answer.fees == pytest.approx(0.03 * 2 / 2.9)
+
+
+def test_a_stored_answer_reads_the_same_as_it_did_when_it_came(monkeypatch):
+    executions = [piece("PARTIAL_FILL", "0.1000", "0.7100", "0.0000"), piece("FILL", "0.9000", "0.7100", "0.0100")]
+    answer = polymarket_us.read_answer({"id": "p13", "executions": executions}, "sell", "yes", 1)
+    assert (answer.status, answer.filled) == ("filled", 1) and answer.dollars == pytest.approx(0.71 - 0.01)
+    assert polymarket_us.read_answer({"id": "p14", "executions": [piece("PARTIAL_FILL", "1", "0.5", "0")]}, "buy", "yes", 3) is None
+
+
 def test_a_sale_nets_the_fee(monkeypatch):
     executions = [{"type": "EXECUTION_TYPE_FILL", "lastShares": "3", "lastPx": {"value": "0.44"}, "commissionNotionalCollected": {"value": "0.05"}}]
     fake_api(monkeypatch, {("POST", "/orders"): {"id": "p2", "executions": executions}})
@@ -213,6 +249,15 @@ def test_an_answer_that_does_not_say_how_the_order_ended_is_followed_by_a_look_a
     assert (answer.order_id, answer.status, answer.filled) == ("p8", "partial", 3)
     assert answer.dollars == pytest.approx(3 * 0.46 + 0.05) and answer.fees == pytest.approx(0.05)
     assert calls[1][:3] == ("GET", "/order/p8", "GET /v1/order/p8")
+
+
+def test_a_look_at_the_order_counts_its_whole_contracts(monkeypatch):
+    partial = [piece("PARTIAL_FILL", "0.1000", "0.5400", "0.0000")]
+    order = {"id": "p15", "state": "ORDER_STATE_CANCELED", "cumQuantity": 2.9999999, "avgPx": {"value": "0.54"},
+             "commissionNotionalTotalCollected": {"value": "0.05"}}
+    fake_api(monkeypatch, {("POST", "/orders"): {"id": "p15", "executions": partial}, ("GET", "/order/p15"): {"order": order}})
+    answer = polymarket_us.place_order("slug", "buy", "yes", 3, 0.55, "c15")
+    assert (answer.status, answer.filled, answer.note) == ("filled", 3, None)
 
 
 def test_an_order_that_has_still_not_ended_has_an_unknown_fate(monkeypatch):

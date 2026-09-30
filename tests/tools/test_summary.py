@@ -137,15 +137,24 @@ def test_live_money_shows_each_venue_read_now_with_the_kalshi_shards(capsys):
     ]
 
 
-def test_open_trades_show_what_they_hold_and_when_it_comes_back(tmp_path, monkeypatch, capsys):
+def test_open_trades_are_listed_soonest_to_settle_first_with_their_returns(tmp_path, monkeypatch, capsys):
     def fill(conn):
-        for held, cost, pays_at in ((5, 2.5, "2026-12-20T00:00:00+00:00"), (5, 3.0, "2026-10-04T20:45:00+00:00"), (0, 0.0, INSIDE)):
+        # (held a side, yes cost, no cost, locked in, flattening, pays at): one settling in December, one on October 4 that lost
+        # 2 cents flattening, and one flattened to nothing, which holds nothing.
+        for held, yes_cost, no_cost, profit, hedge, pays_at in ((5, 2.5, 2.25, 0.25, 0.0, "2026-12-20T00:00:00+00:00"),
+                                                                (5, 3.0, 1.7, 0.30, -0.02, "2026-10-04T20:45:00+00:00"),
+                                                                (0, 0.0, 0.0, 0.0, -0.05, INSIDE)):
             database.insert_trade(conn, Trade(mode="live", pair_id=1, trade="t", signal_ts=INSIDE, edge=0.06, quantity=5,
                                               yes_venue="kalshi", yes_contract="k", yes_polarity="yes", yes_limit=0.5,
                                               no_venue="polymarket_us", no_contract="p", no_polarity="yes", no_limit=0.45,
-                                              pays_at=pays_at, yes_held=held, no_held=held, yes_cost=cost, no_cost=cost * 0.9, status="filled"))
+                                              pays_at=pays_at, yes_held=held, no_held=held, yes_cost=yes_cost, no_cost=no_cost,
+                                              profit=profit, hedge_pnl=hedge, status="filled"))
     out = report(tmp_path, monkeypatch, capsys, fill)
-    # The third was flattened to nothing, so holds nothing.
-    assert "  2 live trades still open, holding kalshi 5.50$, polymarket_us 4.95$, paying out from 2026-10-04 to 2026-12-20" in out
+    # 0.53$ on 9.45$ is 5.6%. A year's rate weighted by capital: 309% on 4.70$ over 7 days and 23% on 4.75$ over 83, 165% in all.
+    assert ("  2 live trades still open, holding kalshi 5.50$, polymarket_us 3.95$: 9.45$ of capital expected to make 0.53$, "
+            "5.6% on it, 165.4% a year on average, settling from 2026-10-04 to 2026-12-20") in out
+    assert table(out, "live open trades, soonest to settle first") == [
+        ["the", "bet", "5/5", "4.70", "0.28", "6.0", "309.3", "7.0", "2026-10-04", "20:45"],
+        ["the", "bet", "5/5", "4.75", "0.25", "5.3", "23.1", "83.2", "2026-12-20", "00:00"]]
     # Held 83.2, 7.0, and 0 days from the signal to the payout, 30.1 on average.
-    assert table(out, "live by kind, last 12 hours")[0][:7] == ["nfl", "winner", "3", "6.0", "0.0", "0.0", "30.1"]
+    assert table(out, "live by kind, last 12 hours")[0][:7] == ["nfl", "winner", "3", "6.0", "0.0", "0.48", "30.1"]

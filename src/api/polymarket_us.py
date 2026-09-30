@@ -155,6 +155,20 @@ def results(event_slugs):
     return out
 
 
+def positions():
+    """
+    The contracts the account holds, as {market slug: contracts}, positive
+    for the long side, the market's yes, and negative for the short, its
+    no. One page holds them all so far. Raises ValueError when the venue
+    says there are more, rather than miss them.
+    """
+    answer = signed_request("GET", "/portfolio/positions")
+    if not answer.get("eof", True):
+        raise ValueError("the positions run past one page, which is not read yet")
+    held = {slug: float_or_zero(p.get("netPositionDecimal", p.get("netPosition"))) for slug, p in (answer.get("positions") or {}).items()}
+    return {slug: contracts for slug, contracts in held.items() if contracts}
+
+
 def balance():
     """
     Dollars available for trading on the account: the buying power of its dollar balance.
@@ -326,6 +340,20 @@ def order_body(slug, action, outcome, quantity, price):
             "synchronousExecution": True, "maxBlockTime": str(MAX_BLOCK_SECONDS)}
 
 
+def whole(shares):
+    """
+    The whole contracts in a number of shares as the venue gives them, and a
+    note when there is a fraction over. The venue fills an order in pieces
+    as small as a hundredth of a contract, 0.1 then 0.89 then 0.01 for one,
+    so shares are added up before they are cut to whole contracts, rounded
+    first so that float sums land on the whole number they make. Contracts
+    are whole in our books.
+    """
+    exact = round(shares, 4)
+    filled = int(exact)
+    return filled, (f"fractional fill of {exact:g} contracts" if exact != filled else None)
+
+
 def look_up(answer, action, outcome, quantity):
     """
     What became of an order whose answer did not say how it ended, read from
@@ -343,48 +371,40 @@ def look_up(answer, action, outcome, quantity):
     state = order.get("state")
     if state not in FINAL_STATES:
         return orders.unknown(ValueError(f"order {order_id} is still {state}"), order_id, response)
-    filled = int(float_or_zero(order.get("cumQuantity")))
+    exact = float_or_zero(order.get("cumQuantity"))
+    filled, note = whole(exact)
     if state == "ORDER_STATE_REJECTED" and not filled:
         return orders.Answer(order_id, "rejected", 0, 0.0, 0.0, state, response)
     long_price = amount(order.get("avgPx"))
     traded = filled * (long_price if outcome == "yes" else 1 - long_price)
-    fees = amount(order.get("commissionNotionalTotalCollected"))
+    fees = amount(order.get("commissionNotionalTotalCollected")) * (filled / exact if exact else 0.0)
     paid = traded + fees if action == "buy" else traded - fees
-    return orders.Answer(order_id, orders.status(filled, quantity), filled, paid, fees, None, response)
+    return orders.Answer(order_id, orders.status(filled, quantity), filled, paid, fees, note, response)
 
 
-def place_order(slug, action, outcome, quantity, price, client_id):
+def read_answer(answer, action, outcome, quantity):
     """
-    Send an immediate or cancel limit order and return what came back as an
-    Answer, from the executions the synchronous answer lists. action
-    is 'buy' or 'sell', outcome 'yes' or 'no', and price the worst price per
-    contract accepted for that outcome. Execution prices are the long side's,
-    since the market's one instrument is its yes side, so a short side fill
-    at p cost 1 - p. An order turned away for having no liquidity or by the
-    latency stopgap is unfilled, not refused. An answer that does not say
-    how the order ended is followed by a look at the order itself, since a
-    returned order id does not mean the order is done. The API takes no id
-    of ours, so client_id is only kept in our own orders table.
+    What an order's synchronous answer says came of it, as an Answer, from
+    the executions it lists, or None when none of them says how the order
+    ended. Execution prices are the long side's, since the market's one
+    instrument is its yes side, so a short side fill at p cost 1 - p. The
+    shares of every fill are added up before they are cut to whole
+    contracts, and a fraction over is left out of the dollars and fees too,
+    as its contract is left out of our books. An order turned away for
+    having no liquidity or by the latency stopgap is unfilled, not refused.
     """
-    try:
-        answer = signed_request("POST", "/orders", order_body(slug, action, outcome, quantity, price))
-    except RequestFailed as e:
-        if STOPGAP in e.body:
-            return orders.unfilled(e, "latency stopgap")
-        return orders.refused(e) if e.status < 500 else orders.unknown(e)
-    except Exception as e:
-        return orders.unknown(e)
     executions = answer.get("executions") or []
     if not any(e.get("type") in FINAL_TYPES for e in executions):
-        return look_up(answer, action, outcome, quantity)
-    filled, traded, fees = 0, 0.0, 0.0
+        return None
+    shares, traded, fees = 0.0, 0.0, 0.0
     for e in executions:
         if e.get("type") not in FILL_TYPES:
             continue
-        shares, long_price = int(float_or_zero(e.get("lastShares"))), amount(e.get("lastPx"))
-        filled += shares
-        traded += shares * (long_price if outcome == "yes" else 1 - long_price)
+        some, long_price = float_or_zero(e.get("lastShares")), amount(e.get("lastPx"))
+        shares += some
+        traded += some * (long_price if outcome == "yes" else 1 - long_price)
         fees += amount(e.get("commissionNotionalCollected"))
+    filled, note = whole(shares)
     rejected = next((e for e in executions if e.get("type") == "EXECUTION_TYPE_REJECTED"), None)
     if rejected and not filled:
         reason = rejected.get("orderRejectReason") or rejected.get("text")
@@ -394,5 +414,29 @@ def place_order(slug, action, outcome, quantity, price, client_id):
         if NO_LIQUIDITY in said:
             return orders.Answer(answer.get("id"), "unfilled", 0, 0.0, 0.0, f"no liquidity: {reason}", answer)
         return orders.Answer(answer.get("id"), "rejected", 0, 0.0, 0.0, reason, answer)
+    if filled != shares:
+        kept = filled / shares if shares else 0.0
+        traded, fees = traded * kept, fees * kept
     paid = traded + fees if action == "buy" else traded - fees
-    return orders.Answer(answer.get("id"), orders.status(filled, quantity), filled, paid, fees, None, answer)
+    return orders.Answer(answer.get("id"), orders.status(filled, quantity), filled, paid, fees, note, answer)
+
+
+def place_order(slug, action, outcome, quantity, price, client_id):
+    """
+    Send an immediate or cancel limit order and return what came back as an
+    Answer, read from its synchronous answer by read_answer(). action is
+    'buy' or 'sell', outcome 'yes' or 'no', and price the worst price per
+    contract accepted for that outcome. An answer that does not say how the
+    order ended is followed by a look at the order itself, since a returned
+    order id does not mean the order is done. The API takes no id of ours,
+    so client_id is only kept in our own orders table.
+    """
+    try:
+        answer = signed_request("POST", "/orders", order_body(slug, action, outcome, quantity, price))
+    except RequestFailed as e:
+        if STOPGAP in e.body:
+            return orders.unfilled(e, "latency stopgap")
+        return orders.refused(e) if e.status < 500 else orders.unknown(e)
+    except Exception as e:
+        return orders.unknown(e)
+    return read_answer(answer, action, outcome, quantity) or look_up(answer, action, outcome, quantity)

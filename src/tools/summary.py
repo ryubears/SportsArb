@@ -10,9 +10,11 @@ edge reached config.MIN_EDGE: how long each held there, and what it could
 have taken at full size, locked in, and returned. Before game and futures
 ones are shown a third time, only those the executors' rules trade:
 paying config.MIN_PAYOUT_HOURS or more out and config.MIN_ANNUAL_PCT a
-year or more. Games are not traded once they kick off. Open trades show
-the money they hold and when it comes back. Reads only, so it is safe to
-run while the live process is writing.
+year or more. Games are not traded once they kick off. Open trades are
+listed soonest to settle first, each with the capital it holds, the
+profit it is expected to make, and that as a return and a year's rate,
+with the average over all of them. Reads only, so it is safe to run while
+the live process is writing.
 
 The script sets its own import path, so it runs from any folder. The live
 money is not in the database but on the venues, so it is read from each
@@ -33,6 +35,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))     # src, so the script runs from any folder.
+from common.timeutil import days_between
 from db.database import DB_PATH, load_held, read_only
 from engine.helper import config
 
@@ -296,16 +299,45 @@ def print_mode_trades(conn, since, hours, mode):
         GROUP BY venue ORDER BY venue""", (mode, since, since, mode, since, since))
     if settled:
         print_table(f"{mode} settled legs by venue, last {hours} hours", ("venue", "legs", "contracts", "cost $", "payout $", "realized $"), settled)
-    open_count, first_payout, last_payout = conn.execute("""
-        SELECT COUNT(*), MIN(pays_at), MAX(pays_at) FROM trades t
-        WHERE mode = ? AND yes_held + no_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)""", (mode,)).fetchone()
-    held = ", ".join(f"{venue} {amount:,.2f}$" for venue, amount in sorted(load_held(conn, mode).items()))
-    print(f"  {open_count:,} {mode} trades still open" + (f", holding {held}, paying out from {first_payout[:10]} to {last_payout[:10]}"
-                                                          if open_count else ""))
+    print_open_trades(conn, mode)
     if mode == "paper":
         print_paper_money(conn)
     else:
         print_live_orders(conn, since, hours)
+
+
+def print_open_trades(conn, mode):
+    """
+    The trades of one mode still open, soonest to settle first. Capital is
+    what the contracts still held cost with fees, and the expected profit
+    what the trade locked in, a dollar for each pair held less what it cost,
+    with what flattening made or lost. A contract held without its other
+    side, which the held column shows, is counted at its cost, as if it broke
+    even. The return is on the capital, and the annual rate scales it over
+    the days from the trade to its payout. Over all of them the annual rate
+    is weighted by capital.
+    """
+    rows = query_rows(conn, """
+        SELECT p.label, t.yes_held, t.no_held, t.yes_cost + t.no_cost, t.profit + t.hedge_pnl, t.signal_ts, t.pays_at
+        FROM trades t JOIN pairs p ON p.id = t.pair_id
+        WHERE t.mode = ? AND t.yes_held + t.no_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)
+        ORDER BY t.pays_at, t.id""", (mode,))
+    if not rows:
+        print(f"  0 {mode} trades still open")
+        return
+    body, capital, profit, yearly = [], 0.0, 0.0, 0.0
+    for label, yes, no, cap, pr, signal, pays in rows:
+        days = max(days_between(signal, pays), 1 / 24)
+        ret, annual = lasting_returns(cap, pr, days)
+        body.append((label[:44], f"{yes}/{no}", f"{cap:,.2f}", f"{pr:,.2f}", percent(ret), percent(annual), f"{days:,.1f}",
+                     pays[:16].replace("T", " ")))
+        capital, profit, yearly = capital + cap, profit + pr, yearly + pr * 365 / days
+    held = ", ".join(f"{venue} {amount:,.2f}$" for venue, amount in sorted(load_held(conn, mode).items()))
+    ret, annual = (100 * profit / capital, 100 * yearly / capital) if capital > 0 else (None, None)
+    print(f"  {len(rows):,} {mode} trades still open, holding {held}: {capital:,.2f}$ of capital expected to make {profit:,.2f}$, "
+          f"{percent(ret)}% on it, {percent(annual)}% a year on average, settling from {rows[0][6][:10]} to {rows[-1][6][:10]}")
+    print_table(f"{mode} open trades, soonest to settle first",
+                ("bet", "held yes/no", "capital $", "expected profit $", "return %", "annual %", "days held", "settles UTC"), body)
 
 
 def read_live_balances(readers=None):
