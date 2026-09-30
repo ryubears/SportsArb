@@ -37,22 +37,30 @@ def test_positive_depth_walks_both_ladders_while_the_edge_is_positive():
     leg_a = [(0.40, 10), (0.41, 10)]
     leg_b = [(0.50, 5), (0.58, 100)]
     fee = ("polymarket_us", NO_PM_FEES)
-    top_edge, size, profit = pricing.positive_depth(leg_a, leg_b, fee, fee)
+    top_edge, size, profit, worth_size, worth_profit = pricing.positive_depth(leg_a, leg_b, fee, fee, 0.05)
     assert top_edge == pytest.approx(0.10)
     assert size == 20
     assert profit == pytest.approx(5 * 0.10 + 5 * 0.02 + 10 * 0.01)
+    assert (worth_size, worth_profit) == (5, pytest.approx(5 * 0.10))     # Only the top step is worth 5 cents.
+
+
+def test_the_levels_worth_the_minimum_edge_stop_at_the_first_one_under_it():
+    fee = ("polymarket_us", NO_PM_FEES)
+    # Steps of 10, then 2, then 8 cents: the 8 below the 2 is not counted, since an order sweeps from the top down.
+    _, size, _, worth_size, worth_profit = pricing.positive_depth([(0.40, 5), (0.48, 5), (0.40, 5)], [(0.50, 15)], fee, fee, 0.05)
+    assert (size, worth_size, worth_profit) == (15, 5, pytest.approx(0.5))
 
 
 def test_positive_depth_stops_at_zero_edge_and_handles_empty_ladders():
     fee = ("polymarket_us", NO_PM_FEES)
-    assert pricing.positive_depth([(0.5, 10)], [(0.5, 10)], fee, fee) == (0.0, 0.0, 0.0)
-    assert pricing.positive_depth([], [(0.5, 10)], fee, fee) == (-1.0, 0.0, 0.0)
+    assert pricing.positive_depth([(0.5, 10)], [(0.5, 10)], fee, fee, 0.05) == (0.0, 0.0, 0.0, 0.0, 0.0)
+    assert pricing.positive_depth([], [(0.5, 10)], fee, fee, 0.05) == (-1.0, 0.0, 0.0, 0.0, 0.0)
 
 
 def test_positive_depth_leaves_the_ladders_as_they_were():
     leg_a, leg_b = [(0.40, 10)], [(0.50, 5)]
     fee = ("polymarket_us", NO_PM_FEES)
-    pricing.positive_depth(leg_a, leg_b, fee, fee)
+    pricing.positive_depth(leg_a, leg_b, fee, fee, 0.05)
     assert (leg_a, leg_b) == ([(0.40, 10)], [(0.50, 5)])
 
 
@@ -81,11 +89,11 @@ def test_best_trade_picks_the_cheapest_leg_on_each_side_across_venues():
     books = {("kalshi", "k"): Book("kalshi", "k", "t", [[0.53, 100]], [[0.54, 100]]),
               ("polymarket_us", "us"): Book("polymarket_us", "us", "t", [[0.44, 100]], [[0.45, 100]])}
     fee_infos = {("kalshi", "k"): NO_K_FEES, ("polymarket_us", "us"): NO_PM_FEES}
-    yes, no, edge, size, profit = pricing.best_trade(members, books, fee_infos)
+    yes, no, edge, size, profit, worth_size, _ = pricing.best_trade(members, books, fee_infos)
     # Yes is cheapest at Polymarket's 0.45 ask. No is cheapest at Kalshi, one minus its 0.53 bid.
     assert (yes["venue"], no["venue"]) == ("polymarket_us", "kalshi")
     assert edge == pytest.approx(1 - 0.45 - 0.47)
-    assert size == 100
+    assert size == worth_size == 100
 
 
 def test_best_trade_uses_a_no_contract_for_yes_exposure():
@@ -93,7 +101,7 @@ def test_best_trade_uses_a_no_contract_for_yes_exposure():
     books = {("kalshi", "k_yes"): Book("kalshi", "k_yes", "t", [[0.40, 100]], [[0.60, 100]]),
               ("kalshi", "k_no"): Book("kalshi", "k_no", "t", [[0.55, 100]], [[0.70, 100]])}
     fee_infos = {("kalshi", "k_yes"): NO_K_FEES, ("kalshi", "k_no"): NO_K_FEES}
-    yes, no, edge, _, _ = pricing.best_trade(members, books, fee_infos)
+    yes, no, edge, *_ = pricing.best_trade(members, books, fee_infos)
     # Yes through the no contract's bid costs 0.45, cheaper than the yes contract's 0.60 ask.
     # No through the yes contract's bid costs 0.60, cheaper than the no contract's 0.70 ask.
     assert (yes["contract_id"], no["contract_id"]) == ("k_no", "k_yes")
@@ -106,7 +114,7 @@ def test_best_trade_never_uses_one_contract_for_both_legs():
     books = {("kalshi", "k_yes"): Book("kalshi", "k_yes", "t", [[0.40, 100]], [[0.60, 100]]),
               ("kalshi", "k_no"): Book("kalshi", "k_no", "t", [[0.55, 100]], [[0.56, 100]])}
     fee_infos = {("kalshi", "k_yes"): NO_K_FEES, ("kalshi", "k_no"): NO_K_FEES}
-    yes, no, edge, _, _ = pricing.best_trade(members, books, fee_infos)
+    yes, no, edge, *_ = pricing.best_trade(members, books, fee_infos)
     assert (yes["contract_id"], no["contract_id"]) == ("k_no", "k_yes")
     assert edge == pytest.approx(1 - 0.45 - 0.60)
 
@@ -134,7 +142,7 @@ def test_fees_are_charged_once_per_level_on_buys_and_sells():
 
 def test_edges_use_the_unrounded_fee_per_contract():
     kalshi = ("kalshi", {"fee_type": "quadratic", "fee_multiplier": 1})
-    edge, size, profit = pricing.positive_depth([(0.45, 100)], [(0.47, 100)], kalshi, kalshi)
+    edge, size, profit, worth_size, _ = pricing.positive_depth([(0.45, 100)], [(0.47, 100)], kalshi, kalshi, 0.05)
     expected = 1 - 0.45 - 0.47 - 0.07 * 0.45 * 0.55 - 0.07 * 0.47 * 0.53
     assert edge == pytest.approx(expected)          # About 4.53 cents. Rounding each fee up to 2 cents would have said 4.
-    assert (size, profit) == (100, pytest.approx(100 * expected))
+    assert (size, profit, worth_size) == (100, pytest.approx(100 * expected), 0)     # Under 5 cents.

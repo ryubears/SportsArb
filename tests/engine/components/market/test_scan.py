@@ -20,19 +20,24 @@ def member(venue, contract_id, polarity="yes", start_time=None, close_time="2026
     return dict(venue=venue, contract_id=contract_id, polarity=polarity, start_time=start_time, close_time=close_time, fee_info=fee_info)
 
 
-def make_db(tmp_path, members):
+def make_db(tmp_path, members, future=False):
     """
-    A database holding one spread pair with these members, so a Scanner can load it.
+    A database holding one spread pair with these members, so a Scanner can
+    load it, or with future, one Super Bowl winner pair.
     """
     conn = database.connect(tmp_path / "t.sqlite")
     contracts = [Contract(venue=m["venue"], contract_id=m["contract_id"], market_id=m["contract_id"], event_id="e", series_id=None,
                           sport="nfl", event_title=None, title="t", outcome="Yes", market_type=None, line=None, rules=None,
                           start_time=m["start_time"], close_time=m["close_time"], fee_info=m["fee_info"]) for m in members]
     database.upsert_contracts(conn, contracts, "2026-09-19T00:00:00+00:00")
-    bets = [Bet(m["venue"], m["contract_id"], "spread", 2027, "2026-09-20", "CAR", "ATL", "ATL", 4.5, m["polarity"]) for m in members]
+    if future:
+        bets = [Bet(m["venue"], m["contract_id"], "champion", 2027, None, None, None, "ATL", None, m["polarity"]) for m in members]
+        pair = Pair("nfl champion 2027 ATL", "champion", 2027, None, None, None, "ATL", None, bets, [], sport="nfl")
+    else:
+        bets = [Bet(m["venue"], m["contract_id"], "spread", 2027, "2026-09-20", "CAR", "ATL", "ATL", 4.5, m["polarity"]) for m in members]
+        pair = Pair(LABEL, "spread", 2027, "2026-09-20", "CAR", "ATL", "ATL", 4.5, bets, [], sport="nfl")
     database.replace_bets(conn, "nfl", bets)
-    database.replace_pairs(conn, "nfl", [Pair(LABEL, "spread", 2027, "2026-09-20", "CAR", "ATL", "ATL", 4.5, bets, [], sport="nfl")],
-                            "2026-09-19T00:00:00+00:00")
+    database.replace_pairs(conn, "nfl", [pair], "2026-09-19T00:00:00+00:00")
     return conn
 
 
@@ -43,6 +48,13 @@ def stored(conn):
     return [Opportunity(*row) for row in conn.execute("""
         SELECT pair_id, trade, yes_venue, yes_contract, no_venue, no_contract, start_ts, end_ts, seconds, peak_ts,
                peak_edge, peak_size, peak_profit, live, days_held, return_pct, annual_pct FROM opportunities ORDER BY start_ts""")]
+
+
+def stretches(conn):
+    """
+    Each stored episode's longest stretch at the minimum edge, as (seconds, contracts, profit), oldest first.
+    """
+    return [tuple(r) for r in conn.execute("SELECT min_edge_seconds, min_edge_size, min_edge_profit FROM opportunities ORDER BY start_ts")]
 
 
 def replay(conn, books, drops=()):
@@ -83,6 +95,49 @@ def test_scanner_finds_one_episode_with_duration_and_return(tmp_path):
     assert o.days_held == pytest.approx(10, rel=1e-3)
     assert o.return_pct == pytest.approx(100 * 0.04 / 0.96)
     assert o.annual_pct == pytest.approx(o.return_pct * 365 / 10, rel=1e-3)
+
+
+def test_an_episode_keeps_its_longest_stretch_at_the_minimum_edge_and_what_stayed_fillable_through_it(tmp_path):
+    conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket_us", "pm")])
+    at = "2026-09-19T12:00:%02d+00:00"
+    episodes = replay(conn, [Book("polymarket_us", "pm", at % 0, [[0.39, 100]], [[0.40, 100]]),     # Yes costs 0.40 throughout.
+                             Book("kalshi", "k", at % 1, [[0.53, 100]], [[0.99, 1]]),       # No costs 0.47: 13 cents on 100.
+                             Book("kalshi", "k", at % 2, [[0.53, 40], [0.43, 60]], [[0.99, 1]]),    # 13 cents on only 40.
+                             Book("kalshi", "k", at % 4, [[0.43, 100]], [[0.99, 1]]),       # 3 cents: the stretch ends after 3s.
+                             Book("kalshi", "k", at % 5, [[0.50, 100]], [[0.99, 1]]),       # 10 cents again, for 1s.
+                             Book("kalshi", "k", at % 6, [[0.40, 100]], [[0.99, 1]])])      # No edge: the episode ends.
+    assert [(o.start_ts, o.end_ts) for o in episodes] == [(at % 1, at % 6)]
+    assert stretches(conn) == [(3.0, 40.0, pytest.approx(40 * 0.13))]
+
+
+def test_a_moment_at_the_minimum_edge_keeps_its_size(tmp_path):
+    conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket_us", "pm")])
+    at = "2026-09-19T12:00:%02d+00:00"
+    replay(conn, [Book("polymarket_us", "pm", at % 0, [[0.39, 100]], [[0.40, 100]]),
+                  Book("kalshi", "k", at % 1, [[0.53, 100]], [[0.99, 1]]),       # 13 cents on 100, for a moment.
+                  Book("kalshi", "k", at % 1, [[0.43, 100]], [[0.99, 1]]),       # Then 3 cents, in the same moment.
+                  Book("kalshi", "k", at % 3, [[0.40, 100]], [[0.99, 1]])])
+    assert stretches(conn) == [(0.0, 100.0, pytest.approx(13.0))]
+
+
+def test_an_episode_never_at_the_minimum_edge_has_no_stretch(tmp_path):
+    conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket_us", "pm")])
+    replay(conn, [Book("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]]),
+                  Book("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]]),     # 4 cents.
+                  Book("kalshi", "k", "2026-09-19T12:01:01+00:00", [[0.49, 100]], [[0.50, 100]])])
+    assert stretches(conn) == [(0.0, 0.0, 0.0)]
+
+
+def test_a_futures_book_does_not_age_while_a_games_does(tmp_path):
+    books = {("polymarket_us", "pm"): Book("polymarket_us", "pm", T0, [[0.39, 100]], [[0.40, 100]]),
+             ("kalshi", "k"): Book("kalshi", "k", T0, [[0.53, 100]], [[0.99, 1]])}
+    hour_later = "2026-09-19T13:00:00+00:00"
+    for future, still_open in ((True, True), (False, False)):
+        conn = make_db(tmp_path / str(future), [member("kalshi", "k"), member("polymarket_us", "pm")], future=future)
+        scanner = scan.Scanner(conn, ("nfl",), lambda m: None)
+        scanner.on_book("kalshi", "k", books, T0)
+        scanner.tick(books, hour_later)         # Neither book changed in the hour.
+        assert bool(scanner.episodes) is still_open, future
 
 
 def test_scanner_marks_live_and_uses_kickoff_for_payout(tmp_path):
@@ -159,7 +214,8 @@ def test_episode_opens_peaks_and_closes_from_book_changes(tmp_path):
     assert s.episodes == {}
     o = stored(conn)[0]
     assert (o.start_ts, o.end_ts, o.peak_ts, round(o.peak_edge, 2), o.peak_size, o.live) == (TL % (0, 2), TL % (0, 5), TL % (0, 3), 0.12, 100, 1)
-    assert logs == [f"episode {LABEL}: yes: PMUS buy, no: K buy other side, 12.0c x 100 = 12.00$, lasted 3.0s"]
+    assert logs == [f"episode {LABEL}: yes: PMUS buy, no: K buy other side, 12.0c x 100 = 12.00$, lasted 3.0s, "
+                    "5c or more for 3.0s with 100 contracts throughout"]
     assert s.summary().startswith("scanner: spread 1 episodes, 1 beat target, best 12.00$ for 3s; 0 open")
     assert s.summary() == "scanner: no episodes; 0 open"
 

@@ -176,8 +176,21 @@ def step_6_pair_sports(conn):
     conn.execute("UPDATE pairs SET label = 'nfl ' || label WHERE label NOT LIKE 'nfl %'")
 
 
+def step_7_min_edge_stretch(conn):
+    """
+    Episodes now keep their longest stretch at config.MIN_EDGE or more and
+    the contracts that stayed fillable through it. Older episodes did not
+    record them, so theirs are null.
+    """
+    columns = [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]
+    for column in ("min_edge_seconds", "min_edge_size", "min_edge_profit"):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE opportunities ADD COLUMN {column} REAL")
+
+
 # Step n brings a database from user_version n - 1 to n. Only ever add to the end.
-STEPS = [step_1_catch_up, step_2_settlements, step_3_opening_balances, step_4_modes, step_5_drop_quotes, step_6_pair_sports]
+STEPS = [step_1_catch_up, step_2_settlements, step_3_opening_balances, step_4_modes, step_5_drop_quotes, step_6_pair_sports,
+         step_7_min_edge_stretch]
 
 
 def migrate(conn, fresh):

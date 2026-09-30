@@ -24,17 +24,21 @@ class Priced(NamedTuple):
     edge: float         # Net dollars per contract at the top of both books.
     size: float         # Contracts fillable at a positive net edge, walking both ladders.
     profit: float       # Net dollars from filling size.
+    min_edge_size: float = 0.0      # Contracts fillable at config.MIN_EDGE or more, the levels an order would sweep.
+    min_edge_profit: float = 0.0    # Net dollars from filling min_edge_size.
 
 
-def fresh(book, now):
+def fresh(book, now, aging=True):
     """
     Whether a book can be priced and traded at now: it has changed within
     config.MAX_BOOK_AGE seconds. A market that has closed may stop changing
     rather than empty its book, and its last book cannot be traded, so an
     old book counts as no book. A quiet market that is still open waits for
-    its next change.
+    its next change. A book that may rest unchanged for hours while its
+    market is open, as a future's does, is priced without aging: it counts
+    until the recorder stops following it.
     """
-    return book is not None and seconds_between(book.ts, now) <= config.MAX_BOOK_AGE
+    return book is not None and (not aging or seconds_between(book.ts, now) <= config.MAX_BOOK_AGE)
 
 
 def ladder(book, polarity, side):
@@ -136,13 +140,15 @@ def walk_pair(leg_a, leg_b, fee_a, fee_b):
             j, left_b = j + 1, None
 
 
-def positive_depth(leg_a, leg_b, fee_a, fee_b):
+def positive_depth(leg_a, leg_b, fee_a, fee_b, min_edge):
     """
     Buy equal amounts of two ladders while the net edge per contract stays
-    positive. Returns (edge at the top, contracts, profit), with an edge of
-    -1 when a ladder is empty.
+    positive. Returns (edge at the top, contracts, profit, contracts and
+    profit of the levels at min_edge or more), with an edge of -1 when a
+    ladder is empty.
     """
-    top_edge, size, profit = None, 0.0, 0.0
+    top_edge, size, profit, worth_size, worth_profit = None, 0.0, 0.0, 0.0, 0.0
+    worth = True        # Still among the levels at min_edge or more, which run from the top down.
     for _, _, contracts, edge in walk_pair(leg_a, leg_b, fee_a, fee_b):
         if top_edge is None:
             top_edge = edge
@@ -150,7 +156,10 @@ def positive_depth(leg_a, leg_b, fee_a, fee_b):
             break
         size += contracts
         profit += contracts * edge
-    return (top_edge if top_edge is not None else -1.0), size, profit
+        worth = worth and edge >= min_edge
+        if worth:
+            worth_size, worth_profit = size, profit
+    return (top_edge if top_edge is not None else -1.0), size, profit, worth_size, worth_profit
 
 
 def depth(leg_a, leg_b, fee_a, fee_b, min_edge):
@@ -191,9 +200,8 @@ def price_pair(yes, no, books, fee_infos):
     Price buying the yes leg and the no leg together.
     """
     yes_key, no_key = (yes["venue"], yes["contract_id"]), (no["venue"], no["contract_id"])
-    edge, size, profit = positive_depth(ladder(books[yes_key], yes["polarity"], "yes"), ladder(books[no_key], no["polarity"], "no"),
-                                        (yes["venue"], fee_infos[yes_key]), (no["venue"], fee_infos[no_key]))
-    return Priced(yes, no, edge, size, profit)
+    return Priced(yes, no, *positive_depth(ladder(books[yes_key], yes["polarity"], "yes"), ladder(books[no_key], no["polarity"], "no"),
+                                           (yes["venue"], fee_infos[yes_key]), (no["venue"], fee_infos[no_key]), config.MIN_EDGE))
 
 
 def best_trade(members, books, fee_infos):

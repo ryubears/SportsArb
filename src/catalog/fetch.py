@@ -16,7 +16,8 @@ from db import database
 FETCHERS = {"kalshi": kalshi.contracts, "polymarket_us": polymarket_us.contracts}     # Each venue client's catalog call.
 
 # How each of our sport keys maps onto the venues' own categories, as the arguments of each venue's fetcher.
-# Kalshi lists hundreds of series for a sport, so only the ones the Kalshi classifier reads are fetched.
+# Kalshi lists hundreds of series for a sport, so only the ones the Kalshi classifier reads are fetched: each sport's game
+# series, then its futures.
 # Adding a sport means adding it here, to config.GAME_HOURS, config.DOLLARS_PER_CAP_HOUR, polymarket_us.EVENT_PREFIX, and
 # match.KIND_NOTES and match.PLAYER_NOTES, an alias file in classify/aliases/, and its Kalshi series to the Kalshi classifier.
 # tests/catalog/test_sports.py fails until the tables agree.
@@ -25,7 +26,10 @@ SPORTS = {
         "kalshi": {
             "tickers": ["KXNFLGAME", "KXNFLSPREAD", "KXNFLTOTAL",
                         "KXNFLRECYDS", "KXNFLRSHYDS", "KXNFLPASSYDS", "KXNFLREC", "KXNFLPASSTDS", "KXNFLTD", "KXNFLFIRSTTD",
-                        "KXNFLPASSCOMP", "KXNFLPASSATT", "KXNFLPASSINT", "KXNFLRSHATT", "KXNFLRRYDS", "KXNFLLONGREC"],
+                        "KXNFLPASSCOMP", "KXNFLPASSATT", "KXNFLPASSINT", "KXNFLRSHATT", "KXNFLRRYDS", "KXNFLLONGREC",
+                        "KXSB", "KXNFLAFCCHAMP", "KXNFLNFCCHAMP", "KXNFL1SEED", "KXNFLPLAYOFF", "KXNFLROUNDQUAL", "KXNFLWINS",
+                        *(f"KXNFL{c}{d}" for c in ("AFC", "NFC") for d in ("EAST", "NORTH", "SOUTH", "WEST")),
+                        "KXNFLMVP", "KXNFLOPOTY", "KXNFLDPOTY", "KXNFLOROTY", "KXNFLDROTY", "KXNFLCPOTY", "KXNFLCOTY"],
         },
         "polymarket_us": {
             "tags": ["nfl"],
@@ -33,7 +37,9 @@ SPORTS = {
     },
     "ncaaf": {
         "kalshi": {
-            "tickers": ["KXNCAAFGAME", "KXNCAAFSPREAD", "KXNCAAFTOTAL"],
+            "tickers": ["KXNCAAFGAME", "KXNCAAFSPREAD", "KXNCAAFTOTAL",
+                        "KXNCAAF", "KXNCAAFPLAYOFF", "KXNCAAFFINALIST", "KXNCAAFWINS", "KXHEISMAN", "KXNCAAFSEC", "KXNCAAFSECQ",
+                        *(f"KXNCAAF{c}{q}" for c in ("AAC", "ACC", "B10", "B12", "CUSA", "MAC", "MWC", "PAC12", "SBELT") for q in ("", "QUAL"))],
         },
         "polymarket_us": {
             "tags": ["cfb"],
@@ -43,7 +49,9 @@ SPORTS = {
         "kalshi": {
             "tickers": ["KXMLBGAME", "KXMLBSPREAD", "KXMLBTOTAL", "KXMLBTEAMTOTAL",
                         "KXMLBHIT", "KXMLBHR", "KXMLBKS", "KXMLBTB", "KXMLBHRR", "KXMLBRBI", "KXMLBSB", "KXMLBOUTS", "KXMLBHA",
-                        "KXMLBERA", "KXMLBWA"],
+                        "KXMLBERA", "KXMLBWA",
+                        "KXMLB", "KXMLBAL", "KXMLBNL", "KXMLBALCSQUAL", "KXMLBNLCSQUAL", "KXMLBSERIES",
+                        "KXMLBALMVP", "KXMLBNLMVP", "KXMLBALCY", "KXMLBNLCY", "KXMLBALROTY", "KXMLBNLROTY", "KXMLBWSMVP"],
         },
         "polymarket_us": {
             "tags": ["mlb"],        # Not 'baseball', which brings Korean and Japanese league games too.
@@ -51,7 +59,10 @@ SPORTS = {
     },
     "nhl": {
         "kalshi": {
-            "tickers": ["KXNHLGAME", "KXNHLSPREAD", "KXNHLTOTAL", "KXNHLTEAMTOTAL", "KXNHLGOAL", "KXNHLPTS"],
+            "tickers": ["KXNHLGAME", "KXNHLSPREAD", "KXNHLTOTAL", "KXNHLTEAMTOTAL", "KXNHLGOAL", "KXNHLPTS",
+                        "KXNHL", "KXNHLEAST", "KXNHLWEST", "KXNHLATLANTIC", "KXNHLCENTRAL", "KXNHLMETROPOLITAN", "KXNHLPACIFIC",
+                        "KXNHLPLAYOFF", "KXNHLPRES", "KXNHLSEASONPTS",
+                        "KXNHLHART", "KXNHLNORRIS", "KXNHLVEZINA", "KXNHLADAMS", "KXNHLRICHARD", "KXNHLROSS"],
         },
         "polymarket_us": {
             "tags": ["nhl"],
@@ -60,7 +71,8 @@ SPORTS = {
     "nba": {
         "kalshi": {
             "tickers": ["KXNBAGAME", "KXNBASPREAD", "KXNBATOTAL", "KXNBATEAMTOTAL",
-                        "KXNBAPTS", "KXNBAREB", "KXNBAAST", "KXNBA3PT", "KXNBABLK"],
+                        "KXNBAPTS", "KXNBAREB", "KXNBAAST", "KXNBA3PT", "KXNBABLK",
+                        "KXNBA", "KXNBAEAST", "KXNBAWEST", "KXNBAEAST1SEED", "KXNBAWEST1SEED", "KXNBAWINS", "KXNBAMVP"],
         },
         "polymarket_us": {
             "tags": ["nba"],

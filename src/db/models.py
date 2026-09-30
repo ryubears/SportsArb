@@ -120,6 +120,9 @@ class Opportunity:
     days_held: float | None     # From the peak until the bet pays out, if held to resolution.
     return_pct: float       # Net edge over the capital tied up, as a percent.
     annual_pct: float | None    # return_pct scaled to a year over days_held, without compounding.
+    min_edge_seconds: float | None = None   # The longest unbroken stretch of the episode at config.MIN_EDGE or more.
+    min_edge_size: float | None = None      # Contracts fillable at that edge through all of that stretch.
+    min_edge_profit: float | None = None    # Net dollars from filling them, at the stretch's thinnest moment.
 
 
 @dataclass

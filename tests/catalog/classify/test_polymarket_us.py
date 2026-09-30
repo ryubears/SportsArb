@@ -49,15 +49,60 @@ def test_college_games_use_cfb_slugs_and_the_venues_own_codes():
     assert college("nfl-phi-ten-2026-09-20", "aec-nfl-phi-ten-2026-09-20", "football_team_full_game_winner") is None
 
 
-def test_futures_are_left_out():
-    assert polymarket_us.classify(row("nfl-champ-2027-02-14-w", "tec-nfl-champ-2027-02-14-w-buf", "futures", start_time=None)) is None
-    assert polymarket_us.classify(row("nfl-afceast-2027-01-10-w", "tec-nfl-afceast-2027-01-10-w-buf", "futures", start_time=None)) is None
-    assert polymarket_us.classify(row("cfb-champ-2027-01-25-w", "tec-cfb-champ-2027-01-25-w-nd", "futures", start_time=None) | {"sport": "ncaaf"}) is None
+def future(event, slug, sport="nfl", title=""):
+    return polymarket_us.classify(row(event, slug, "futures", start_time=None) | {"sport": sport, "title": title})
 
 
-def test_skips_props_and_awards():
+def test_team_futures_read_the_event_shape_and_name_the_team_from_the_market_slug():
+    assert bet_fields(future("nfl-champ-2027-02-14-w", "tec-nfl-champ-2027-02-14-w-buf")) == (
+        "champion", 2027, None, None, None, "BUF", None, "yes")
+    assert future("nfl-afceast-2027-01-10-w", "tec-nfl-afceast-2027-01-10-w-buf").kind == "division_champion"
+    assert future("nfl-afc1seed-2027-01-10", "aachc-nfl-afc1seed-2027-01-10-bal").kind == "conf_top_seed"
+    assert future("nfl-2027-01-10-playoffq", "aqc-nfl-2027-01-10-playoffq-ari").kind == "make_playoffs"
+    assert future("nfl-afc-2027-01-24-champq", "aqc-nfl-afc-2027-01-24-champq-bal").kind == "reach_conf_final"
+    assert bet_fields(future("mlb-champ-2026-09-27", "tec-mlb-champ-2026-09-27-lad", "mlb"))[:6] == ("champion", 2026, None, None, None, "LAD")
+    assert future("mlb-2026-10-10-alcsq", "aqc-mlb-2026-10-10-alcsq-bos", "mlb").kind == "reach_conf_final"
+    assert future("nhl-champ-2027-06-18-w", "tec-nhl-champ-2027-06-18-w-tb", "nhl").subject == "TBL"
+    assert future("nhl-atldiv-2027-04-10-w", "tec-nhl-atldiv-2027-04-10-w-bos", "nhl").kind == "division_champion"
+    assert future("nba-eastseed1-2027-04-11-w", "aachc-nba-eastseed1-2027-04-11-w-atl", "nba").kind == "conf_top_seed"
+
+
+def test_college_conference_futures_use_the_venues_own_codes():
+    acc = future("cfb-accchamp-2026-12-05-w", "tec-cfb-accchamp-2026-12-05-w-boscol", "ncaaf")
+    assert bet_fields(acc) == ("conf_champion", 2027, None, None, None, "BC", None, "yes")      # A college season ends the next year.
+    assert future("cfb-secchamp-2026-12-05-winner", "tec-cfb-secchamp-2026-12-05-winner-ala", "ncaaf").kind == "conf_champion"
+    assert future("cfb-big12-2026-12-05-w", "tec-cfb-big12-2026-12-05-w-arz", "ncaaf").kind == "conf_champion"
+    assert future("cfb-big12-2026-12-04-champq", "aqc-cfb-big12-2026-12-04-champq-arz", "ncaaf").kind == "reach_conf_title_game"
+    assert future("cfb-cfp-2027-01-25-finalq", "aqc-cfb-cfp-2027-01-25-finalq-ohiost", "ncaaf").subject == "OSU"
+
+
+def test_a_wild_card_series_lists_its_teams_in_a_fixed_order():
+    braves = future("mlb-nlwc-phi-atl-2026-10-01-w", "tec-mlb-nlwc-phi-atl-2026-10-01-w-atl", "mlb")
+    assert bet_fields(braves) == ("wild_card_series", 2026, None, "ATL", "PHI", "ATL", None, "yes")
+
+
+def test_awards_name_the_player_from_the_market_title():
+    pca = future("mlb-nl-2026-11-27-mvp", "tec-mlb-nl-2026-11-27-mvp-petarm", "mlb", title="Pete Crow-Armstrong")
+    assert bet_fields(pca) == ("nl_mvp", 2026, None, None, None, "pete crowarmstrong", None, "yes")
+    assert future("nhl-2027-04-10-mostgoals", "aachc-nhl-2027-04-10-mostgoals-adrkem", "nhl", title="Adrian Kempe").kind == "goals_leader"
+    assert future("nfl-mvp-2027-02-11-w", "tec-nfl-mvp-2027-02-11-w-abc") is None         # No name to go by.
+
+
+def test_season_totals_read_the_line_from_the_market_title():
+    over = future("nfl-wins-2027-01-10-ari", "aachc-nfl-wins-2027-01-10-ari-2pt5wins", title="2.5+ Wins")
+    at_least = future("nba-2027-04-11-wintotals", "aachc-nba-2027-04-11-wintotals-atl", "nba", title="Atlanta 43+ wins")
+    points = future("nhl-2027-04-10-teampts", "aachc-nhl-2027-04-10-teampts-ana", "nhl", title="ANA Ducks 95+")
+    assert bet_fields(over) == ("season_wins", 2027, None, None, None, "ARI", 2.5, "yes")      # Over 2.5.
+    assert (at_least.subject, at_least.line) == ("ATL", 42.5)                                  # At least 43.
+    assert (points.kind, points.subject, points.line) == ("season_points", "ANA", 94.5)
+    assert future("nfl-wins-ou-2027-01-10", "aachc-nfl-wins-ou-2027-01-10-ari", title="Arizona 4.5+").line == 4.5
+    assert future("nfl-wins-2027-01-10-ari", "aachc-nfl-wins-2027-01-10-ari-x", title="Win Total") is None
+
+
+def test_skips_props_and_futures_nobody_pairs():
     assert polymarket_us.classify(row("nfl-phi-ten-2026-09-20", "x", "football_player_touchdowns", 0.5)) is None
-    assert polymarket_us.classify(row("nfl-mvp-2027-02-11-w", "tec-nfl-mvp-2027-02-11-w-abc", "futures", start_time=None)) is None
+    assert future("nfl-mostrecyds-2027-01-10", "aachc-nfl-mostrecyds-2027-01-10-abro", title="A.J. Brown") is None
+    assert future("mlb-champ-2026-09-27", "tec-mlb-champ-2026-09-27-lad") is None      # An MLB event under the NFL.
 
 
 def test_player_props_shift_the_at_least_line_by_a_half():

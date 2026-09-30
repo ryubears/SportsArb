@@ -7,8 +7,7 @@ per market, for the market's long side, reads how each game under way
 stands, and reads the account's balance.
 The streaming half opens the signed markets websocket and keeps a live
 book per market slug, replacing the whole book on every message because
-the feed sends full snapshots, and applying each trade from the trade
-feed until a book shows it. The trading half sends signed orders for
+the feed sends full snapshots. The trading half sends signed orders for
 the live executor. This is the only file that knows Polymarket US field
 names and message formats.
 
@@ -38,9 +37,9 @@ WS_URL = "wss://api.polymarket.us/v1/ws/markets"
 WS_PATH = "/v1/ws/markets"
 WS_CHUNK = 100          # Market slugs per subscription request, the documented maximum.
 WS_SUBSCRIPTIONS = 10   # Subscription requests per connection, however few slugs each carries.
-# What each chunk of slugs subscribes to, by request id prefix: the whole book, and each trade, which on 2026-09-29 came a
-# median 30 ms before the book that showed it, and added up to every contract the books' stats said traded.
-WS_TYPES = {"md": "SUBSCRIPTION_TYPE_MARKET_DATA", "tr": "SUBSCRIPTION_TYPE_TRADE"}
+# What each chunk of slugs subscribes to: the whole book. The trade feed was dropped on 2026-09-30. Trades came about 4% as
+# often as book changes, arrived no sooner than the book with the same time, and can only take quotes away, never add them.
+WS_TYPE = "SUBSCRIPTION_TYPE_MARKET_DATA"
 WS_FULL = "max subscriptions per connection reached"    # The error refusing a request past WS_SUBSCRIPTIONS.
 WS_DEBOUNCE = False     # Whether to ask the feed to batch updates. Batching cuts bandwidth by a third, but it can hold our view of the
                         # book behind the venue's: on the first live game, 2026-09-28, only 1 of 11 orders opening a trade here filled.
@@ -97,7 +96,9 @@ def is_game(event):
     Whether an event is a game, whose start time is its kickoff, rather than
     a future. The venue gives a game the id of its sports data feed, and
     Sportradar's, though not always its own: NHL preseason games and many
-    small college ones come with only Sportradar's.
+    small college ones come with only Sportradar's. An award's event has a
+    Sportradar id too, 'type_national_league_mvp-sport_baseball-league_mlb',
+    so a futures market never takes its event's start time as a kickoff.
     """
     return bool(event.get("gameId") or event.get("sportradarGameId"))
 
@@ -116,6 +117,7 @@ def contracts(sport, tags):
             if m.get("closed"):
                 continue
             long_side = next((s for s in m.get("marketSides", []) if s.get("long")), {})
+            future = m.get("sportsMarketType") == "futures"
             result.append(Contract(
                 venue="polymarket_us",
                 contract_id=m["slug"],
@@ -124,13 +126,16 @@ def contracts(sport, tags):
                 series_id=event.get("seriesSlug"),
                 sport=sport,
                 event_title=event.get("title"),
-                title=m.get("question") or m.get("title") or "",
+                # A future's question is its event's, 'National League MVP', and its title the player or line, 'Pete Crow-Armstrong'.
+                title=(m.get("title") if future else m.get("question")) or m.get("question") or m.get("title") or "",
                 outcome=long_side.get("description") or "Yes",
                 market_type=m.get("sportsMarketType"),
                 line=float_or_none(m.get("line")),
                 rules=m.get("description"),
-                start_time=iso(event.get("startTime")) if is_game(event) else None,
-                close_time=iso(m.get("endDate")),
+                start_time=iso(event.get("startTime")) if is_game(event) and not future else None,
+                # A future's market stays open two weeks past its event in case the event moves. The event's end is when it
+                # is expected to settle, which the payout time and how long it is recorded go by.
+                close_time=iso((event.get("endDate") if future else None) or m.get("endDate")),
                 fee_info={"feeCoefficient": m.get("feeCoefficient")},
             ))
     return result
@@ -190,56 +195,24 @@ def levels(entries, reverse):
     return sorted((lv for lv in parsed if lv[1] > 0), key=lambda lv: lv[0], reverse=reverse)
 
 
-# The book side a trade took from, by its maker's side of the long book: a resting sell was an offer, a resting buy a bid.
-MAKER_SIDES = {"ORDER_SIDE_SELL": "asks", "ORDER_SIDE_BUY": "bids"}
-TRADE_NEW = "TRADE_STATE_NEW"   # A trade as it happens. One in any other state is left alone.
-
-
-def after_trade(bids, asks, trade):
-    """
-    A book's (bids, asks) after a trade of (time, price, quantity, side):
-    the side it took from without every level better than its price,
-    which the taker would have reached first or which had already gone,
-    and with its quantity taken off the level at its price.
-    """
-    _, price, quantity, side = trade
-    better = (lambda p: p < price) if side == "asks" else (lambda p: p > price)
-    kept = []
-    for p, size in asks if side == "asks" else bids:
-        if better(p):
-            continue
-        if p == price:
-            size = round(size - quantity, 4)
-            if size <= 0:
-                continue
-        kept.append([p, size])
-    return (bids, kept) if side == "asks" else (kept, asks)
-
-
 class PolymarketUSBookStream(BookStream):
     """
     The signed markets websocket. Each book message carries a market's
-    whole book, so the local copy is replaced rather than patched. Trades
-    come on the same connection some 30 ms before the book that shows them,
-    so each is applied to the local copy at once and kept until a book
-    whose time is at or after its own replaces it. A book that is older,
-    arriving late, has the newer trades applied again. A trade the feed
-    misses costs only that head start, since the next book is whole.
+    whole book, so the local copy is replaced rather than patched.
 
     The feed allows WS_SUBSCRIPTIONS subscription requests on a connection,
-    of up to WS_CHUNK slugs each, and every chunk of slugs takes one request
-    per type in WS_TYPES. It documents no unsubscribe, so removed slugs are
-    simply ignored until the next connect and never give their requests
-    back. A fresh connection subscribes its slugs, capacity at most, in full
-    requests, but every later add spends requests of its own, even for a
-    single slug. So room() counts the requests left, and the feed opens
-    another connection once none has any. A request refused anyway, as past
-    the limit, has its slugs handed back through on_refused to go on another
-    connection.
+    of up to WS_CHUNK slugs each. It documents no unsubscribe, so removed
+    slugs are simply ignored until the next connect and never give their
+    requests back. A fresh connection subscribes its slugs, capacity at
+    most, in full requests, but every later add spends requests of its own,
+    even for a single slug. So room() counts the requests left, and the feed
+    opens another connection once none has any. A request refused anyway,
+    as past the limit, has its slugs handed back through on_refused to go on
+    another connection.
     """
 
     name = "polymarket_us"
-    capacity = WS_CHUNK * (WS_SUBSCRIPTIONS // len(WS_TYPES))
+    capacity = WS_CHUNK * WS_SUBSCRIPTIONS
 
     def __init__(self, contract_ids, on_book, on_gap=None, log=print):
         super().__init__(contract_ids, on_book, on_gap, log)
@@ -250,7 +223,6 @@ class PolymarketUSBookStream(BookStream):
         self.requests = 0       # Subscription requests this connection has spent, adds still queued included.
         self.asked = {}         # Each request id sent maps to its slugs, to hand them back if it is refused.
         self.seen = set()       # Slugs whose first book has come on this connection. That one is a snapshot, whose transactTime is its last change, maybe long ago.
-        self.pending = {}       # Slug maps to the trades, as (time, price, quantity, side), that its book does not show yet.
 
     def room(self):
         """
@@ -259,31 +231,30 @@ class PolymarketUSBookStream(BookStream):
         adds, which the subscription will carry with the rest, so the slug
         capacity bounds it too.
         """
-        return max(0, min((WS_SUBSCRIPTIONS - self.requests) // len(WS_TYPES) * WS_CHUNK, self.capacity - len(self.wanted)))
+        return max(0, min((WS_SUBSCRIPTIONS - self.requests) * WS_CHUNK, self.capacity - len(self.wanted)))
 
     def add(self, contract_ids):
         new = set(contract_ids) - self.wanted
         super().add(new)
-        self.requests += math.ceil(len(new) / WS_CHUNK) * len(WS_TYPES)    # What send_command will spend on them.
+        self.requests += math.ceil(len(new) / WS_CHUNK)     # What send_command will spend on them.
 
     def connect(self):
         return self.open_connection(WS_URL, signed_headers("GET", WS_PATH))
 
     async def send_subscriptions(self, ws, slugs):
         """
-        Subscribe to every type in WS_TYPES for the slugs, WS_CHUNK at a time.
+        Subscribe to the slugs' books, WS_CHUNK at a time.
         """
         for i in range(0, len(slugs), WS_CHUNK):
             self.request_id += 1
-            for prefix, kind in WS_TYPES.items():
-                request_id = f"{prefix}-{self.request_id}"
-                self.asked[request_id] = slugs[i:i + WS_CHUNK]
-                await ws.send(json.dumps({"subscribe": {"requestId": request_id, "subscriptionType": kind,
-                                                        "marketSlugs": slugs[i:i + WS_CHUNK], "responsesDebounced": WS_DEBOUNCE}}))
+            request_id = f"md-{self.request_id}"
+            self.asked[request_id] = slugs[i:i + WS_CHUNK]
+            await ws.send(json.dumps({"subscribe": {"requestId": request_id, "subscriptionType": WS_TYPE,
+                                                    "marketSlugs": slugs[i:i + WS_CHUNK], "responsesDebounced": WS_DEBOUNCE}}))
 
     async def subscribe(self, ws):
         slugs = sorted(self.wanted)
-        self.requests = math.ceil(len(slugs) / WS_CHUNK) * len(WS_TYPES)    # Replaces the count of adds, which these slugs include.
+        self.requests = math.ceil(len(slugs) / WS_CHUNK)    # Replaces the count of adds, which these slugs include.
         await self.send_subscriptions(ws, slugs)
 
     async def send_command(self, ws, action, slugs):
@@ -299,16 +270,13 @@ class PolymarketUSBookStream(BookStream):
         self.requests = WS_SUBSCRIPTIONS
         slugs = sorted(set(self.asked.pop(request_id)) & self.wanted)
         if not slugs:
-            return          # Moved already, when the other request of its chunk was refused, or removed since.
+            return          # Removed since.
         self.log(f"polymarket_us refused {request_id} as one subscription too many, moving its {len(slugs)} contracts to another connection")
         self.remove(slugs)
         self.on_refused(slugs)
 
     def handle(self, raw):
         m = json.loads(raw)
-        if m.get("trade"):
-            self.on_trade(m["trade"])
-            return True
         data = m.get("marketData")
         if not data:
             error = m.get("error")
@@ -321,36 +289,10 @@ class PolymarketUSBookStream(BookStream):
         if slug not in self.wanted:
             return True
         at = epoch(data.get("transactTime"))
-        pending = [t for t in self.pending.pop(slug, ()) if at is None or t[0] > at]     # The trades this book does not show yet.
-        bids, asks = levels(data.get("bids"), reverse=True), levels(data.get("offers"), reverse=False)
-        for trade in pending:
-            bids, asks = after_trade(bids, asks, trade)
-        if pending:
-            self.pending[slug] = pending
-        self.books[slug] = {"bids": bids, "asks": asks, "at": at}
+        self.books[slug] = {"bids": levels(data.get("bids"), reverse=True), "asks": levels(data.get("offers"), reverse=False), "at": at}
         self.show(slug, at if slug in self.seen else None)
         self.seen.add(slug)
         return True
-
-    def on_trade(self, trade):
-        """
-        Apply a new trade to its market's book at once, and keep it until a
-        book shows it. A trade the book already shows, or on a market with
-        no book yet, changes nothing now.
-        """
-        slug = trade.get("marketSlug")
-        side = MAKER_SIDES.get((trade.get("maker") or {}).get("side"))
-        at = epoch(trade.get("tradeTime"))
-        if slug not in self.wanted or trade.get("state", TRADE_NEW) != TRADE_NEW or side is None or at is None:
-            return
-        book = self.books.get(slug)
-        if book is not None and book["at"] is not None and at <= book["at"]:
-            return
-        t = (at, amount(trade.get("price")), amount(trade.get("quantity")), side)
-        self.pending.setdefault(slug, []).append(t)
-        if book is not None:
-            book["bids"], book["asks"] = after_trade(book["bids"], book["asks"], t)
-            self.show(slug, at)
 
     def show(self, slug, sent):
         """

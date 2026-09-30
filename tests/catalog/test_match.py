@@ -24,6 +24,21 @@ def test_label():
     assert match.label(bet("kalshi", "k", kind="spread", game_date="2026-09-20", team_a="CAR", team_b="ATL", subject="ATL", line=4.5), "nfl") == "nfl spread 2026-09-20 CAR@ATL ATL 4.5"
 
 
+def test_a_futures_label_names_the_season_in_place_of_the_game():
+    assert match.label(bet("kalshi", "k", kind="champion", game_date=None, team_a=None, team_b=None, subject="KC"), "nfl") == \
+        "nfl champion 2027 KC"
+    assert match.label(bet("kalshi", "k", kind="wild_card_series", game_date=None, team_a="ATL", team_b="PHI", subject="ATL"), "mlb") == \
+        "mlb wild_card_series 2027 ATL vs PHI ATL"
+    assert match.label(bet("kalshi", "k", kind="season_wins", game_date=None, team_a=None, team_b=None, subject="ARI", line=2.5), "nfl") == \
+        "nfl season_wins 2027 ARI 2.5"
+
+
+def test_an_award_pair_notes_how_each_venue_settles_a_shared_award():
+    pair = match.make_pair([bet("kalshi", "k", kind="mvp", game_date=None, team_a=None, team_b=None, subject="josh allen"),
+                            bet("polymarket_us", "p", kind="mvp", game_date=None, team_a=None, team_b=None, subject="josh allen")], "nfl")
+    assert pair.flags == [match.AWARD_NOTE]
+
+
 def test_the_same_bet_in_two_sports_has_two_labels():
     game = dict(game_date="2026-11-01", team_a="DAL", team_b="DEN", subject="DAL")     # Dallas at Denver, the same day in both leagues.
     cowboys, mavericks = bet("kalshi", "k", **game), bet("kalshi", "k2", **game)

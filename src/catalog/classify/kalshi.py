@@ -7,9 +7,14 @@ basketball's game series share the NFL's layout, with team codes of two
 to five letters in college football, two or three in hockey, and three in
 basketball. Baseball's event tickers carry the start time too, which
 tells a doubleheader's two games apart. Player props name the player in
-the title, before the colon. Only games are read, since only games are
-traded, so futures are left out. This is the only file that knows
-Kalshi's ticker layout.
+the title, before the colon.
+
+Futures, bets on a season rather than a game, each have a series of their
+own. A team future's market ticker ends in the team, an award's names the
+player in its subtitle, and a season win total's event ticker ends in the
+team, with one market per line. The venues number seasons differently, so
+a future's season is the one its settlement falls in, which both agree
+on. This is the only file that knows Kalshi's ticker layout.
 """
 
 import re
@@ -62,6 +67,43 @@ PLAYER_SERIES = {
     "KXNBABLK": "player_blocks",
 }
 PLAYER_TITLE = re.compile(r"^(.+?): ")     # 'Bijan Robinson: 100+ receiving yards'.
+
+# FUTURES. Each series is one kind. The market ticker ends in the team, 'KXSB-27-KC'.
+CONFERENCES = ("AAC", "ACC", "B10", "B12", "CUSA", "MAC", "MWC", "PAC12", "SBELT")     # College conferences, bar the SEC, spelled alike.
+TEAM_FUTURES = {
+    "KXSB": "champion", "KXMLB": "champion", "KXNBA": "champion", "KXNHL": "champion", "KXNCAAF": "champion",
+    "KXNFLAFCCHAMP": "conf_champion", "KXNFLNFCCHAMP": "conf_champion", "KXMLBAL": "conf_champion", "KXMLBNL": "conf_champion",
+    "KXNBAEAST": "conf_champion", "KXNBAWEST": "conf_champion", "KXNHLEAST": "conf_champion", "KXNHLWEST": "conf_champion",
+    **{f"KXNCAAF{c}": "conf_champion" for c in (*CONFERENCES, "SEC")},
+    **{f"KXNFL{c}{d}": "division_champion" for c in ("AFC", "NFC") for d in ("EAST", "NORTH", "SOUTH", "WEST")},
+    **{f"KXNHL{d}": "division_champion" for d in ("ATLANTIC", "CENTRAL", "METROPOLITAN", "PACIFIC")},
+    "KXNFL1SEED": "conf_top_seed", "KXNBAEAST1SEED": "conf_top_seed", "KXNBAWEST1SEED": "conf_top_seed",
+    "KXNFLPLAYOFF": "make_playoffs", "KXNHLPLAYOFF": "make_playoffs", "KXNCAAFPLAYOFF": "make_playoffs",
+    "KXMLBALCSQUAL": "reach_conf_final", "KXMLBNLCSQUAL": "reach_conf_final",     # The league championship series.
+    "KXNCAAFFINALIST": "reach_final",
+    **{f"KXNCAAF{c}QUAL": "reach_conf_title_game" for c in CONFERENCES}, "KXNCAAFSECQ": "reach_conf_title_game",
+    "KXNHLPRES": "presidents_trophy",
+}
+ROUND_SERIES = "KXNFLROUNDQUAL"     # Playoff round qualifiers, one event per round: 'KXNFLROUNDQUAL-27CONF'.
+ROUNDS = {"CONF": "reach_conf_final", "DIV": "reach_divisional_round"}
+SERIES_WINNERS = "KXMLBSERIES"      # One event per playoff series, the round last: 'KXMLBSERIES-26PHIATLWC'.
+SERIES_ROUNDS = {"WC": "wild_card_series"}
+SERIES_EVENT = re.compile(r"^\d{2}([A-Z]+?)(WC|DS|CS|WS)$")
+# Awards, the player named in the market's subtitle, 'Aaron Judge'.
+AWARD_FUTURES = {
+    "KXNFLMVP": "mvp", "KXNFLOPOTY": "offensive_player", "KXNFLDPOTY": "defensive_player", "KXNFLOROTY": "offensive_rookie",
+    "KXNFLDROTY": "defensive_rookie", "KXNFLCPOTY": "comeback_player", "KXNFLCOTY": "coach",
+    "KXMLBALMVP": "al_mvp", "KXMLBNLMVP": "nl_mvp", "KXMLBALCY": "al_cy_young", "KXMLBNLCY": "nl_cy_young",
+    "KXMLBALROTY": "al_rookie", "KXMLBNLROTY": "nl_rookie", "KXMLBWSMVP": "world_series_mvp",
+    "KXNBAMVP": "mvp",
+    "KXNHLHART": "hart", "KXNHLNORRIS": "norris", "KXNHLVEZINA": "vezina", "KXNHLADAMS": "jack_adams",
+    "KXNHLRICHARD": "goals_leader", "KXNHLROSS": "points_leader",
+    "KXHEISMAN": "heisman",
+}
+# Season totals, one event per team, 'KXNFLWINS-27ARI', and one market per line, stored as the strict threshold.
+LINE_FUTURES = {"KXNFLWINS": "season_wins", "KXNCAAFWINS": "season_wins", "KXNBAWINS": "season_wins", "KXNHLSEASONPTS": "season_points"}
+LINE_EVENT = re.compile(r"^\d{2}([A-Z]+)$")
+FUTURE_SERIES = {*TEAM_FUTURES, ROUND_SERIES, SERIES_WINNERS, *AWARD_FUTURES, *LINE_FUTURES}
 
 
 def team(code, sport):
@@ -137,7 +179,41 @@ def classify(row):
             return None
         return Bet(kind=kind, season=season_from_date(game_date, sport), game_date=game_date, team_a=away, team_b=home,
                    subject=player_key(m.group(1)), line=line, polarity="yes", **base)
+
+    if series in FUTURE_SERIES and row["close_time"]:
+        return classify_future(row, series, event_tail, market_tail, sport, base)
     return None
+
+
+def classify_future(row, series, event_tail, market_tail, sport, base):
+    """
+    The Bet a futures contract row describes, or None. Its season is the one its settlement falls in.
+    """
+    future = dict(season=season_from_date(row["close_time"][:10], sport), game_date=None, polarity="yes", **base)
+    if series in AWARD_FUTURES:
+        name = row["outcome"]
+        return Bet(kind=AWARD_FUTURES[series], team_a=None, team_b=None, subject=player_key(name), line=None, **future) if name else None
+    if series in LINE_FUTURES:
+        m = LINE_EVENT.match(event_tail)
+        subject = team(m.group(1), sport) if m else None
+        if not subject or row["line"] is None:
+            return None
+        return Bet(kind=LINE_FUTURES[series], team_a=None, team_b=None, subject=subject, line=row["line"], **future)
+    subject = team(market_tail, sport)
+    if not subject:
+        return None
+    if series == ROUND_SERIES:
+        kind = ROUNDS.get(event_tail[2:])
+        return Bet(kind=kind, team_a=None, team_b=None, subject=subject, line=None, **future) if kind else None
+    if series == SERIES_WINNERS:
+        m = SERIES_EVENT.match(event_tail)
+        kind = SERIES_ROUNDS.get(m.group(2)) if m else None
+        teams = split_codes(m.group(1), sport) if kind else (None, None)
+        if subject not in teams:
+            return None
+        team_a, team_b = sorted(teams)      # The venues list a series' teams in different orders.
+        return Bet(kind=kind, team_a=team_a, team_b=team_b, subject=subject, line=None, **future)
+    return Bet(kind=TEAM_FUTURES[series], team_a=None, team_b=None, subject=subject, line=None, **future)
 
 
 def doubleheaders(rows):

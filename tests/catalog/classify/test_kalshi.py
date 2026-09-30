@@ -10,7 +10,7 @@ def row(series, event, ticker, **fields):
     A Kalshi contract row with the fields the classifier reads.
     """
     r = {"venue": "kalshi", "sport": "nfl", "series_id": series, "event_id": event, "contract_id": ticker,
-         "title": "", "outcome": "", "market_type": None, "line": None, "start_time": None}
+         "title": "", "outcome": "", "market_type": None, "line": None, "start_time": None, "close_time": None}
     r.update(fields)
     return r
 
@@ -62,15 +62,53 @@ def test_college_games_read_like_the_nfls():
     assert bet_fields(total) == ("total", 2027, "2026-10-03", "BC", "SMU", None, 43.5, "yes")
 
 
-def test_futures_are_left_out():
-    assert kalshi.classify(row("KXSB", "KXSB-27", "KXSB-27-BUF")) is None
-    assert kalshi.classify(row("KXNFLAFCEAST", "KXNFLAFCEAST-27", "KXNFLAFCEAST-27-BUF")) is None
-    assert kalshi.classify(row("KXNFLWINS", "KXNFLWINS-27BUF", "KXNFLWINS-27BUF-10", line=9.5)) is None
+def future(series, event, ticker, close, **fields):
+    return kalshi.classify(row(series, event, ticker, close_time=close, **fields))
 
 
-def test_skips_unknown_series_and_missing_lines():
+def test_team_futures_name_the_team_and_take_the_season_their_settlement_falls_in():
+    assert bet_fields(future("KXSB", "KXSB-27", "KXSB-27-KC", "2027-02-14T23:30:00+00:00")) == (
+        "champion", 2027, None, None, None, "KC", None, "yes")
+    assert bet_fields(future("KXNFL1SEED", "KXNFL1SEED-AFC26", "KXNFL1SEED-AFC26-BAL", "2027-01-11T15:00:00+00:00")) == (
+        "conf_top_seed", 2027, None, None, None, "BAL", None, "yes")      # The event names the year the season starts.
+    assert future("KXNFLAFCEAST", "KXNFLAFCEAST-27", "KXNFLAFCEAST-27-BUF", "2027-01-11T15:00:00+00:00").kind == "division_champion"
+    assert bet_fields(future("KXMLB", "KXMLB-26", "KXMLB-26-LAD", "2026-11-01T04:00:00+00:00", sport="mlb"))[:6] == (
+        "champion", 2026, None, None, None, "LAD")
+    assert bet_fields(future("KXNCAAFACC", "KXNCAAFACC-26", "KXNCAAFACC-26-CLEM", "2026-12-06T15:00:00+00:00", sport="ncaaf"))[:6] == (
+        "conf_champion", 2027, None, None, None, "CLEM")                  # A college season ends the year after it starts.
+    assert future("KXNCAAFSECQ", "KXNCAAFSECQ-26", "KXNCAAFSECQ-26-UGA", "2026-12-06T04:00:00+00:00", sport="ncaaf").kind == "reach_conf_title_game"
+    assert future("KXNHL", "KXNHL-27", "KXNHL-27-TB", "2027-07-01T14:00:00+00:00", sport="nhl").subject == "TBL"
+
+
+def test_playoff_rounds_and_series_winners():
+    conf = future("KXNFLROUNDQUAL", "KXNFLROUNDQUAL-27CONF", "KXNFLROUNDQUAL-27CONF-BAL", "2027-01-25T15:00:00+00:00")
+    div = future("KXNFLROUNDQUAL", "KXNFLROUNDQUAL-27DIV", "KXNFLROUNDQUAL-27DIV-BAL", "2027-01-25T15:00:00+00:00")
+    series = future("KXMLBSERIES", "KXMLBSERIES-26PHIATLWC", "KXMLBSERIES-26PHIATLWC-PHI", "2026-10-14T18:00:00+00:00", sport="mlb")
+    assert (conf.kind, div.kind) == ("reach_conf_final", "reach_divisional_round")
+    assert bet_fields(series) == ("wild_card_series", 2026, None, "ATL", "PHI", "PHI", None, "yes")     # The teams in a fixed order.
+    assert future("KXMLBSERIES", "KXMLBSERIES-26PHIATLDS", "KXMLBSERIES-26PHIATLDS-PHI", "2026-10-14T18:00:00+00:00", sport="mlb") is None
+
+
+def test_awards_name_the_player_from_the_subtitle():
+    judge = future("KXMLBALMVP", "KXMLBALMVP-26", "KXMLBALMVP-26-AJUD", "2026-12-08T15:00:00+00:00", sport="mlb", outcome="Aaron Judge")
+    witt = future("KXMLBALMVP", "KXMLBALMVP-26", "KXMLBALMVP-26-RWIT", "2026-12-08T15:00:00+00:00", sport="mlb", outcome="Bobby Witt Jr.")
+    assert bet_fields(judge) == ("al_mvp", 2026, None, None, None, "aaron judge", None, "yes")
+    assert witt.subject == "bobby witt"
+    assert future("KXNFLMVP", "KXNFLMVP-27", "KXNFLMVP-27-X", "2027-03-14T15:00:00+00:00", outcome="").__class__ is type(None)
+
+
+def test_season_totals_name_the_team_from_the_event_and_keep_the_strict_line():
+    wins = future("KXNFLWINS", "KXNFLWINS-27ARI", "KXNFLWINS-27ARI-2", "2027-01-18T05:00:00+00:00", line=1.5)
+    points = future("KXNHLSEASONPTS", "KXNHLSEASONPTS-27ANA", "KXNHLSEASONPTS-27ANA-70", "2027-04-18T14:00:00+00:00", sport="nhl", line=69.5)
+    assert bet_fields(wins) == ("season_wins", 2027, None, None, None, "ARI", 1.5, "yes")
+    assert bet_fields(points) == ("season_points", 2027, None, None, None, "ANA", 69.5, "yes")
+
+
+def test_skips_unknown_series_and_missing_lines_and_settlement_times():
     assert kalshi.classify(row("KXNFLRECYDS", "KXNFLRECYDS-26SEP20", "KXNFLRECYDS-26SEP20-X")) is None
-    assert kalshi.classify(row("KXNFLWINS", "KXNFLWINS-27BUF", "KXNFLWINS-27BUF-10")) is None
+    assert future("KXNFLWINS", "KXNFLWINS-27BUF", "KXNFLWINS-27BUF-10", "2027-01-18T05:00:00+00:00") is None
+    assert kalshi.classify(row("KXSB", "KXSB-27", "KXSB-27-KC")) is None       # No close time, so no season.
+    assert future("KXSB", "KXSB-27", "KXSB-27-XYZ", "2027-02-14T23:30:00+00:00") is None
 
 
 def test_player_props_name_the_player_and_keep_the_strict_line():

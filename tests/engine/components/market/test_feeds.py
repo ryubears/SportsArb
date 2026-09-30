@@ -68,20 +68,20 @@ def test_contracts_a_connection_refuses_go_to_another_with_room():
 
     async def scenario():
         feed = feeds.VenueFeed(OfflinePolymarket, lambda *args: None, lambda *args: None, logs.append)
-        feed.start([f"s{i:04}" for i in range(600)])
+        feed.start([f"s{i:04}" for i in range(1200)])
         for stream in feed.streams:
             await stream.subscribe(Socket())
         first, second = feed.streams
-        # The first's last request for books refused, as if the venue counted one more than it did.
-        first.handle(json.dumps({"requestId": "md-5", "error": polymarket_us.WS_FULL}))
+        # The first's last request refused, as if the venue counted one more than it did.
+        first.handle(json.dumps({"requestId": "md-10", "error": polymarket_us.WS_FULL}))
         feed.add(["new"])
         await feed.stop()
         return feed.streams
     first, second = asyncio.run(scenario())
-    assert logs == ["polymarket_us refused md-5 as one subscription too many, moving its 100 contracts to another connection"]
-    assert (len(first.wanted), first.room()) == (400, 0)            # It takes nothing more.
-    assert (len(second.wanted), second.room()) == (201, 200)        # Its own chunk, then one for the 100 moved and one for new.
-    assert {f"s{i:04}" for i in range(400, 500)} | {"new"} <= second.wanted
+    assert logs == ["polymarket_us refused md-10 as one subscription too many, moving its 100 contracts to another connection"]
+    assert (len(first.wanted), first.room()) == (900, 0)            # It takes nothing more.
+    assert (len(second.wanted), second.room()) == (301, 600)        # Its own two chunks, then one for the 100 moved and one for new.
+    assert {f"s{i:04}" for i in range(900, 1000)} | {"new"} <= second.wanted
 
 
 async def until(condition, seconds=30):

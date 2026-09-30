@@ -32,4 +32,4 @@ def test_sports_named_apart_are_ones_the_catalog_fetches(name, sports):
 
 def test_the_kalshi_series_fetched_are_the_ones_the_kalshi_classifier_reads():
     fetched = [ticker for venues in fetch.SPORTS.values() for ticker in venues["kalshi"]["tickers"]]
-    assert sorted(fetched) == sorted({**kalshi.GAME_SERIES, **kalshi.PLAYER_SERIES})
+    assert sorted(fetched) == sorted({*kalshi.GAME_SERIES, *kalshi.PLAYER_SERIES, *kalshi.FUTURE_SERIES})

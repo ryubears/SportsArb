@@ -42,6 +42,13 @@ BASKETBALL_POSTPONED = ("Overtime counts on both venues. If the game does not st
 BASKETBALL_NOTES = {"game_winner": BASKETBALL_POSTPONED, "spread": BASKETBALL_POSTPONED, "total": BASKETBALL_POSTPONED,
                     "team_total": BASKETBALL_POSTPONED}
 KIND_NOTES = {"nfl": FOOTBALL_NOTES, "ncaaf": FOOTBALL_NOTES, "mlb": BASEBALL_NOTES, "nhl": HOCKEY_NOTES, "nba": BASKETBALL_NOTES}
+# Awards, in every sport. Both venues follow the official award, and season win totals count the regular season only on both.
+AWARD_NOTE = ("Polymarket US pays $1 divided among players who share the award. Kalshi's rules say the same for some awards and "
+              "nothing for others.")
+FUTURE_NOTES = {kind: AWARD_NOTE for kind in (
+    "mvp", "offensive_player", "defensive_player", "offensive_rookie", "defensive_rookie", "comeback_player", "coach",
+    "al_mvp", "nl_mvp", "al_cy_young", "nl_cy_young", "al_rookie", "nl_rookie", "world_series_mvp",
+    "hart", "norris", "vezina", "jack_adams", "goals_leader", "points_leader", "heisman")}
 FOOTBALL_PLAYER_NOTE = "Both venues settle to the pre-game fair price if the player never takes a snap and count overtime. Polymarket US ignores stat corrections made after the game."
 PLAYER_NOTES = {
     "nfl": FOOTBALL_PLAYER_NOTE,
@@ -68,11 +75,14 @@ def identity(bet):
 def label(bet, sport):
     """
     The sport and the identity in words, for example 'nfl spread 2026-09-20
-    CAR@ATL ATL 4.5'. The sport keeps it unique across sports, whose bets can
-    read the same: Dallas at Denver on one day is 'game_winner 2026-11-01
-    DAL@DEN DAL' in the NFL and the NBA alike.
+    CAR@ATL ATL 4.5', or for a future the season in place of the game,
+    'nfl champion 2027 KC'. The sport keeps it unique across sports, whose
+    bets can read the same: the Broncos' and the Nuggets' titles are both
+    'champion 2027 DEN'.
     """
-    parts = [sport, bet["kind"], bet["game_date"], f"{bet['team_a']}@{bet['team_b']}"]
+    parts = [sport, bet["kind"], bet["game_date"] or str(bet["season"])]
+    if bet["team_a"]:
+        parts.append(f"{bet['team_a']}@{bet['team_b']}" if bet["game_date"] else f"{bet['team_a']} vs {bet['team_b']}")
     if bet["subject"]:
         parts.append(bet["subject"])
     if bet["line"] is not None:
@@ -93,6 +103,8 @@ def flags(rows, sport):
         found.append(KIND_NOTES[sport][kind])
     if kind.startswith("player_") and sport in PLAYER_NOTES:
         found.append(PLAYER_NOTES[sport])
+    if kind in FUTURE_NOTES:
+        found.append(FUTURE_NOTES[kind])
     return found
 
 

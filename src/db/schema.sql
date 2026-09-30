@@ -84,7 +84,10 @@ CREATE TABLE IF NOT EXISTS opportunities (
     live           INTEGER NOT NULL,   -- 1 when the game had started, 0 otherwise.
     days_held      REAL,            -- From the peak until the bet pays out, assuming it is held to resolution.
     return_pct     REAL NOT NULL,   -- Net edge over the capital tied up, as a percent.
-    annual_pct     REAL             -- return_pct scaled to a year over days_held, without compounding.
+    annual_pct     REAL,            -- return_pct scaled to a year over days_held, without compounding.
+    min_edge_seconds REAL,          -- The longest unbroken stretch of the episode at config.MIN_EDGE or more. Null before 2026-09-30.
+    min_edge_size  REAL,            -- Contracts fillable at that edge through all of that stretch.
+    min_edge_profit REAL            -- Net dollars from filling them, at the stretch's thinnest moment.
 );
 
 -- Reports read the episodes of a recent window, see tools/summary.py, and this spares them reading every one.

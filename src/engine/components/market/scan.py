@@ -9,6 +9,12 @@ with its two legs, its duration, its peak edge, how many contracts could
 have been filled at the peak by walking the books' depth, and the return
 on the capital tied up, annualized as if held until the bet pays out.
 
+Within an episode the edge worth trading, config.MIN_EDGE or more, may
+come and go. The Opportunity also keeps the longest unbroken stretch of it,
+and the contracts that stayed fillable at that edge through all of it,
+which is what an order sent any time in the stretch could have had, and
+so what an edge that lasts is worth.
+
 The recorder drives the Scanner with the books it holds in memory and
 the Scanner stores every episode as it ends, so the opportunities table
 is the log of everything it saw. The summary script reads it. The
@@ -35,11 +41,40 @@ class Episode:
     peak: Priced            # The best moment so far.
     peak_ts: str            # When the best moment was.
     taken: set = field(default_factory=set)     # Which of the scanner's on_signals took a trade on it, by position.
+    worth_since: str | None = None      # When the current stretch at config.MIN_EDGE or more began, or None outside one.
+    worth_least: tuple = (0.0, 0.0)     # The fewest contracts fillable at that edge so far in the stretch, and their profit.
+    worth_best: tuple | None = None     # The longest stretch so far, as (seconds, contracts, profit), a moment's included.
+
+    def see(self, priced, now):
+        """
+        Follow the stretches at config.MIN_EDGE or more through one pricing of the pair.
+        """
+        if priced is not None and priced.edge >= config.MIN_EDGE:
+            least = (priced.min_edge_size, priced.min_edge_profit)
+            if self.worth_since is None:
+                self.worth_since, self.worth_least = now, least
+            elif least[0] < self.worth_least[0]:
+                self.worth_least = least
+        else:
+            self.end_stretch(now)
+
+    def end_stretch(self, now):
+        """
+        Close the current stretch at config.MIN_EDGE or more at now, keeping it when it is the longest.
+        """
+        if self.worth_since is None:
+            return
+        seconds = seconds_between(self.worth_since, now)
+        if self.worth_best is None or seconds > self.worth_best[0]:
+            self.worth_best = (seconds, *self.worth_least)
+        self.worth_since = None
 
     def opportunity(self, end_ts):
         """
         The episode as an Opportunity, ended at end_ts.
         """
+        self.end_stretch(end_ts)
+        worth_seconds, worth_size, worth_profit = self.worth_best or (0.0, 0.0, 0.0)
         start_time = next((m["start_time"] for m in self.pair["members"] if m["start_time"]), None)
         live = 1 if start_time and self.peak_ts >= start_time else 0
         # Capital is locked until the slower of the two legs pays, so the later resolution counts.
@@ -64,6 +99,9 @@ class Episode:
             days_held=days_held,
             return_pct=return_pct,
             annual_pct=return_pct * 365 / days_held if days_held else None,
+            min_edge_seconds=worth_seconds,
+            min_edge_size=worth_size,
+            min_edge_profit=worth_profit,
         )
 
 
@@ -98,7 +136,8 @@ class Scanner:
         database.insert_opportunities(self.conn, [o])
         self.finished.append((episode.pair["kind"], o))
         if o.peak_profit >= config.LOG_PROFIT_DOLLARS:
-            self.log(f"episode {episode.pair['label']}: {o.trade}, {100 * o.peak_edge:.1f}c x {o.peak_size:.0f} = {o.peak_profit:.2f}$, lasted {o.seconds:.1f}s")
+            self.log(f"episode {episode.pair['label']}: {o.trade}, {100 * o.peak_edge:.1f}c x {o.peak_size:.0f} = {o.peak_profit:.2f}$, lasted {o.seconds:.1f}s, "
+                     f"{100 * config.MIN_EDGE:.0f}c or more for {o.min_edge_seconds:.1f}s with {o.min_edge_size:.0f} contracts throughout")
 
     def reload(self):
         """
@@ -118,9 +157,11 @@ class Scanner:
 
     def price(self, pair, books, now):
         """
-        The best trade across the pair's members whose books are fresh, as a Priced, or None.
+        The best trade across the pair's members whose books are fresh, as a Priced, or None. A future's
+        books may rest unchanged for hours while its markets are open, so they do not age, see pricing.fresh().
         """
-        members = [m for m in pair["members"] if fresh(books.get((m["venue"], m["contract_id"])), now)]
+        aging = pair["game_date"] is not None
+        members = [m for m in pair["members"] if fresh(books.get((m["venue"], m["contract_id"])), now, aging)]
         if len(members) < 2:
             return None
         return best_trade(members, books, self.fee_infos)
@@ -137,6 +178,7 @@ class Scanner:
                 episode = self.episodes[pair_id] = Episode(pair, now, priced, now)
             elif priced.edge > episode.peak.edge:
                 episode.peak, episode.peak_ts = priced, now
+            episode.see(priced, now)
             for i, on_signal in enumerate(self.on_signals):
                 if i not in episode.taken and on_signal(pair, priced.yes, priced.no, priced.edge, priced.size, self.fee_infos, now):
                     episode.taken.add(i)

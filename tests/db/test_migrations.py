@@ -60,6 +60,22 @@ def test_pairs_from_before_a_second_sport_become_nfl_ones_with_the_sport_in_thei
     assert version(conn) == len(migrations.STEPS)
 
 
+def test_older_episodes_get_the_minimum_edge_stretch_columns_empty(tmp_path):
+    path = tmp_path / "t.sqlite"
+    old = sqlite3.connect(path)
+    old.execute("""CREATE TABLE opportunities (id INTEGER PRIMARY KEY, pair_id INTEGER NOT NULL, trade TEXT NOT NULL,
+                   yes_venue TEXT NOT NULL, yes_contract TEXT NOT NULL, no_venue TEXT NOT NULL, no_contract TEXT NOT NULL,
+                   start_ts TEXT NOT NULL, end_ts TEXT NOT NULL, seconds REAL NOT NULL, peak_ts TEXT NOT NULL, peak_edge REAL NOT NULL,
+                   peak_size REAL NOT NULL, peak_profit REAL NOT NULL, live INTEGER NOT NULL, days_held REAL, return_pct REAL NOT NULL,
+                   annual_pct REAL)""")
+    old.execute("INSERT INTO opportunities VALUES (1, 7, 't', 'kalshi', 'k', 'polymarket_us', 'p', 's', 'e', 1, 'p', 0.1, 10, 1, 0, 1, 11, 400)")
+    old.execute("PRAGMA user_version = 6")
+    old.commit(); old.close()
+    conn = database.connect(path)
+    assert tuple(conn.execute("SELECT id, min_edge_seconds, min_edge_size, min_edge_profit FROM opportunities").fetchone()) == (1, None, None, None)
+    assert version(conn) == len(migrations.STEPS)
+
+
 def test_the_database_layer_does_not_import_the_live_code():
     import ast, pathlib
     for path in pathlib.Path(database.__file__).parent.glob("*.py"):
