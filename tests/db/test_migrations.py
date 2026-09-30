@@ -87,6 +87,19 @@ def test_the_transfers_table_is_dropped(tmp_path):
     assert version(conn) == len(migrations.STEPS)
 
 
+def test_trades_lose_their_cap_column_and_keep_their_rows(tmp_path):
+    path = tmp_path / "t.sqlite"
+    old = sqlite3.connect(path)
+    old.execute("CREATE TABLE trades (id INTEGER PRIMARY KEY, mode TEXT, signal_ts TEXT, quantity INTEGER NOT NULL, cap INTEGER)")
+    old.execute("INSERT INTO trades VALUES (1, 'live', '2026-09-29T20:00:00+00:00', 5, 5)")
+    old.execute("PRAGMA user_version = 8")
+    old.commit(); old.close()
+    conn = database.connect(path)
+    assert "cap" not in [r[1] for r in conn.execute("PRAGMA table_info(trades)")]
+    assert tuple(conn.execute("SELECT id, mode, quantity FROM trades").fetchone()) == (1, "live", 5)
+    assert version(conn) == len(migrations.STEPS)
+
+
 def test_the_database_layer_does_not_import_the_live_code():
     import ast, pathlib
     for path in pathlib.Path(database.__file__).parent.glob("*.py"):

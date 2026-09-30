@@ -37,7 +37,7 @@ config.MIN_ANNUAL_PCT a year or more until then. Near a game and during
 it, faster traders take an edge before our Polymarket US leg lands.
 A trade asks for config.FILL_SHARE of what the books show at that edge,
 the share we expect to get, as far as the cash free on each venue pays
-for, and a live one for no more than config.LIVE_MAX_CAP. Every trade is
+for, live as on paper. Every trade is
 stored in the trades table as soon as it is sent and updated when it is
 done, and every dollar moved goes through the cash the executor was
 given. Settling what was bought is money/settle.py's job.
@@ -371,31 +371,29 @@ class Executor:
 
     def quantity_for(self, legs):
         """
-        Set each leg's limit and return how many contracts to ask for, with
-        the cap that applied, as (quantity, cap). The two ladders are walked
-        together through the levels that keep config.MIN_EDGE, each limit
-        set at the deepest level reached. The quantity is config.FILL_SHARE
-        of what those levels show, the share we expect to get, so an
-        unchanged book fills in full, and no more than the cash free pays
-        for, both legs' at once where they share a venue's cash, or for a
-        live trade config.LIVE_MAX_CAP.
+        Set each leg's limit and return how many contracts to ask for. The
+        two ladders are walked together through the levels that keep
+        config.MIN_EDGE, each limit set at the deepest level reached. The
+        quantity is config.FILL_SHARE of what those levels show, the share we
+        expect to get, so an unchanged book fills in full, and no more than
+        the cash free pays for, both legs' at once where they share a venue's
+        cash.
         """
         yes_leg, no_leg = legs
         yes_book, no_book = self.book(yes_leg.key), self.book(no_leg.key)
         if yes_book is None or no_book is None:
-            return 0, None
+            return 0
         yes_ladder = ladder(yes_book, yes_leg.polarity, "yes")
         no_ladder = ladder(no_book, no_leg.polarity, "no")
         yes_leg.limit, no_leg.limit, available = depth(yes_ladder, no_ladder, (yes_leg.venue, yes_leg.fee_info),
                                                        (no_leg.venue, no_leg.fee_info), config.MIN_EDGE)
-        cap = config.LIVE_MAX_CAP if self.mode == "live" else None
         if not available:
-            return 0, cap
+            return 0
         per_contract = {}           # What one contract of both legs costs from each venue's cash, its shard's where it has them.
         for leg in legs:
             per_contract[(leg.venue, shard(leg))] = per_contract.get((leg.venue, shard(leg)), 0.0) + leg.limit
         affordable = min(self.cash.spendable(venue, part) // cost for (venue, part), cost in per_contract.items())
-        return int(min(available * config.FILL_SHARE, affordable, cap if cap is not None else float("inf"))), cap
+        return int(min(available * config.FILL_SHARE, affordable))
 
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """
@@ -420,7 +418,7 @@ class Executor:
             return False
         legs = [Leg(side, m["venue"], m["contract_id"], m["polarity"], fee_info=fee_infos[(m["venue"], m["contract_id"])])
                 for side, m in (("yes", yes), ("no", no))]
-        quantity, cap = self.quantity_for(legs)
+        quantity = self.quantity_for(legs)
         if quantity < 1:
             return False
         for leg in legs:
@@ -428,7 +426,7 @@ class Executor:
             self.cash.reserve(leg.venue, quantity * leg.limit, shard(leg))
         yes_leg, no_leg = legs
         trade = Trade(mode=self.mode, pair_id=pair["id"], label=pair["label"], trade=trade_words(yes, no), signal_ts=now, edge=edge,
-                      quantity=quantity, cap=cap, pays_at=pays_at,
+                      quantity=quantity, pays_at=pays_at,
                       yes_venue=yes["venue"], yes_contract=yes["contract_id"], yes_polarity=yes["polarity"], yes_limit=yes_leg.limit,
                       no_venue=no["venue"], no_contract=no["contract_id"], no_polarity=no["polarity"], no_limit=no_leg.limit)
         database.insert_trade(self.conn, trade)

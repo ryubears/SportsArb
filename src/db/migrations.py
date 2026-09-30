@@ -195,9 +195,17 @@ def step_8_drop_transfers(conn):
     conn.execute("DROP TABLE IF EXISTS transfers")
 
 
+def step_9_drop_trade_caps(conn):
+    """
+    Live trades are no longer capped, so trades lose the cap column that held a live trade's.
+    """
+    if "cap" in [r[1] for r in conn.execute("PRAGMA table_info(trades)")]:
+        conn.execute("ALTER TABLE trades DROP COLUMN cap")
+
+
 # Step n brings a database from user_version n - 1 to n. Only ever add to the end.
 STEPS = [step_1_catch_up, step_2_settlements, step_3_opening_balances, step_4_modes, step_5_drop_quotes, step_6_pair_sports,
-         step_7_min_edge_stretch, step_8_drop_transfers]
+         step_7_min_edge_stretch, step_8_drop_transfers, step_9_drop_trade_caps]
 
 
 def migrate(conn, fresh):

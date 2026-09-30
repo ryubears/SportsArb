@@ -157,8 +157,8 @@ checks before it trades, below.
    together through the levels that keep that edge and sets each leg's
    limit at the deepest one. It then asks for `FILL_SHARE` of what those
    levels show, but no more than the cash each venue can spend, on Kalshi
-   the cash on the market's shard, and for a live trade `LIVE_MAX_CAP`.
-   The cash is reserved and the trade is stored before any order goes out.
+   the cash on the market's shard, live as on paper. The cash is reserved
+   and the trade is stored before any order goes out.
 2. **Fill** (`run_trade`). Both legs go out at once.
    - Paper (`trading/paper.py`): each order waits a latency drawn from
      what was measured, then fills against the book as it is then.
@@ -412,8 +412,8 @@ each leg's limit is set at the deepest level that still leaves the minimum
 edge, so an order sweeps every level above the floor rather than only the
 top one. A trade asks for half of what those levels show (`FILL_SHARE`),
 as far as the cash free on each venue pays for, both legs from one venue's
-cash when they share it, and a live trade for no more than `LIVE_MAX_CAP`,
-5 contracts. No cash is held back: trades may spend all that is free.
+cash when they share it, live as on paper, with no cap on contracts. No
+cash is held back: trades may spend all that is free.
 
 In **paper.py** each order arrives after a latency drawn from what was
 measured from us-east-1 (about 50 ms to Kalshi, 60 ms to Polymarket US,
@@ -485,8 +485,7 @@ rule reads the orders and trades tables, so a restart does not reset it,
 and starts over after a halt. A halt is logged and emailed, and what is
 held is still settled. It is also written to `data/live_halt.txt`, and
 live trading stays halted across restarts, a crash or a deploy, until a
-human has checked the venues and removed that file. Live trades hold 1 to
-5 contracts until the live results earn more.
+human has checked the venues and removed that file.
 
 **notify.py** tells a human by email when live trading needs one: when it
 halts, when the cash on a live venue or Kalshi shard runs low, and when
@@ -728,9 +727,8 @@ nfl,ncaaf,mlb,nhl,nba` runs them all from one pool of money. `--no-trade`
 scans without trading, `--no-scan` only records, and `--seconds 120` runs a
 short test. `--execute live` trades with real money and `--execute both`
 trades the same signals on paper and for real. The settings a run is tuned
-by, such as the minimum edge, the annual return, the live cap, and the
-starting balance, are
-in `src/engine/helper/config.py`. Those only paper trading reads start with
+by, such as the minimum edge, the annual return, and the starting
+balance, are in `src/engine/helper/config.py`. Those only paper trading reads start with
 `PAPER_`, those only live trading reads with `LIVE_`, and the rest hold for
 both. `--set NAME=VALUE` overrides one for a run, for example `python3 -m
 engine.run --sport nfl --set min_edge=0.03`. The run logs every setting

@@ -101,7 +101,6 @@ CREATE TABLE IF NOT EXISTS trades (
     signal_ts      TEXT NOT NULL,
     edge           REAL NOT NULL,   -- Net dollars per contract at the signal.
     quantity       INTEGER NOT NULL,   -- Contracts wanted on each leg.
-    cap            INTEGER,            -- The most contracts it could hold when sent: config.LIVE_MAX_CAP for a live trade, none for a paper one.
     yes_venue      TEXT NOT NULL,
     yes_contract   TEXT NOT NULL,
     yes_polarity   TEXT NOT NULL,   -- The side the contract pays on, so settlement knows whether the leg won.

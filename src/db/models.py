@@ -181,8 +181,6 @@ class Trade:
     signal_ts: str          # When the scanner signalled.
     edge: float             # Net dollars per contract at the signal.
     quantity: int           # Contracts wanted on each leg.
-    cap: int | None = field(default=None, kw_only=True)     # The most contracts it could hold when sent: config.LIVE_MAX_CAP for a live
-                                                            # trade, none for a paper one.
     yes_venue: str
     yes_contract: str
     yes_polarity: str       # The side the contract pays on, so settlement knows whether the leg won.

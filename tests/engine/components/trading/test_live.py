@@ -13,7 +13,8 @@ from engine.components.money.paper import PaperBalances
 from engine.components.trading.live import LiveExecutor
 from engine.components.trading.paper import PaperExecutor
 from engine.helper import config
-from trade_setup import FEES, NO, NO_K_FEES, NO_PM_FEES, NOW, PAIR, YES, books, stored
+from trade_setup import FEES, NO, NO_K_FEES, NO_PM_FEES, NOW, PAIR, YES, stored
+from trade_setup import books as shared_books
 
 
 def fills(n=None):
@@ -49,9 +50,11 @@ class Venues:
         return {venue: for_venue(venue) for venue in self.scripts}
 
 
-@pytest.fixture(autouse=True)
-def cap_of_ten(monkeypatch):
-    monkeypatch.setattr(config, "LIVE_MAX_CAP", 10)     # The trades here hold 10 contracts, whatever live trading is tuned to.
+def books(size=20, **prices):
+    """
+    The shared books with 20 contracts a level, so the trades here ask for half of them, 10 contracts.
+    """
+    return shared_books(size=size, **prices)
 
 
 class FakeNotifier:
@@ -93,18 +96,18 @@ def trade(ex, times=1):
 
 def test_both_legs_are_sent_as_real_orders_and_every_order_is_stored(tmp_path):
     venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
-    conn, cash, ex = executor(tmp_path, venues)
+    conn, cash, ex = executor(tmp_path, venues, books(size=100))
     assert trade(ex) == [True]
     t = stored(conn, "trades")[0]
-    # The live cap, not half the visible 100, sets the size.
-    assert (t["mode"], t["status"], t["quantity"], t["yes_filled"], t["no_filled"], t["matched"]) == ("live", "filled", 10, 10, 10, 10)
-    assert t["profit"] == pytest.approx(10 * (1 - 0.45 - 0.47))
+    # Half the visible 100, with no cap, as on paper.
+    assert (t["mode"], t["status"], t["quantity"], t["yes_filled"], t["no_filled"], t["matched"]) == ("live", "filled", 50, 50, 50, 50)
+    assert t["profit"] == pytest.approx(50 * (1 - 0.45 - 0.47))
     # Yes is the Polymarket US contract itself. No is the other side of the Kalshi contract, bought at no more than 1 - 0.53.
-    assert sorted(venues.orders) == [("kalshi", "buy", "no", 10, 0.47), ("polymarket_us", "buy", "yes", 10, 0.45)]
+    assert sorted(venues.orders) == [("kalshi", "buy", "no", 50, 0.47), ("polymarket_us", "buy", "yes", 50, 0.45)]
     stored_orders = stored(conn, "orders")
-    assert {(o["trade_id"], o["purpose"], o["status"], o["filled"], o["venue_order_id"]) for o in stored_orders} == {(t["id"], "open", "filled", 10, "venue-10")}
-    assert all(o["client_id"] and o["answered_at"] == NOW and o["response"] == '{"filled": 10}' for o in stored_orders)
-    assert cash.amounts == pytest.approx({"polymarket_us": 1000 - 4.5, "kalshi": 1000 - 4.7})
+    assert {(o["trade_id"], o["purpose"], o["status"], o["filled"], o["venue_order_id"]) for o in stored_orders} == {(t["id"], "open", "filled", 50, "venue-50")}
+    assert all(o["client_id"] and o["answered_at"] == NOW and o["response"] == '{"filled": 50}' for o in stored_orders)
+    assert cash.amounts == pytest.approx({"polymarket_us": 1000 - 22.5, "kalshi": 1000 - 23.5})
     assert stored(conn, "ledger") == []                                 # Live money keeps no ledger of ours.
 
 
@@ -295,29 +298,30 @@ def test_trades_spend_all_the_cash_and_a_venue_or_kalshi_shard_running_low_email
     notifier, logs = FakeNotifier(), []
     venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
     conn = database.connect(tmp_path / "t.sqlite")
-    ex = LiveExecutor(conn, cash, lambda: books(), logs.append, clock=lambda: NOW, place=venues.place(), notifier=notifier)
+    ex = LiveExecutor(conn, cash, lambda: books(size=100), logs.append, clock=lambda: NOW, place=venues.place(), notifier=notifier)
     football = {("polymarket_us", "pm"): NO_PM_FEES, ("kalshi", "k"): dict(NO_K_FEES, exchange_index=0)}
 
     async def scenario():
         sent = ex.signal(PAIR, YES, NO, 1 - 0.45 - 0.47, 100, football, NOW)
         await asyncio.gather(*ex.tasks)
         return sent
-    # All 8 dollars on Polymarket US and on Kalshi's shard 0 may be spent: 17 contracts at 0.45 or at 0.47, but the cap is 10.
+    # All 8 dollars on Polymarket US and on Kalshi's shard 0 may be spent: half the 100 shown is 50, but the 8 dollars pay for
+    # 17 contracts at 0.45 or at 0.47.
     assert cash.spendable("kalshi", 0) == pytest.approx(8.0)
-    assert asyncio.run(scenario()) is True and stored(conn, "trades")[0]["quantity"] == 10
+    assert asyncio.run(scenario()) is True and stored(conn, "trades")[0]["quantity"] == 17
     ex.tick(NOW)
     ex.tick(NOW)
-    # Once each: Kalshi's shard 0, whose 8 dollars less the 4.70 bought is 3.30, and Polymarket US, 8 less 4.50. Shard 3 has plenty.
-    assert [(kind, subject) for kind, subject, _ in notifier.sent] == [("low_cash", "SportsArb live kalshi shard 0 cash low: 3.30$"),
-                                                                        ("low_cash", "SportsArb live polymarket_us cash low: 3.50$")]
+    # Once each: Kalshi's shard 0, whose 8 dollars less the 7.99 bought is 0.01, and Polymarket US, 8 less 7.65. Shard 3 has plenty.
+    assert [(kind, subject) for kind, subject, _ in notifier.sent] == [("low_cash", "SportsArb live kalshi shard 0 cash low: 0.01$"),
+                                                                        ("low_cash", "SportsArb live polymarket_us cash low: 0.35$")]
     assert "move some to the shard with python3 -m tools.kalshi_shards" in notifier.sent[0][2]
     cash.shard_read[("kalshi", 0)] = 20.0                               # A payout arrives.
     ex.tick(NOW)
-    assert logs[-1] == "live kalshi shard 0 has 15.30$, back over 5.00$"
+    assert logs[-1] == "live kalshi shard 0 has 12.01$, back over 5.00$"
     cash.shard_read[("kalshi", 0)] = 4.0
     cash.shard_read[("kalshi", 3)] = 1.0
     ex.tick(NOW)
-    assert [subject for _, subject, _ in notifier.sent][-2:] == ["SportsArb live kalshi shard 0 cash low: -0.70$",     # 4 read, less 4.70.
+    assert [subject for _, subject, _ in notifier.sent][-2:] == ["SportsArb live kalshi shard 0 cash low: -3.99$",     # 4 read, less 7.99.
                                                                   "SportsArb live kalshi shard 3 cash low: 1.00$"]
 
 

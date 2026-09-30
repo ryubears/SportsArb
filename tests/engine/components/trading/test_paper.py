@@ -268,7 +268,7 @@ def test_edges_before_kickoff_and_on_futures_that_pay_enough_are_traded(tmp_path
     assert at(ex, FUTURE, FUTURE_YES, FUTURE_NO, 0.30, NOW) is True
     before_game, future = stored(conn)
     assert (before_game["status"], before_game["quantity"], before_game["pays_at"]) == ("filled", 50, PAYS_AT)
-    assert (future["status"], future["quantity"], future["pays_at"], future["cap"]) == ("filled", 50, SEASON_END, None)   # Paper has no cap.
+    assert (future["status"], future["quantity"], future["pays_at"]) == ("filled", 50, SEASON_END)
     assert ex.games == {}                   # Both filled evenly, so neither is kept for flattening.
 
 

@@ -36,10 +36,9 @@ PAPER_REJECT_PROBABILITY = 0.03     # The share of orders a venue rejects outrig
 PAPER_LATENCY_MS = {"kalshi": (50, 0.35), "polymarket_us": (60, 0.35)}
 PAPER_START_BALANCE = 10000.0   # Paper dollars per venue at the start.
 
-# LIVE, trading/live.py, trading/brakes.py, and money/live.py. Real money, so each limit is kept small until the live results
-# earn more. Sized for a test with about 100 dollars on each venue.
+# LIVE, trading/live.py, trading/brakes.py, and money/live.py. A live trade is sized as a paper one is, by the books and the cash
+# alone. The brakes are sized for a test with about 100 dollars on each venue.
 
-LIVE_MAX_CAP = 5            # The most contracts one live trade may hold, whatever the books and the cash would allow.
 LIVE_BALANCE_SECONDS = 15   # Between readings of the venues' balances. Under http.IDLE_SECONDS, so each reading also keeps the
                             # venue's kept connection open for the next order: one opened afresh took Polymarket US 11 ms longer.
 LIVE_LOW_CASH = 5.0         # Dollars on a live venue, or on one of its shards in LIVE_SHARDS, under which a human is emailed, once until
