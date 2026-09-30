@@ -108,7 +108,9 @@ class Executor:
     def fresh_book(self, key):
         """
         The newest book for a contract, or None when there is none or it is
-        too old to trade, by the rule the scanner prices by, see pricing.fresh().
+        too old to trade, see pricing.fresh(). Every book here ages, as the
+        scanner's do once their game has started: trades are made only on
+        games in play, since the allocator gives no other pair a cap.
         """
         book = self.books().get(key)
         return book if fresh(book, self.clock()) else None

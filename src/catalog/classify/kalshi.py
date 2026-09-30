@@ -70,13 +70,14 @@ PLAYER_TITLE = re.compile(r"^(.+?): ")     # 'Bijan Robinson: 100+ receiving yar
 
 # FUTURES. Each series is one kind. The market ticker ends in the team, 'KXSB-27-KC'.
 CONFERENCES = ("AAC", "ACC", "B10", "B12", "CUSA", "MAC", "MWC", "PAC12", "SBELT")     # College conferences, bar the SEC, spelled alike.
+NFL_DIVISIONS = tuple(f"{c}{d}" for c in ("AFC", "NFC") for d in ("EAST", "NORTH", "SOUTH", "WEST"))     # 'KXNFLAFCEAST'.
+NHL_DIVISIONS = ("ATLANTIC", "CENTRAL", "METROPOLITAN", "PACIFIC")     # 'KXNHLATLANTIC'.
 TEAM_FUTURES = {
     "KXSB": "champion", "KXMLB": "champion", "KXNBA": "champion", "KXNHL": "champion", "KXNCAAF": "champion",
     "KXNFLAFCCHAMP": "conf_champion", "KXNFLNFCCHAMP": "conf_champion", "KXMLBAL": "conf_champion", "KXMLBNL": "conf_champion",
     "KXNBAEAST": "conf_champion", "KXNBAWEST": "conf_champion", "KXNHLEAST": "conf_champion", "KXNHLWEST": "conf_champion",
     **{f"KXNCAAF{c}": "conf_champion" for c in (*CONFERENCES, "SEC")},
-    **{f"KXNFL{c}{d}": "division_champion" for c in ("AFC", "NFC") for d in ("EAST", "NORTH", "SOUTH", "WEST")},
-    **{f"KXNHL{d}": "division_champion" for d in ("ATLANTIC", "CENTRAL", "METROPOLITAN", "PACIFIC")},
+    **{f"KXNFL{d}": "division_champion" for d in NFL_DIVISIONS}, **{f"KXNHL{d}": "division_champion" for d in NHL_DIVISIONS},
     "KXNFL1SEED": "conf_top_seed", "KXNBAEAST1SEED": "conf_top_seed", "KXNBAWEST1SEED": "conf_top_seed",
     "KXNFLPLAYOFF": "make_playoffs", "KXNHLPLAYOFF": "make_playoffs", "KXNCAAFPLAYOFF": "make_playoffs",
     "KXMLBALCSQUAL": "reach_conf_final", "KXMLBNLCSQUAL": "reach_conf_final",     # The league championship series.
@@ -137,6 +138,37 @@ def parse_game(tail, sport):
     return date, away, home
 
 
+def classify_future(row, series, event_tail, market_tail, sport, base):
+    """
+    The Bet a futures contract row describes, or None. Its season is the one its settlement falls in.
+    """
+    future = dict(season=season_from_date(row["close_time"][:10], sport), game_date=None, polarity="yes", **base)
+    if series in AWARD_FUTURES:
+        name = row["outcome"]
+        return Bet(kind=AWARD_FUTURES[series], team_a=None, team_b=None, subject=player_key(name), line=None, **future) if name else None
+    if series in LINE_FUTURES:
+        m = LINE_EVENT.match(event_tail)
+        subject = team(m.group(1), sport) if m else None
+        if not subject or row["line"] is None:
+            return None
+        return Bet(kind=LINE_FUTURES[series], team_a=None, team_b=None, subject=subject, line=row["line"], **future)
+    subject = team(market_tail, sport)
+    if not subject:
+        return None
+    if series == ROUND_SERIES:
+        kind = ROUNDS.get(event_tail[2:])
+        return Bet(kind=kind, team_a=None, team_b=None, subject=subject, line=None, **future) if kind else None
+    if series == SERIES_WINNERS:
+        m = SERIES_EVENT.match(event_tail)
+        kind = SERIES_ROUNDS.get(m.group(2)) if m else None
+        teams = split_codes(m.group(1), sport) if kind else (None, None)
+        if subject not in teams:
+            return None
+        team_a, team_b = sorted(teams)      # The venues list a series' teams in different orders.
+        return Bet(kind=kind, team_a=team_a, team_b=team_b, subject=subject, line=None, **future)
+    return Bet(kind=TEAM_FUTURES[series], team_a=None, team_b=None, subject=subject, line=None, **future)
+
+
 def classify(row):
     """
     The Bet a Kalshi contract row describes, or None when it is not one we trade.
@@ -183,37 +215,6 @@ def classify(row):
     if series in FUTURE_SERIES and row["close_time"]:
         return classify_future(row, series, event_tail, market_tail, sport, base)
     return None
-
-
-def classify_future(row, series, event_tail, market_tail, sport, base):
-    """
-    The Bet a futures contract row describes, or None. Its season is the one its settlement falls in.
-    """
-    future = dict(season=season_from_date(row["close_time"][:10], sport), game_date=None, polarity="yes", **base)
-    if series in AWARD_FUTURES:
-        name = row["outcome"]
-        return Bet(kind=AWARD_FUTURES[series], team_a=None, team_b=None, subject=player_key(name), line=None, **future) if name else None
-    if series in LINE_FUTURES:
-        m = LINE_EVENT.match(event_tail)
-        subject = team(m.group(1), sport) if m else None
-        if not subject or row["line"] is None:
-            return None
-        return Bet(kind=LINE_FUTURES[series], team_a=None, team_b=None, subject=subject, line=row["line"], **future)
-    subject = team(market_tail, sport)
-    if not subject:
-        return None
-    if series == ROUND_SERIES:
-        kind = ROUNDS.get(event_tail[2:])
-        return Bet(kind=kind, team_a=None, team_b=None, subject=subject, line=None, **future) if kind else None
-    if series == SERIES_WINNERS:
-        m = SERIES_EVENT.match(event_tail)
-        kind = SERIES_ROUNDS.get(m.group(2)) if m else None
-        teams = split_codes(m.group(1), sport) if kind else (None, None)
-        if subject not in teams:
-            return None
-        team_a, team_b = sorted(teams)      # The venues list a series' teams in different orders.
-        return Bet(kind=kind, team_a=team_a, team_b=team_b, subject=subject, line=None, **future)
-    return Bet(kind=TEAM_FUTURES[series], team_a=None, team_b=None, subject=subject, line=None, **future)
 
 
 def doubleheaders(rows):

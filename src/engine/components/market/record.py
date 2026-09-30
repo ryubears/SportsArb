@@ -108,16 +108,6 @@ class Recorder:
         self.gaps[venue] += 1
         self.forget(venue, contract_ids)
 
-    def status(self):
-        """
-        One line with what has happened so far, including how long each venue has been quiet and how far behind it its books came.
-        """
-        parts = []
-        for venue, n in self.updates.items():
-            t = self.last_update[venue]
-            parts.append(f"{venue} {n} (last {f'{time.time() - t:.0f}s ago' if t else 'never'}, {self.gaps[venue]} gaps{self.delay(venue)})")
-        return f"tracking {len(self.books)} books, updates {', '.join(parts)}"
-
     def delay(self, venue):
         """
         How far behind the venue its books reached us since the last status, as words for the status line, and then forget it.
@@ -128,3 +118,13 @@ class Recorder:
             return ""
         words = f", {1000 * quantile(behind, 0.5):.0f} ms behind the venue, {1000 * quantile(behind, 0.9):.0f} at 90%"
         return words + (f", {1000 * quantile(ours, 0.5):.0f} from us" if ours else "")
+
+    def status(self):
+        """
+        One line with what has happened so far, including how long each venue has been quiet and how far behind it its books came.
+        """
+        parts = []
+        for venue, n in self.updates.items():
+            t = self.last_update[venue]
+            parts.append(f"{venue} {n} (last {f'{time.time() - t:.0f}s ago' if t else 'never'}, {self.gaps[venue]} gaps{self.delay(venue)})")
+        return f"tracking {len(self.books)} books, updates {', '.join(parts)}"

@@ -94,7 +94,7 @@ def test_awards_name_the_player_from_the_subtitle():
     witt = future("KXMLBALMVP", "KXMLBALMVP-26", "KXMLBALMVP-26-RWIT", "2026-12-08T15:00:00+00:00", sport="mlb", outcome="Bobby Witt Jr.")
     assert bet_fields(judge) == ("al_mvp", 2026, None, None, None, "aaron judge", None, "yes")
     assert witt.subject == "bobby witt"
-    assert future("KXNFLMVP", "KXNFLMVP-27", "KXNFLMVP-27-X", "2027-03-14T15:00:00+00:00", outcome="").__class__ is type(None)
+    assert future("KXNFLMVP", "KXNFLMVP-27", "KXNFLMVP-27-X", "2027-03-14T15:00:00+00:00", outcome="") is None
 
 
 def test_season_totals_name_the_team_from_the_event_and_keep_the_strict_line():

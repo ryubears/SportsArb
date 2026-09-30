@@ -45,6 +45,17 @@ class Episode:
     worth_least: tuple = (0.0, 0.0)     # The fewest contracts fillable at that edge so far in the stretch, and their profit.
     worth_best: tuple | None = None     # The longest stretch so far, as (seconds, contracts, profit), a moment's included.
 
+    def end_stretch(self, now):
+        """
+        Close the current stretch at config.MIN_EDGE or more at now, keeping it when it is the longest.
+        """
+        if self.worth_since is None:
+            return
+        seconds = seconds_between(self.worth_since, now)
+        if self.worth_best is None or seconds > self.worth_best[0]:
+            self.worth_best = (seconds, *self.worth_least)
+        self.worth_since = None
+
     def see(self, priced, now):
         """
         Follow the stretches at config.MIN_EDGE or more through one pricing of the pair.
@@ -57,17 +68,6 @@ class Episode:
                 self.worth_least = least
         else:
             self.end_stretch(now)
-
-    def end_stretch(self, now):
-        """
-        Close the current stretch at config.MIN_EDGE or more at now, keeping it when it is the longest.
-        """
-        if self.worth_since is None:
-            return
-        seconds = seconds_between(self.worth_since, now)
-        if self.worth_best is None or seconds > self.worth_best[0]:
-            self.worth_best = (seconds, *self.worth_least)
-        self.worth_since = None
 
     def opportunity(self, end_ts):
         """

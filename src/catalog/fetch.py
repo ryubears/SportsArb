@@ -9,6 +9,7 @@ Run with:
 import argparse
 import time
 from api import kalshi, polymarket_us
+from catalog.classify.kalshi import CONFERENCES, NFL_DIVISIONS, NHL_DIVISIONS
 from common.timeutil import now_iso
 from common.venues import VENUES
 from db import database
@@ -28,7 +29,7 @@ SPORTS = {
                         "KXNFLRECYDS", "KXNFLRSHYDS", "KXNFLPASSYDS", "KXNFLREC", "KXNFLPASSTDS", "KXNFLTD", "KXNFLFIRSTTD",
                         "KXNFLPASSCOMP", "KXNFLPASSATT", "KXNFLPASSINT", "KXNFLRSHATT", "KXNFLRRYDS", "KXNFLLONGREC",
                         "KXSB", "KXNFLAFCCHAMP", "KXNFLNFCCHAMP", "KXNFL1SEED", "KXNFLPLAYOFF", "KXNFLROUNDQUAL", "KXNFLWINS",
-                        *(f"KXNFL{c}{d}" for c in ("AFC", "NFC") for d in ("EAST", "NORTH", "SOUTH", "WEST")),
+                        *(f"KXNFL{d}" for d in NFL_DIVISIONS),
                         "KXNFLMVP", "KXNFLOPOTY", "KXNFLDPOTY", "KXNFLOROTY", "KXNFLDROTY", "KXNFLCPOTY", "KXNFLCOTY"],
         },
         "polymarket_us": {
@@ -39,7 +40,7 @@ SPORTS = {
         "kalshi": {
             "tickers": ["KXNCAAFGAME", "KXNCAAFSPREAD", "KXNCAAFTOTAL",
                         "KXNCAAF", "KXNCAAFPLAYOFF", "KXNCAAFFINALIST", "KXNCAAFWINS", "KXHEISMAN", "KXNCAAFSEC", "KXNCAAFSECQ",
-                        *(f"KXNCAAF{c}{q}" for c in ("AAC", "ACC", "B10", "B12", "CUSA", "MAC", "MWC", "PAC12", "SBELT") for q in ("", "QUAL"))],
+                        *(f"KXNCAAF{c}{q}" for c in CONFERENCES for q in ("", "QUAL"))],
         },
         "polymarket_us": {
             "tags": ["cfb"],
@@ -60,7 +61,7 @@ SPORTS = {
     "nhl": {
         "kalshi": {
             "tickers": ["KXNHLGAME", "KXNHLSPREAD", "KXNHLTOTAL", "KXNHLTEAMTOTAL", "KXNHLGOAL", "KXNHLPTS",
-                        "KXNHL", "KXNHLEAST", "KXNHLWEST", "KXNHLATLANTIC", "KXNHLCENTRAL", "KXNHLMETROPOLITAN", "KXNHLPACIFIC",
+                        "KXNHL", "KXNHLEAST", "KXNHLWEST", *(f"KXNHL{d}" for d in NHL_DIVISIONS),
                         "KXNHLPLAYOFF", "KXNHLPRES", "KXNHLSEASONPTS",
                         "KXNHLHART", "KXNHLNORRIS", "KXNHLVEZINA", "KXNHLADAMS", "KXNHLRICHARD", "KXNHLROSS"],
         },

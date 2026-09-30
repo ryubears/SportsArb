@@ -108,22 +108,6 @@ def print_gaps(conn, since, hours):
         f"{v} {n} ({secs:.0f}s down{f', {open_} without an end' if open_ else ''})" for v, n, secs, open_ in gaps) if gaps else "none"))
 
 
-def print_opportunities(conn, since, hours):
-    total = first_value(conn, "SELECT COUNT(*) FROM opportunities")
-    recent = first_value(conn, "SELECT COUNT(*) FROM opportunities WHERE start_ts >= ?", (since,))
-    if not total:
-        print("\nopportunities: none yet, the live process's scanner writes them")
-        return
-    # Asked apart, so the first start comes from the index. Episodes are stored as they end, so the newest one ended last.
-    first = first_value(conn, "SELECT MIN(start_ts) FROM opportunities")
-    last = first_value(conn, "SELECT end_ts FROM opportunities ORDER BY id DESC LIMIT 1")
-    print(f"\nopportunities {total:,} episodes in all, covering {short_time(first)} to {short_time(last)} UTC, "
-          f"{recent:,} in the last {hours} hours")
-    if recent:
-        print_episode_group(conn, since, hours, 1, "during games")
-        print_episode_group(conn, since, hours, 0, "not during a game, before games and futures")
-
-
 def print_episode_group(conn, since, hours, live, words):
     """
     The episodes in the window of one group, during games when live is 1 and the rest when 0: by kind, then the
@@ -143,7 +127,7 @@ def print_episode_group(conn, since, hours, live, words):
         (target, LASTING_SECONDS, LASTING_SECONDS, since, live))
     print_table(f"{words}, by kind, last {hours} hours",
                 ("sport", "kind", "episodes", "best edge c", "best profit $", "max capital $", "best annual %", "avg days held",
-                 f"beat {target}%/yr", f"{cents}+ over {LASTING_SECONDS}s", f"longest {cents}+ s", f"most capital lasting $"),
+                 f"beat {target}%/yr", f"{cents}+ over {LASTING_SECONDS}s", f"longest {cents}+ s", "most capital lasting $"),
                 [(sp, k, n, e, pr, f"{cap:,.0f}", f"{a:,.0f}" if a is not None else "-", d, beat, lasted, longest, f"{kept:,.0f}")
                  for sp, k, n, e, pr, cap, a, d, beat, lasted, longest, kept in body])
     lasting = query_rows(conn, """
@@ -168,6 +152,22 @@ def print_episode_group(conn, since, hours, live, words):
                     ("bet", "trade", "edge c", "size", "capital $", "profit $", "annual %", "days held", "seconds", f"{cents}+ s"),
                     [(l[:44], t, e, f"{n:,.0f}", f"{cap:,.0f}", pr, f"{a:,.0f}", d, f"{sec:,.1f}", f"{w:,.1f}")
                      for l, t, e, n, cap, pr, a, d, sec, w in best])
+
+
+def print_opportunities(conn, since, hours):
+    total = first_value(conn, "SELECT COUNT(*) FROM opportunities")
+    recent = first_value(conn, "SELECT COUNT(*) FROM opportunities WHERE start_ts >= ?", (since,))
+    if not total:
+        print("\nopportunities: none yet, the live process's scanner writes them")
+        return
+    # Asked apart, so the first start comes from the index. Episodes are stored as they end, so the newest one ended last.
+    first = first_value(conn, "SELECT MIN(start_ts) FROM opportunities")
+    last = first_value(conn, "SELECT end_ts FROM opportunities ORDER BY id DESC LIMIT 1")
+    print(f"\nopportunities {total:,} episodes in all, covering {short_time(first)} to {short_time(last)} UTC, "
+          f"{recent:,} in the last {hours} hours")
+    if recent:
+        print_episode_group(conn, since, hours, 1, "during games")
+        print_episode_group(conn, since, hours, 0, "not during a game, before games and futures")
 
 
 def print_paper_money(conn):

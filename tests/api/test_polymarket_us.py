@@ -1,10 +1,11 @@
 """
-Tests for the Polymarket US client's book handling that need no network.
+Tests for the Polymarket US client that need no network: its books, its catalog, and its orders.
 """
 
 import asyncio
-import json
+import pytest
 from api import polymarket_us
+from api.http import RequestFailed
 from fake_socket import Socket
 
 
@@ -92,10 +93,6 @@ def test_a_refused_subscription_fills_the_connection_and_hands_back_its_slugs():
 
 
 # TRADING
-
-import pytest
-from api.http import RequestFailed
-
 
 def fake_api(monkeypatch, answers):
     """
