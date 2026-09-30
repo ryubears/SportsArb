@@ -35,8 +35,8 @@ def fresh(book, now, aging=True):
     rather than empty its book, and its last book cannot be traded, so an
     old book counts as no book. A quiet market that is still open waits for
     its next change. A book that may rest unchanged for hours while its
-    market is open, as a future's does, is priced without aging: it counts
-    until the recorder stops following it.
+    market is open, as a future's does, or a game's before kickoff, is priced
+    without aging: it counts until the recorder stops following it.
     """
     return book is not None and (not aging or seconds_between(book.ts, now) <= config.MAX_BOOK_AGE)
 

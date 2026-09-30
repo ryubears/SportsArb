@@ -27,7 +27,7 @@ from common.timeutil import days_between, now_iso, seconds_between
 from db import database
 from db.models import Opportunity
 from engine.helper import config
-from engine.helper.game import pays_at as payout_time
+from engine.helper.game import kickoff, pays_at as payout_time
 from engine.helper.pricing import Priced, best_trade, fresh, trade_words
 
 
@@ -157,10 +157,12 @@ class Scanner:
 
     def price(self, pair, books, now):
         """
-        The best trade across the pair's members whose books are fresh, as a Priced, or None. A future's
-        books may rest unchanged for hours while its markets are open, so they do not age, see pricing.fresh().
+        The best trade across the pair's members whose books are fresh, as a Priced, or None. Books age only
+        once their game may have started, see pricing.fresh(): before kickoff a game's markets are open, and a
+        future's until its season settles, so their books may rest unchanged for hours without going stale.
         """
-        aging = pair["game_date"] is not None
+        start = kickoff(pair["members"])
+        aging = pair["game_date"] is not None and (start is None or start <= now)
         members = [m for m in pair["members"] if fresh(books.get((m["venue"], m["contract_id"])), now, aging)]
         if len(members) < 2:
             return None

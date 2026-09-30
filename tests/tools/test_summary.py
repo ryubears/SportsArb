@@ -54,7 +54,28 @@ def test_episodes_are_covered_from_the_first_start_to_the_newest_end(tmp_path, m
                         live=1, days_held=0.1, return_pct=5, annual_pct=50) for start, end in episodes])
     out = report(tmp_path, monkeypatch, capsys, fill)
     assert "2 episodes in all, covering 2026-09-27 13:00:00 to 2026-09-27 15:00:00 UTC, 2 in the last 12 hours" in out
-    assert [row[:3] for row in table(out, "by kind, last 12 hours")] == [["nfl", "winner", "2"]]
+    assert [row[:3] for row in table(out, "during games, by kind, last 12 hours")] == [["nfl", "winner", "2"]]
+
+
+def test_episodes_during_games_are_shown_apart_from_the_rest_with_those_that_lasted(tmp_path, monkeypatch, capsys):
+    def episode(start, live, days, edge, stretch):
+        seconds, size, profit = stretch
+        return Opportunity(pair_id=1, trade="t", yes_venue="kalshi", yes_contract="k", no_venue="polymarket_us", no_contract="pm",
+                           start_ts=start, end_ts=start, seconds=600, peak_ts=start, peak_edge=edge, peak_size=100, peak_profit=100 * edge,
+                           live=live, days_held=days, return_pct=100 * edge / (1 - edge), annual_pct=100 * edge / (1 - edge) * 365 / days,
+                           min_edge_seconds=seconds, min_edge_size=size, min_edge_profit=profit)
+
+    def fill(conn):
+        database.insert_opportunities(conn, [
+            episode("2026-09-27T13:00:00+00:00", 1, 0.1, 0.08, (0.2, 100, 8.0)),     # In a game, gone in 0.2s.
+            episode("2026-09-27T14:00:00+00:00", 0, 120, 0.09, (3600.0, 40, 3.6)),   # A future, 40 contracts at 5c+ for an hour.
+            episode("2026-09-27T15:00:00+00:00", 0, 120, 0.06, (0.0, 0, 0.0))])      # A future never at 5c.
+    out = report(tmp_path, monkeypatch, capsys, fill)
+    assert "during games: 1 episodes in the last 12 hours" in out and "  none lasted at 5c+ over 1s and beat 10%/yr" in out
+    [row] = table(out, "not during a game, before games and futures, by kind, last 12 hours")
+    assert row[:3] + row[-3:] == ["nfl", "winner", "2", "1", "3600.0", "36"]      # 40 contracts at 91 cents, less the fees.
+    [lasted] = table(out, "not during a game, before games and futures, largest that lasted at 5c+ over 1s and beat 10%/yr, last 12 hours")
+    assert lasted[:6] == ["the", "bet", "t", "9.0", "3,600.0", "40"]
 
 
 def test_settled_legs_count_by_when_each_leg_settled(tmp_path, monkeypatch, capsys):

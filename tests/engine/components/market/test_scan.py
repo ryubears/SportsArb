@@ -128,6 +128,17 @@ def test_an_episode_never_at_the_minimum_edge_has_no_stretch(tmp_path):
     assert stretches(conn) == [(0.0, 0.0, 0.0)]
 
 
+def test_a_games_book_ages_only_once_the_game_may_have_started(tmp_path):
+    books = {("polymarket_us", "pm"): Book("polymarket_us", "pm", T0, [[0.39, 100]], [[0.40, 100]]),
+             ("kalshi", "k"): Book("kalshi", "k", T0, [[0.53, 100]], [[0.99, 1]])}
+    for kickoff, still_open in (("2026-09-20T17:00:00+00:00", True), ("2026-09-19T12:30:00+00:00", False)):
+        conn = make_db(tmp_path / kickoff[:13], [member("kalshi", "k"), member("polymarket_us", "pm", start_time=kickoff)])
+        scanner = scan.Scanner(conn, ("nfl",), lambda m: None)
+        scanner.on_book("kalshi", "k", books, T0)
+        scanner.tick(books, "2026-09-19T13:00:00+00:00")     # An hour on, the books unchanged: a day before kickoff, or after it.
+        assert bool(scanner.episodes) is still_open, kickoff
+
+
 def test_a_futures_book_does_not_age_while_a_games_does(tmp_path):
     books = {("polymarket_us", "pm"): Book("polymarket_us", "pm", T0, [[0.39, 100]], [[0.40, 100]]),
              ("kalshi", "k"): Book("kalshi", "k", T0, [[0.53, 100]], [[0.99, 1]])}

@@ -3,8 +3,12 @@ Print a summary of everything in the database.
 
 Row counts and time ranges for each table, pairs by sport and kind, and
 for the recent window the feed drops, the opportunities found, and the
-trades made, paper and live apart. Reads only, so it is safe to run
-while the live process is writing.
+trades made, paper and live apart. Opportunities during games are shown
+apart from the rest, those before games and on futures, whose money is
+tied up longer. Each group lists the edges that lasted, which stayed at
+config.MIN_EDGE or more for over a second, since those are the ones an
+order could still reach. Reads only, so it is safe to run while the live
+process is writing.
 
 The script sets its own import path, so it runs from any folder. The live
 money is not in the database but on the venues, so it is read from each
@@ -26,6 +30,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))     # src, so the script runs from any folder.
 from db.database import DB_PATH, load_held, read_only
+from engine.helper import config
+
+LASTING_SECONDS = 1     # How long an edge must stay at config.MIN_EDGE or more to count as one an order could still reach.
 
 
 def query_rows(conn, sql, params=()):
@@ -112,24 +119,55 @@ def print_opportunities(conn, since, hours):
     last = first_value(conn, "SELECT end_ts FROM opportunities ORDER BY id DESC LIMIT 1")
     print(f"\nopportunities {total:,} episodes in all, covering {short_time(first)} to {short_time(last)} UTC, "
           f"{recent:,} in the last {hours} hours")
-    if not recent:
+    if recent:
+        print_episode_group(conn, since, hours, 1, "during games")
+        print_episode_group(conn, since, hours, 0, "not during a game, before games and futures")
+
+
+def print_episode_group(conn, since, hours, live, words):
+    """
+    The episodes in the window of one group, during games when live is 1 and the rest when 0: by kind, then the
+    largest of those that lasted, by what stayed fillable through the stretch, and the largest at their peak.
+    Capital is the contracts times the cost of both legs and fees, which is one dollar a contract less the edge.
+    """
+    count = first_value(conn, "SELECT COUNT(*) FROM opportunities WHERE start_ts >= ? AND live = ?", (since, live))
+    print(f"\n{words}: {count:,} episodes in the last {hours} hours")
+    if not count:
         return
-    # Capital required is the fillable size times the cost of both legs and fees, which is one dollar minus the edge.
+    cents, target = f"{100 * config.MIN_EDGE:.0f}c", config.TARGET_ANNUAL_PCT
     body = query_rows(conn, """
-        SELECT p.sport, p.kind, COUNT(*), SUM(live), ROUND(100 * MAX(peak_edge), 1), ROUND(MAX(peak_profit), 2),
-               ROUND(MAX(peak_size * (1 - peak_edge))), ROUND(MAX(return_pct), 2), ROUND(MAX(annual_pct)),
-               ROUND(AVG(days_held), 1), SUM(annual_pct >= 10)
-        FROM opportunities o JOIN pairs p ON p.id = o.pair_id WHERE start_ts >= ? GROUP BY p.sport, p.kind ORDER BY p.sport, p.kind""", (since,))
-    print_table(f"by kind, last {hours} hours", ("sport", "kind", "episodes", "live", "best edge c", "best profit $", "max capital $",
-                            "best return %", "best annual %", "avg days held", "beat 10%/yr"), body)
+        SELECT p.sport, p.kind, COUNT(*), ROUND(100 * MAX(peak_edge), 1), ROUND(MAX(peak_profit), 2), ROUND(MAX(peak_size * (1 - peak_edge))),
+               ROUND(MAX(annual_pct)), ROUND(AVG(days_held), 1), SUM(annual_pct >= ?), SUM(min_edge_seconds > ?),
+               ROUND(COALESCE(MAX(min_edge_seconds), 0), 1), ROUND(COALESCE(MAX(CASE WHEN min_edge_seconds > ? THEN min_edge_size - min_edge_profit END), 0))
+        FROM opportunities o JOIN pairs p ON p.id = o.pair_id WHERE start_ts >= ? AND live = ? GROUP BY p.sport, p.kind ORDER BY p.sport, p.kind""",
+        (target, LASTING_SECONDS, LASTING_SECONDS, since, live))
+    print_table(f"{words}, by kind, last {hours} hours",
+                ("sport", "kind", "episodes", "best edge c", "best profit $", "max capital $", "best annual %", "avg days held",
+                 f"beat {target}%/yr", f"{cents}+ over {LASTING_SECONDS}s", f"longest {cents}+ s", f"most capital lasting $"),
+                [(sp, k, n, e, pr, f"{cap:,.0f}", f"{a:,.0f}" if a is not None else "-", d, beat, lasted, longest, f"{kept:,.0f}")
+                 for sp, k, n, e, pr, cap, a, d, beat, lasted, longest, kept in body])
+    lasting = query_rows(conn, """
+        SELECT p.label, trade, ROUND(100 * peak_edge, 1), ROUND(min_edge_seconds, 1), ROUND(min_edge_size),
+               ROUND(min_edge_size - min_edge_profit), ROUND(min_edge_profit, 2), ROUND(annual_pct), ROUND(days_held, 1)
+        FROM opportunities o JOIN pairs p ON p.id = o.pair_id
+        WHERE start_ts >= ? AND live = ? AND min_edge_seconds > ? AND annual_pct >= ? ORDER BY min_edge_profit DESC LIMIT 8""",
+        (since, live, LASTING_SECONDS, target))
+    if lasting:
+        print_table(f"{words}, largest that lasted at {cents}+ over {LASTING_SECONDS}s and beat {target}%/yr, last {hours} hours",
+                    ("bet", "trade", "peak c", f"{cents}+ s", "size", "capital $", "profit $", "annual %", "days held"),
+                    [(l[:44], t, e, f"{sec:,.1f}", f"{n:,.0f}", f"{cap:,.0f}", pr, f"{a:,.0f}", d) for l, t, e, sec, n, cap, pr, a, d in lasting])
+    else:
+        print(f"  none lasted at {cents}+ over {LASTING_SECONDS}s and beat {target}%/yr")
     best = query_rows(conn, """
         SELECT p.label, trade, ROUND(100 * peak_edge, 1), ROUND(peak_size), ROUND(peak_size * (1 - peak_edge)),
-               ROUND(peak_profit, 2), ROUND(return_pct, 2), ROUND(annual_pct), ROUND(days_held, 1), ROUND(seconds), live
-        FROM opportunities o JOIN pairs p ON p.id = o.pair_id WHERE start_ts >= ? AND annual_pct >= 10 ORDER BY peak_profit DESC LIMIT 8""", (since,))
-    print_table(f"largest that beat the target, last {hours} hours",
-                ("bet", "trade", "edge c", "size", "capital $", "profit $", "return %", "annual %", "days held", "seconds", "live"),
-                [(l[:40], t, e, f"{s:,.0f}", f"{cap:,.0f}", p, r, f"{a:,.0f}", d, f"{sec:,.0f}", "yes" if lv else "no")
-                 for l, t, e, s, cap, p, r, a, d, sec, lv in best])
+               ROUND(peak_profit, 2), ROUND(annual_pct), ROUND(days_held, 1), ROUND(seconds, 1), ROUND(COALESCE(min_edge_seconds, 0), 1)
+        FROM opportunities o JOIN pairs p ON p.id = o.pair_id WHERE start_ts >= ? AND live = ? AND annual_pct >= ?
+        ORDER BY peak_profit DESC LIMIT 5""", (since, live, target))
+    if best:
+        print_table(f"{words}, largest at their peak that beat {target}%/yr, last {hours} hours",
+                    ("bet", "trade", "edge c", "size", "capital $", "profit $", "annual %", "days held", "seconds", f"{cents}+ s"),
+                    [(l[:44], t, e, f"{n:,.0f}", f"{cap:,.0f}", pr, f"{a:,.0f}", d, f"{sec:,.1f}", f"{w:,.1f}")
+                     for l, t, e, n, cap, pr, a, d, sec, w in best])
 
 
 def print_paper_money(conn):
