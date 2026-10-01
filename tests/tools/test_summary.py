@@ -68,7 +68,7 @@ def test_live_game_episodes_are_shown_apart_from_the_rest_with_those_at_the_mini
     def fill(conn):
         database.insert_opportunities(conn, [
             episode("2026-09-27T13:00:00+00:00", 1, 0.1, 0.08, (0.2, 100, 8.0)),     # In a game, gone in 0.2s.
-            episode("2026-09-27T14:00:00+00:00", 0, 120, 0.09, (3600.0, 40, 3.6)),   # A future, 40 contracts at 5c+ for an hour.
+            episode("2026-09-27T14:00:00+00:00", 0, 70, 0.09, (3600.0, 40, 3.6)),    # A future, 40 contracts at 5c+ for an hour.
             episode("2026-09-27T15:00:00+00:00", 0, 120, 0.04, (0.0, 0, 0.0))])      # A future never at 5c.
     out = report(tmp_path, monkeypatch, capsys, fill)
     assert "live game opportunities: 1 episodes in the last 12 hours" in out
@@ -76,15 +76,15 @@ def test_live_game_episodes_are_shown_apart_from_the_rest_with_those_at_the_mini
     assert len(row) == 9 and row[:3] == ["nfl", "winner", "2"]         # No columns for the edge at 5c.
     # The game's 8 cents for 0.2s on 100 contracts, which cost 92$ with fees and lock in 8$.
     assert table(out, "live game opportunities at 5c+, by kind, last 12 hours") == [["nfl", "winner", "1", "0.2", "92", "8.00", "8.7", "31,739.1", "0.1"]]
-    # The future's 40 contracts at 91 cents less the 3.60$ they lock in, 9.9% on 36.40$, 30.1% a year over 120 days. The future
+    # The future's 40 contracts at 91 cents less the 3.60$ they lock in, 9.9% on 36.40$, 51.6% a year over 70 days. The future
     # whose edge never reached 5 cents is left out.
     assert ("before game/futures opportunities at 5c+: 1 episodes in the last 12 hours could have taken 36$ and locked in 3.60$, "
-            "9.9% on capital, 30.1% a year, held 120.0 days on average") in out
+            "9.9% on capital, 51.6% a year, held 70.0 days on average") in out
     assert table(out, "before game/futures opportunities at 5c+, largest, last 12 hours") == [
-        ["the", "bet", "t", "9.0", "3,600.0", "40.0", "36", "3.60", "9.9", "30.1", "120.0"]]
-    # 30.1% a year clears the 30% the rules ask, so the future is within them too.
+        ["the", "bet", "t", "9.0", "3,600.0", "40.0", "36", "3.60", "9.9", "51.6", "70.0"]]
+    # 51.6% a year clears the 50% the rules ask, so the future is within them too.
     assert ("before game/futures opportunities within the rules: 1 episodes in the last 12 hours could have taken 36$ and locked in "
-            "3.60$, 9.9% on capital, 30.1% a year, held 120.0 days on average") in out
+            "3.60$, 9.9% on capital, 51.6% a year, held 70.0 days on average") in out
     assert "Live game opportunities are not traded: a game is traded only before it kicks off." in out
 
 

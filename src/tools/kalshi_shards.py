@@ -9,10 +9,11 @@ the football futures are where the long-lasting edges are. This reads
 the cash on each shard, moves what is over a shard's share to the shards
 under theirs, and then sets Kalshi's own target split to the same shares,
 which Kalshi rebalances to every 10 seconds, so payouts landing on one
-shard are shared out too. Kalshi seems to count what a shard's open
-positions are worth with its cash, so it may then move some cash back
-toward the shard that holds fewer. The money stays in the account, and
-nothing is traded. Without --apply it only says what it would do.
+shard are shared out too. It does not refill a shard whose cash orders
+spend: at 50/50 on 2026-10-01, shard 0 had spent down to 6.94$ of
+51.77$. So run this again when one shard runs low. The money stays in
+the account, and nothing is traded. Without --apply it only says what it
+would do.
 
 Run from src/ on the instance, where the Kalshi key is, with:
     python3 -m tools.kalshi_shards

@@ -419,9 +419,9 @@ future, and never a game once it has kicked off: near a game and during
 it, faster traders take an edge before our Polymarket US order lands, and
 the leg is missed. A signal needs a net edge of at least five cents per
 contract (`MIN_EDGE`), a payout at least 24 hours away
-(`MIN_PAYOUT_HOURS`), and a return of at least 30% a year on the money it
+(`MIN_PAYOUT_HOURS`), and a return of at least 50% a year on the money it
 ties up until then (`MIN_ANNUAL_PCT`). Five cents clears that for a bet
-paying within 64 days, ten cents within 135, twenty within 304. One limit
+paying within 38 days, ten cents within 81, twenty within 182. One limit
 order is sent per leg, both at once. Both ladders are walked together and
 each leg's limit is set at the deepest level that still leaves the minimum
 edge, so an order sweeps every level above the floor rather than only the
@@ -603,9 +603,9 @@ exchange shards live trading uses by the percents `LIVE_SHARDS` gives them,
 90% to shard 0 and 10% to shard 3. It reads each shard's cash and says what
 it would move, and with `--apply` moves it, then sets Kalshi's own target
 split to the same shares, which Kalshi keeps every 10 seconds, payouts
-included. Kalshi seems to count what a shard's open positions are worth
-with its cash, so it may then move some cash back toward the shard holding
-fewer. The money stays in the account, and nothing is traded.
+included. It does not refill a shard whose cash orders spend: at 50/50 on
+2026-10-01, shard 0 had spent down to $6.94 of $51.77. So run it again when
+one shard runs low. The money stays in the account, and nothing is traded.
 
 `src/tools/repair_fills.py` repairs the live trades recorded under an
 older reading of Polymarket US fills: before fills were added up, when an
@@ -791,7 +791,8 @@ closed for its weekly maintenance while its feed went on: three trades
 bought the Polymarket US leg, Kalshi refused the other, and two of those
 legs were sold back at a cent each. Neither venue is traded in its
 published maintenance window now, and a sale to flatten no longer gives
-away a contract for under half of what it cost.
+away a contract for under half of what it cost. On October 2 the return a
+trade must make went up from 30% a year to 50%.
 
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.

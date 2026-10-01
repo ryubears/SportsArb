@@ -18,8 +18,8 @@ MIN_EDGE = 0.05             # Net dollars per contract at the top before orders 
                             # In-game, 2 to 3 cent edges lost money after hedging.
 MIN_PAYOUT_HOURS = 24       # The soonest a bet may pay out and still be traded, so no game is traded once it is near or under way.
                             # There the fast traders take an edge before our Polymarket US leg lands, and the leg is missed.
-MIN_ANNUAL_PCT = 30         # The least an edge must return a year on the capital it ties up until the bet pays, before a game or on
-                            # a future. A 5 cent edge clears it if it pays within 64 days, 10 cents within 135, and 20 within 304.
+MIN_ANNUAL_PCT = 50         # The least an edge must return a year on the capital it ties up until the bet pays, before a game or on
+                            # a future. A 5 cent edge clears it if it pays within 38 days, 10 cents within 81, and 20 within 182.
 FILL_SHARE = 0.5            # The share of visible size at a level a trade asks for. Other takers get the rest.
 MIN_SALE_SHARE = 0.5        # The least share of what contracts cost a sale to flatten them takes. Below it they are kept, a bet that
                             # may still pay out, rather than given away: a 4 cent contract is not sold at the 1 cent bid.
