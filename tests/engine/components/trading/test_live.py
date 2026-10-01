@@ -379,6 +379,20 @@ def test_a_leg_filled_in_hundredths_is_flattened_to_the_hundredth(tmp_path):
     assert ex.exposed == {}
 
 
+def test_a_fraction_sold_back_on_a_later_try_is_recorded(tmp_path):
+    venues = Venues(polymarket_us=[fills(), fills(0), fills()], kalshi=[fills(9.58)])
+    logs = []
+    conn, cash, ex = executor(tmp_path, venues, logs=logs)
+    trade(ex)                                                           # The 0.42 yes over found no taker at first.
+    assert list(ex.exposed) == [1] and stored(conn, "trades")[0]["yes_held"] == 10
+    asyncio.run(ex.retry(NOW))
+    # On 2026-10-01 a sale of 0.42 read as one that sold nothing, "sold back 0...", and went unrecorded.
+    t = stored(conn, "trades")[0]
+    assert (t["yes_held"], t["no_held"]) == (9.58, 9.58) and ex.exposed == {}
+    assert t["hedge"].endswith(f"then sold back 0.42 of 0.42 on polymarket_us at {NOW[11:19]}")
+    assert logs[-1].startswith("live flattened nfl game_winner 2026-09-22 CAR@ATL CAR: sold back 0.42 of 0.42 on polymarket_us, 0 still exposed")
+
+
 UNFUNDED = orders.Answer(None, "unfunded", 0, 0.0, 0.0, "not enough funds: You don't have enough funds for this order.", {})
 
 

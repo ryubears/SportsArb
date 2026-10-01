@@ -21,11 +21,16 @@ other trade on its bet, for a human to settle with the venue. Last it
 reads each venue's positions and compares them with what the live trades
 then hold, contract by contract.
 
+A trade whose record fell behind its orders for another reason, as trade
+48 did when a sale of 0.42 of a contract went unrecorded on 2026-10-01,
+is worked out again from its orders when named with --trade.
+
 Stop the recorder first, so no order is in flight and the executor reads
 the repaired trades when it starts. Without --apply it only says what it
 would change. Run from src/ with:
     python3 -m tools.repair_fills
     python3 -m tools.repair_fills --apply
+    python3 -m tools.repair_fills --trade 48 --apply
 """
 
 import argparse
@@ -119,10 +124,14 @@ def holdings(trades):
     return out
 
 
-def repair(conn, apply, positions=POSITIONS, out=print):
+def repair(conn, apply, positions=POSITIONS, out=print, rewrite=()):
     """
     Correct the misread orders and their trades, writing them when apply is
     true, then compare what the live trades hold with each venue's positions.
+    The trades in rewrite are worked out again from their orders though no
+    order of theirs was misread, for a trade whose record is known to have
+    fallen behind its orders. Any other trade that works out differently
+    stops the repair, since the replay itself would then be in doubt.
     Returns the ids of the trades left for a human.
     """
     orders = database.load_orders(conn)
@@ -144,7 +153,7 @@ def repair(conn, apply, positions=POSITIONS, out=print):
         except Oversold as e:
             oversold[trade_id] = str(e)
             continue
-        if any(o.id in corrected for o in by_trade.get(trade_id, [])):
+        if any(o.id in corrected for o in by_trade.get(trade_id, [])) or (trade_id in rewrite and differs(trade, again)):
             repaired[trade_id] = again
         elif differs(trade, again):
             raise ValueError(f"trade {trade_id} has no misread order, yet works out differently again: {', '.join(differs(trade, again))}")
@@ -153,7 +162,7 @@ def repair(conn, apply, positions=POSITIONS, out=print):
         repaired.pop(trade_id, None)
         out(f"trade {trade_id} {trades[trade_id].trade}: left for a human, " + oversold.get(trade_id, "on the same bet as one that was oversold"))
     for trade_id, again in repaired.items():
-        again.hedge = f"{trades[trade_id].hedge}; repaired from the venue's answers"
+        again.hedge = f"{trades[trade_id].hedge}; " + ("worked out again from its orders" if trade_id in rewrite else "repaired from the venue's answers")
         out(f"trade {trade_id}: " + ", ".join(differs(trades[trade_id], again)))
     if apply:
         for o in corrected.values():
@@ -176,4 +185,7 @@ def repair(conn, apply, positions=POSITIONS, out=print):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Repair the live trades whose Polymarket US fills were misread.")
     ap.add_argument("--apply", action="store_true", help="write the repaired orders and trades, rather than only saying what would change")
-    repair(database.connect(), ap.parse_args().apply)
+    ap.add_argument("--trade", type=int, action="append", default=[],
+                    help="also work out this trade again from its orders, though none was misread; may be given more than once")
+    args = ap.parse_args()
+    repair(database.connect(), args.apply, rewrite=args.trade)

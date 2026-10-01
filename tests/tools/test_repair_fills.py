@@ -107,3 +107,18 @@ def test_a_bet_with_a_leg_sold_below_nothing_is_left_for_a_human(conn):
     assert (stored(conn, 2)["no_filled"], stored(conn, 2)["status"]) == (0, "failed")          # As it was.
     assert dict(conn.execute("SELECT status, filled FROM orders WHERE id = 5").fetchone()) == {"status": "unfilled", "filled": 0}
     assert stored(conn, 4)["status"] == "filled"                                             # Read right, left alone.
+
+
+def test_a_trade_named_is_worked_out_again_though_no_order_was_misread(conn):
+    # The record of the trade read right says it still holds 2 a side, though its orders sold 1 yes back since.
+    database.insert_order(conn, Order(trade_id=4, venue="polymarket_us", contract_id="e", purpose="flatten", action="sell", outcome="yes",
+                                      quantity=1, limit_price=0.5, client_id="c", sent_at=AT, status="filled", filled=1, dollars=0.49, fees=0.01,
+                                      response=json.dumps({"id": "x", "executions": [piece("FILL", "1", "0.50", "0.01")]})))
+    with pytest.raises(ValueError, match="trade 4 has no misread order, yet works out differently again"):
+        repair_fills.repair(conn, True, VENUE, lambda line: None)
+    lines = []
+    repair_fills.repair(conn, True, VENUE, lines.append, rewrite=[4])
+    t = stored(conn, 4)
+    assert (t["yes_held"], t["no_held"], t["hedge_pnl"]) == (1, 2, pytest.approx(0.49 - 0.5))
+    assert t["hedge"].endswith("; worked out again from its orders")
+

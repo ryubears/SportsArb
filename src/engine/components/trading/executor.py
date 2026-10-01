@@ -306,14 +306,14 @@ class Executor:
             waiting = self.unfunded.get(trade_id)
             if waiting and self.cash.available(waiting[0], waiting[1]) <= waiting[2] + 1e-9:
                 continue
-            before = trade.hedge_pnl
+            before, held = trade.hedge_pnl, [leg.held for leg in legs]
             self.flattening.add(trade_id)
             try:
                 note = await self.flatten(trade, legs)
             finally:
                 self.flattening.discard(trade_id)
-            if not note or note.startswith("sold back 0"):
-                continue
+            if not note or [leg.held for leg in legs] == held:
+                continue        # Nothing sold, so nothing to record.
             self.record_holdings(trade, legs)
             left = exact(abs(legs[0].held - legs[1].held))
             trade.hedge += f", then {note} at {now[11:19]}"

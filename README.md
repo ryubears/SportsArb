@@ -603,8 +603,11 @@ again from its orders, as the executor does, and the live executor
 sells back at its next start what a repaired trade holds on one side more
 than the other. A bet whose orders sold more than it held is left for a
 human. Last it compares what the trades hold with each venue's positions.
-Without `--apply` it writes nothing, so it also serves as a check that the
-live records match the venues. Stop the recorder before `--apply`.
+`--trade` names a trade whose record fell behind its orders for another
+reason, to be worked out again from them too, as trade 48 was when a
+sale of 0.42 of a contract went unrecorded. Without `--apply` it writes
+nothing, so it also serves as a check that the live records match the
+venues. Stop the recorder before `--apply`.
 
 `src/tools/latency_report.py` reports, over a stretch such as a game, how
 far behind the venues the books ran, minute by minute from the status
