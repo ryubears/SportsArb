@@ -39,7 +39,7 @@ from api import kalshi, orders, polymarket_us
 from common import jsonutil
 from common.periodic import Periodic
 from common.timeutil import now_iso
-from common.venues import VENUES
+from common.venues import VENUES, is_maintenance
 from db import database
 from db.models import Order
 from engine.components.trading.brakes import Brakes
@@ -64,8 +64,9 @@ class LiveExecutor(Executor):
     mode = "live"
     step = orders.STEP      # The venues fill, and take orders, in hundredths of a contract.
 
-    def __init__(self, conn, cash, books, log=print, clock=now_iso, place=None, notifier=None, positions=None):
-        super().__init__(conn, cash, books, log, clock)
+    def __init__(self, conn, cash, books, log=print, clock=now_iso, place=None, notifier=None, positions=None,
+                 is_maintenance=is_maintenance):
+        super().__init__(conn, cash, books, log, clock, is_maintenance)
         self.place = place or PLACE
         self.threads = ThreadPoolExecutor(ORDER_THREADS, thread_name_prefix="orders")
         self.brakes = Brakes(conn, cash, log, notifier, clock)

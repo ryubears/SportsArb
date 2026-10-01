@@ -21,6 +21,8 @@ MIN_PAYOUT_HOURS = 24       # The soonest a bet may pay out and still be traded,
 MIN_ANNUAL_PCT = 30         # The least an edge must return a year on the capital it ties up until the bet pays, before a game or on
                             # a future. A 5 cent edge clears it if it pays within 64 days, 10 cents within 135, and 20 within 304.
 FILL_SHARE = 0.5            # The share of visible size at a level a trade asks for. Other takers get the rest.
+MIN_SALE_SHARE = 0.5        # The least share of what contracts cost a sale to flatten them takes. Below it they are kept, a bet that
+                            # may still pay out, rather than given away: a 4 cent contract is not sold at the 1 cent bid.
 # A leg on a venue here trades only once its book is current: newer, by the venues' own clocks, than the other leg's last
 # change, or else that change is this many seconds old, time for any reaction to it on this venue to reach us. Polymarket US
 # books reached us 85 ms after the venue changed them at the median, 160 at the 90th percentile, so a price that moved on

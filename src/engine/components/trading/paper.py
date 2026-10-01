@@ -28,6 +28,7 @@ import dataclasses
 import math
 import random
 from common.timeutil import now_iso
+from common.venues import is_maintenance
 from engine.components.trading.executor import Executor, Fill
 from engine.helper import config
 from engine.helper.pricing import book_level, ladder, sell_ladder, sweep, takes
@@ -40,8 +41,8 @@ class PaperExecutor(Executor):
 
     mode = "paper"
 
-    def __init__(self, conn, cash, books, log=print, rng=None, clock=now_iso):
-        super().__init__(conn, cash, books, log, clock)
+    def __init__(self, conn, cash, books, log=print, rng=None, clock=now_iso, is_maintenance=is_maintenance):
+        super().__init__(conn, cash, books, log, clock, is_maintenance)
         self.rng = rng or random.Random()
         self.taken = {}             # (venue, contract_id) maps to {(book side, price): contracts our orders took from that level}.
 

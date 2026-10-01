@@ -149,7 +149,7 @@ def test_exposure_is_flattened_on_a_later_tick_once_a_book_allows_it(tmp_path, q
 
     run(ex, kalshi_vanishes_and_polymarket_loses_its_bids)
     t = stored(conn)[0]
-    assert (t["yes_held"], t["no_held"], t["hedge"]) == (50, 0, "50 exposed, no book to flatten, no leg no book")
+    assert (t["yes_held"], t["no_held"], t["hedge"]) == (50, 0, "50 exposed, nothing to sell it into, no leg no book")
     assert list(ex.exposed) == [t["id"]]
 
     async def later():
@@ -164,7 +164,7 @@ def test_exposure_is_flattened_on_a_later_tick_once_a_book_allows_it(tmp_path, q
     asyncio.run(later())
     t = stored(conn)[0]
     assert (t["yes_held"], t["no_held"], t["matched"], t["status"]) == (30, 0, 0, "failed")
-    assert t["hedge"] == "50 exposed, no book to flatten, no leg no book, then sold back 20 of 50 on polymarket_us, 30 exposed at 17:31:00"
+    assert t["hedge"] == "50 exposed, nothing to sell it into, no leg no book, then sold back 20 of 50 on polymarket_us, 30 exposed at 17:31:00"
     assert t["hedge_pnl"] == pytest.approx(20 * (0.43 - 0.45))
     assert logs[-1] == ("paper flattened nfl game_winner 2026-09-22 CAR@ATL CAR: sold back 20 of 50 on polymarket_us, 30 exposed, "
                         "30 still exposed, hedge -0.40$")
@@ -418,3 +418,48 @@ def test_an_edge_trades_once_the_other_venues_move_is_older_than_the_wait_or_whe
     moved(latest, "polymarket_us", 0.01)                    # Polymarket US just moved, Kalshi's book is older: Kalshi has no wait.
     moved(latest, "kalshi", 3.0)
     assert run(ex) == [True]
+
+
+def test_a_sale_under_half_of_what_it_cost_is_not_made_and_the_contracts_are_kept(tmp_path, quick):
+    latest = books()
+    conn, cash, ex = executor(tmp_path, latest)
+
+    def kalshi_vanishes_and_polymarket_bids_a_dime():
+        latest.pop(("kalshi", "k"))
+        latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [[0.10, 100]], [[0.45, 100]])
+
+    run(ex, kalshi_vanishes_and_polymarket_bids_a_dime)
+    # 50 yes bought at 0.45: a dime would give back under half of that, so they are kept, a bet that may still pay out.
+    t = stored(conn)[0]
+    assert (t["yes_held"], t["no_held"], t["hedge"]) == (50, 0, "50 exposed, nothing to sell it into, no leg no book")
+    latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [[0.30, 100]], [[0.45, 100]])
+    asyncio.run(ex.retry(NOW))                                          # 0.30 is two thirds of the cost.
+    assert stored(conn)[0]["yes_held"] == 0 and ex.exposed == {}
+
+
+def in_maintenance(*venues):
+    """
+    A stand in for the venues' maintenance windows, with the venues in theirs.
+    """
+    return lambda venue, now: venue in venues
+
+
+def test_no_trade_opens_and_no_sale_goes_out_on_a_venue_that_is_not_trading(tmp_path, quick):
+    latest = books()
+    conn, cash, ex = executor(tmp_path, latest)
+    ex.is_maintenance = in_maintenance("kalshi")                                      # Kalshi's Thursday maintenance, say.
+    assert run(ex) == [False] and stored(conn) == []
+    ex.is_maintenance = in_maintenance()
+
+    def kalshi_vanishes():
+        latest.pop(("kalshi", "k"))
+        ex.is_maintenance = in_maintenance("polymarket_us")                           # And Polymarket US stops before the yes over is sold.
+
+    run(ex, kalshi_vanishes)
+    assert stored(conn)[0]["yes_held"] == 50 and list(ex.exposed) == [1]
+    asyncio.run(ex.retry(NOW))
+    assert stored(conn)[0]["yes_held"] == 50                            # Nothing is sent while it is stopped.
+    ex.is_maintenance = in_maintenance()
+    asyncio.run(ex.retry(NOW))
+    assert stored(conn)[0]["yes_held"] == 0 and ex.exposed == {}
+

@@ -23,6 +23,9 @@ When the two legs fill unevenly the executor goes flat at once by selling
 the excess back on its own venue, and records the result with fees. A
 sale frees the money at once, where buying the missing amount on the
 other venue, though it may cost less, would tie it up until the bet pays.
+A sale goes no lower than config.MIN_SALE_SHARE of what the contracts
+cost: below that it would give away most of what was paid, and the
+contracts are kept, as a bet that may still pay out.
 What it cannot sell stays on a list and is tried again on every tick,
 against the books as they are then, until it is flat, the bet pays out,
 or the settler says its contracts have resolved. A sale its venue turned
@@ -37,7 +40,10 @@ A pair is traded before its game or on a season's future, never once its
 game has kicked off, while its edge is config.MIN_EDGE or more, the bet
 pays out config.MIN_PAYOUT_HOURS or more away, and the edge returns
 config.MIN_ANNUAL_PCT a year or more until then. Near a game and during
-it, faster traders take an edge before our Polymarket US leg lands.
+it, faster traders take an edge before our Polymarket US leg lands. Both
+venues must be trading, outside the weekly maintenance each publishes, see
+common/venues.py: while one has stopped, its feed may still show prices no
+order can trade at.
 A trade asks for config.FILL_SHARE of what the books show at that edge,
 the share we expect to get, as far as the cash free on each venue pays
 for, live as on paper. Every trade is stored in the trades table as soon
@@ -51,6 +57,7 @@ import dataclasses
 from dataclasses import dataclass
 from common.log import on_failure
 from common.timeutil import epoch, hours_between, now_iso
+from common.venues import is_maintenance
 from db import database
 from db.models import Ledger, Leg, Trade
 from engine.helper import config, game
@@ -89,12 +96,13 @@ class Executor:
     subclass says how an order is filled, through fill() and sell_back().
     books is a function returning the newest Book of each contract, keyed by (venue, contract_id).
     cash is the money on each venue, with reserve(), release(), and apply().
+    is_maintenance says whether a venue is in its weekly maintenance at a time, (venue, ISO 8601 UTC), see common/venues.py.
     """
 
     mode = None     # 'paper' or 'live', set by each subclass. It starts every log line.
     step = 1        # The least part of a contract an order trades: whole contracts on paper, a hundredth live, see orders.STEP.
 
-    def __init__(self, conn, cash, books, log=print, clock=now_iso):
+    def __init__(self, conn, cash, books, log=print, clock=now_iso, is_maintenance=is_maintenance):
         if cash.mode != self.mode:
             raise ValueError(f"a {self.mode} executor cannot trade {cash.mode} money")
         self.conn = conn
@@ -102,6 +110,7 @@ class Executor:
         self.books = books
         self.clock = clock          # The current time in ISO 8601 UTC, for fills and for how old a book is.
         self.log = log
+        self.is_maintenance = is_maintenance    # Whether a venue is in its weekly maintenance at a time, see common/venues.py.
         self.games = {}             # Trade id maps to its pair's game date and members, for when its books go stale while it is flattened.
         self.tasks = set()          # Trades in flight, and the retry of exposed ones while it runs.
         self.done = []              # Trades finished since the last summary.
@@ -165,16 +174,16 @@ class Executor:
         trade.yes_cost, trade.no_cost = legs[0].cost, legs[1].cost
         trade.status = "failed" if trade.matched == 0 else "partial" if trade.matched < trade.quantity else "filled"
 
-    def sale_ladder(self, leg, excess, aging=True):
+    def sale_ladder(self, leg, excess, aging=True, least=0.0):
         """
         The ladder selling the excess back on the leg's own venue would sell
-        into, from its fresh book, or an empty one when there is no fresh
-        book or nothing would sell.
+        into, from its fresh book, its levels at least least each, or an empty
+        one when there is no fresh book or nothing would sell.
         """
         book = self.fresh_book(leg.key, aging)
         if not book:
             return []
-        selling = sell_ladder(book, leg.polarity, leg.side)
+        selling = [(price, size) for price, size in sell_ladder(book, leg.polarity, leg.side) if price >= least - 1e-9]
         sold, _ = sweep(selling, excess, leg.venue, leg.fee_info, config.FILL_SHARE, selling=True, step=self.step)
         return selling if sold else []
 
@@ -200,15 +209,18 @@ class Executor:
     async def flatten(self, trade, legs):
         """
         Sell the excess on the leg holding more back on its own venue, sent
-        like any other order. Returns what was done in words, or None when no
-        fresh book would take the sale or the trade has been set aside.
+        like any other order, no lower than config.MIN_SALE_SHARE of what it
+        cost. Returns what was done in words, or None when nothing would sell
+        at that, its venue is not trading, or the trade has been set aside.
         """
         if trade.id in self.set_aside:
             return None
         long_leg, short_leg = sorted(legs, key=lambda leg: leg.held, reverse=True)
+        if self.is_maintenance(long_leg.venue, self.clock()):
+            return None
         excess = exact(long_leg.held - short_leg.held)
         average = long_leg.cost / long_leg.held         # What each contract the long leg holds cost.
-        selling = self.sale_ladder(long_leg, excess, self.aging(trade))
+        selling = self.sale_ladder(long_leg, excess, self.aging(trade), average * config.MIN_SALE_SHARE)
         if not selling:
             return None
         done, note = await self.sell_excess(trade, long_leg, excess, average, selling)
@@ -251,7 +263,7 @@ class Executor:
         hedge = None                # How the mismatch was flattened, in words, when there was one.
         if trade.yes_filled != trade.no_filled:
             exposed = exact(abs(trade.yes_filled - trade.no_filled))
-            hedge = await self.flatten(trade, legs) or f"{exposed:g} exposed, {self.set_aside.get(trade.id, 'no book to flatten')}"
+            hedge = await self.flatten(trade, legs) or f"{exposed:g} exposed, {self.set_aside.get(trade.id, 'nothing to sell it into')}"
         self.record_holdings(trade, legs)
         notes = [f"{leg.side} leg {fill.note}" for leg, fill in zip(legs, fills) if fill.note]
         trade.hedge = ", ".join(([hedge] if hedge else []) + notes) or "none"
@@ -430,6 +442,8 @@ class Executor:
             return False
         legs = [Leg(side, m["venue"], m["contract_id"], m["polarity"], fee_info=fee_infos[(m["venue"], m["contract_id"])])
                 for side, m in (("yes", yes), ("no", no))]
+        if any(self.is_maintenance(leg.venue, now) for leg in legs):
+            return False
         quantity = self.quantity_for(legs)
         if quantity < 1:
             return False

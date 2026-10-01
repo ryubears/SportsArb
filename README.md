@@ -443,12 +443,16 @@ stored in the orders table before it is sent and again with the venue's
 answer. Either way a leg that filled short is flattened at once by selling
 the excess back on its own venue, even when buying the missing side on the
 other venue would cost less, since a sale frees the money now and a
-purchase would hold it until the bet pays. Whatever stays exposed is tried
-again on every tick until it is flat, the bet pays out, or the settler
-settles it. A sale its venue turned away for lack of cash is tried again
-only once the cash there has grown, by a payout, a deposit, or another
-sale, rather than sent again every second. A restart takes back from the trades table whatever is still
-exposed, so a crash or a deploy does not leave it unhedged. A live sale is
+purchase would hold it until the bet pays. A sale goes no lower than half
+of what the contracts cost (`MIN_SALE_SHARE`): below that it would give
+away most of what was paid, so the contracts are kept, a bet that may
+still pay out, until a bid worth taking comes. Whatever stays exposed is
+tried again on every tick until it is flat, the bet pays out, or the
+settler settles it. A sale its venue turned away for lack of cash is
+tried again only once the cash there has grown, by a payout, a deposit, or
+another sale, rather than sent again every second. A restart takes back
+from the trades table whatever is still exposed, so a crash or a deploy
+does not leave it unhedged. A live sale is
 limited to the deepest price the books said it would reach, so a book that
 moved leaves the rest for the next tick rather than filling far from its
 price. Once a game has started, orders and flattening only use a book that
@@ -481,6 +485,12 @@ one is trusted only once that change is `CONFIRM_SECONDS`, 0.3 seconds,
 old, long enough for a reaction on Polymarket US to have reached us, and
 until then the edge waits for the scanner to offer it again at the next
 change or tick. A Kalshi leg has no such wait, since its feed is fast.
+Both venues stop every Thursday for maintenance they publish, Kalshi from
+3 to 5 AM Eastern and Polymarket US from 6 to 8 AM, while a feed may go on
+sending books, so no trade is opened, and no order sent to flatten one,
+with a leg on a venue in its window (`venues.is_maintenance`). A pause at any other
+time is met by the brakes: the venue refuses the orders, and three
+refusals in a row halt live trading.
 Live trading takes every sport the run does. A Kalshi leg spends only the
 cash on its market's shard, football's and hockey's on shard 0, baseball's
 and basketball's on 3, so `tools/kalshi_shards.py` splits the Kalshi cash
@@ -772,6 +782,12 @@ Polymarket US nets positions per market, so selling that No was buying
 Yes, and the $0.16 free there could not pay for it. Three such refusals in
 a row halted live trading, so an order turned away for lack of cash now
 counts as unfunded rather than refused, and waits for the cash to grow.
+Later that night live trading halted again, at 3 AM Eastern, when Kalshi
+closed for its weekly maintenance while its feed went on: three trades
+bought the Polymarket US leg, Kalshi refused the other, and two of those
+legs were sold back at a cent each. Neither venue is traded in its
+published maintenance window now, and a sale to flatten no longer gives
+away a contract for under half of what it cost.
 
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.
@@ -845,7 +861,7 @@ python3 -m tools.feed_check --seconds 300 --markets 100
 src/
   api/        venue clients and the shared websocket book stream
   catalog/    fetch, classify (one parser per venue), match, notes, pipeline
-  common/     paths, time and json helpers, the venue list, the logger, the timer background work runs on,
+  common/     paths, time and json helpers, the venue list and maintenance windows, the logger, the timer background work runs on,
               how a child process starts, quantiles
   db/         models, the SQLite schema and its migrations, reads and writes
   engine/     run, the process that wires the components together
@@ -872,6 +888,7 @@ Where to look to change something:
 | fees | `engine/helper/fees.py` |
 | how an edge is priced | `engine/helper/pricing.py` |
 | game timing | `engine/helper/game.py` |
+| when each venue is in maintenance | `common/venues.py` |
 | every tunable number | `engine/helper/config.py` |
 | when a trade is taken and sized | `engine/components/trading/executor.py` |
 | the Kalshi cash on each shard | `tools/kalshi_shards.py` |

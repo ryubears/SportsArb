@@ -76,6 +76,17 @@ def seconds_between(a, b):
     return (datetime.fromisoformat(b) - datetime.fromisoformat(a)).total_seconds()
 
 
+def in_weekly_window(seconds, window):
+    """
+    Whether a time, in seconds since 1970, falls in a weekly window given as
+    (weekday, Monday 0, start hour, end hour) in US Eastern time, which keeps
+    daylight saving time as the venues' schedules do.
+    """
+    weekday, start, end = window
+    eastern = datetime.fromtimestamp(seconds, timezone.utc).astimezone(EASTERN)
+    return eastern.weekday() == weekday and start <= eastern.hour < end
+
+
 def hours_between(a, b):
     """
     Hours from ISO timestamp a to ISO timestamp b, as a float.

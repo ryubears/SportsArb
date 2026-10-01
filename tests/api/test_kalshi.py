@@ -170,6 +170,7 @@ def test_an_order_that_did_not_fill_costs_nothing(monkeypatch):
 
 @pytest.mark.parametrize("error, status", [
     (RequestFailed(400, '{"code": "insufficient_balance", "message": "insufficient balance"}'), "rejected"),     # Refused, nothing traded.
+    (RequestFailed(400, '{"error":{"code":"trading_is_paused","message":"trading is paused"}}'), "rejected"),    # Kalshi stopped: refused.
     (RequestFailed(503, "unavailable"), "error"),                                                                   # Failed on its side, it may have traded.
     # The market's exchange shard lacked the cash, as Kalshi answered on 2026-09-29. Nothing traded, and no refusal to halt on.
     (RequestFailed(404, '{"error":{"code":"insufficient_shard_balance","message":"insufficient shard balance","details":'
