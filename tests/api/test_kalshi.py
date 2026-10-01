@@ -153,12 +153,14 @@ def test_an_order_is_costed_from_its_average_price_and_fee(monkeypatch):
     assert calls[0][2] == "POST /trade-api/v2/portfolio/events/orders" and len(calls) == 1
 
 
-def test_a_sale_nets_the_fee_and_a_fractional_fill_counts_its_whole_contracts(monkeypatch):
+def test_a_sale_nets_the_fee_and_a_fill_is_counted_to_the_hundredth(monkeypatch):
     answer = {"order_id": "o2", "fill_count": "3.50", "remaining_count": "0.00", "average_fill_price": "0.4400", "average_fee_paid": "0.0200"}
     fake_api(monkeypatch, {("POST", "/portfolio/events/orders"): answer})
     placed = kalshi.place_order("T", "sell", "yes", 4, 0.44, "c2")
-    assert (placed.status, placed.filled, placed.note) == ("partial", 3, "fractional fill of 3.5 contracts")
-    assert placed.dollars == pytest.approx(3 * 0.44 - 3 * 0.02)
+    assert (placed.status, placed.filled, placed.note) == ("partial", 3.5, None)
+    assert placed.dollars == pytest.approx(3.5 * 0.44 - 3.5 * 0.02)
+    assert kalshi.order_body("T", "sell", "no", 0.58, 0.46, "c4")["count"] == "0.58"     # Hundredths of a contract, whole ones as before.
+    assert kalshi.order_body("T", "buy", "yes", 5, 0.45, "c5")["count"] == "5"
 
 
 def test_an_order_that_did_not_fill_costs_nothing(monkeypatch):

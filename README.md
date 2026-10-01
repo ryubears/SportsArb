@@ -191,6 +191,9 @@ checks before it trades, below.
   trades, and starts a settlement pass every 30 seconds, and the live desk
   emails once when the cash on Polymarket US, or on either Kalshi shard it
   trades on, falls under `LIVE_LOW_CASH`;
+- every 5 minutes the live desk reads each venue's positions and logs any
+  contract the venue holds more or less of than the live trades say
+  (`LIVE_POSITION_SECONDS`);
 - a status line is logged every minute, and each component's summary
   every ten.
 
@@ -332,7 +335,14 @@ immediate or cancel limit order whose answer they turn into an `Answer`,
 the same for both venues. Polymarket US prices every order on the long
 side, so a short side order at p is sent at 1 - p, and when its answer does
 not say how an order ended, the order itself is looked up, since a returned
-order id does not mean the order is done. Kalshi turns away an order whose
+order id does not mean the order is done. Both venues trade in hundredths
+of a contract: Polymarket US fills an order in pieces as small as one,
+0.1 then 0.89 then 0.01 for a contract, and takes orders that small, and
+Kalshi counts contracts to the hundredth too. So the pieces are added up
+and every fill, holding, and order is counted to the hundredth
+(`orders.exact`). Both clients also read the account's positions, which
+the live executor and `tools/repair_fills.py` check the trades against.
+Kalshi turns away an order whose
 market's shard lacks the cash, which counts as unfilled rather than
 refused, since nothing traded. Trading calls go over kept HTTPS connections
 from **http.py**, since a new TLS connection costs round trips a race
@@ -440,6 +450,18 @@ since a market that has closed may stop changing rather than empty its
 book, and its last book cannot be traded. Every trade is stored as soon as
 it is sent and updated when it is done.
 
+A trade opens in whole contracts, but a leg may fill to the hundredth,
+6.42 of 7 for one, and live trading counts it so: the other leg's 0.58
+over is sold back like any excess, in an order for 0.58 of a contract.
+Paper trading keeps to whole contracts, as its fills are worked out from
+the books (`Executor.step`). Every `LIVE_POSITION_SECONDS`, 5 minutes, the
+live executor reads each venue's positions and compares them with what
+the open live trades hold of each contract (`check_positions`). A
+difference of a hundredth or more means the records are wrong, so it is
+logged once and left to a human, see `tools/repair_fills.py`. Nothing is
+compared while a trade or a flatten is in flight, or when an order went
+out while the positions were read.
+
 A leg on Polymarket US trades only on a current book. That venue's books
 reached us about 85 ms after it changed them at the median, 160 at the
 90th percentile, and Kalshi's in about 12, so after a score Kalshi's new
@@ -542,10 +564,13 @@ with the return and annual return. Before games and futures are shown once
 more, only those within the trading rules: paying `MIN_PAYOUT_HOURS` or
 more out and `MIN_ANNUAL_PCT` a year or more. For paper and live apart it
 shows the trades by outcome and by sport and kind, with the days their
-money is held, the settled legs by venue, and what open trades hold on each
-venue and when it comes back, then the paper balances, the real orders
-sent by venue and what came back, and the live balances read from the
-venues now, with Kalshi's shards. `--hours` sets the window, and
+money is held, and the settled legs by venue. Then it lists the open
+trades, soonest to settle first, each with the capital it holds, the
+profit it is expected to make, that as a return and a year's rate, and
+when it settles, and over all of them what they hold on each venue and the
+average annual return weighted by capital. Last come the paper balances,
+the real orders sent by venue and what came back, and the live balances
+read from the venues now, with Kalshi's shards. `--hours` sets the window, and
 `--no-live` leaves out the live balances.
 
 `src/tools/live_check.py` reads both venues' balances with the keys in
@@ -558,6 +583,19 @@ exchange shards live trading uses, 0 and 3. It reads each shard's cash and
 says what it would move, and with `--apply` moves it, then sets Kalshi's
 own target split to the same shares, which Kalshi keeps every 10 seconds,
 payouts included. The money stays in the account, and nothing is traded.
+
+`src/tools/repair_fills.py` repairs the live trades recorded under an
+older reading of Polymarket US fills: before fills were added up, when an
+order filled in pieces was stored as filled short or not at all, and
+before they were counted to the hundredth, when 6.42 was stored as 6. It
+reads every stored Polymarket US answer again as the client now does,
+corrects the orders read differently, and works out each of their trades
+again from its orders, as the executor does, and the live executor
+sells back at its next start what a repaired trade holds on one side more
+than the other. A bet whose orders sold more than it held is left for a
+human. Last it compares what the trades hold with each venue's positions.
+Without `--apply` it writes nothing, so it also serves as a check that the
+live records match the venues. Stop the recorder before `--apply`.
 
 `src/tools/latency_report.py` reports, over a stretch such as a game, how
 far behind the venues the books ran, minute by minute from the status
@@ -695,10 +733,28 @@ is tied up, which faster traders tend to leave alone. Futures came back
 into the catalog, every episode records how long its edge stayed at five
 cents or more, and the executors stopped trading games in play. They take
 only bets paying a day or more away that return enough a year, at first
-100% and from October 1 30%, sell back a missed leg rather than buy the
+100% and from that evening 30%, sell back a missed leg rather than buy the
 other side, and size by the books and the cash alone. At 100% a year one
 edge in the first 24 hours of live trading qualified, and it lasted an
 instant.
+
+**The first lasting trades.** At 30% a year live trading took its first
+trades within seconds, on college football season win totals that had
+held an edge for hours, several of them two Polymarket US markets on the
+same line. In under three hours it had put about $100, most of its
+Polymarket US cash, into 16 open trades expected to make about $9, 8% on
+the capital or 46% a year, paying out from November 28. Those first hours
+also found a bug. Polymarket US fills an order in pieces as small as a
+hundredth of a contract, and each piece was cut to whole contracts on its
+own, so 18 of the first 32 orders there, every one filled in full, were
+stored as filled short or not at all, and trades were flattened against
+legs they did not hold, one of them three times over. Fills are now added
+up first, the stored answers were read again to repair the trades, and the
+11 contracts they held on one side more than the other were sold back.
+Since both venues trade in hundredths of a contract, fills are now counted
+to the hundredth, so an order for 7 that fills 6.42 is recorded as 6.42
+and its other leg's 0.58 over is sold back like any excess, and the live
+executor checks the venues' positions against the trades every 5 minutes.
 
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.
@@ -781,7 +837,7 @@ src/
       trading/   executor (what paper and live share), paper, live, brakes, notify
       money/     balances (what paper and live share), paper, live, settle
     helper/      config (the settings a run is tuned by), game (when a game is played and when its bets pay out), pricing, fees
-  tools/      summary report, live_check, kalshi_shards, latency_report, feed_check
+  tools/      summary report, live_check, kalshi_shards, repair_fills, latency_report, feed_check
 tests/        mirrors src, run with pytest, configured in pyproject.toml
   support/    helpers the tests share, and the streams and refreshes a child process can run
 commands.txt  operating the AWS instance, gitignored, kept locally
@@ -808,3 +864,4 @@ Where to look to change something:
 | how far behind the feeds run | `tools/latency_report.py`, `tools/feed_check.py` |
 | how the processes are wired | `engine/run.py` |
 | the report on the database | `tools/summary.py` |
+| live records against the venues' positions | `tools/repair_fills.py` |

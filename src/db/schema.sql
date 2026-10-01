@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS trades (
     yes_contract   TEXT NOT NULL,
     yes_polarity   TEXT NOT NULL,   -- The side the contract pays on, so settlement knows whether the leg won.
     yes_limit      REAL NOT NULL,
-    yes_filled     INTEGER NOT NULL,
+    yes_filled     INTEGER NOT NULL,   -- Contracts filled, to the hundredth the venues fill in; SQLite keeps a fraction as a REAL. So are held and matched.
     yes_cost       REAL NOT NULL,   -- Dollars paid including fees.
     yes_latency_ms INTEGER NOT NULL,
     yes_fill_ts    TEXT,
@@ -153,7 +153,7 @@ CREATE TABLE IF NOT EXISTS orders (
     purpose        TEXT NOT NULL,      -- 'open' for one of the trade's two legs, 'flatten' for an order that evens them.
     action         TEXT NOT NULL,      -- 'buy' or 'sell'.
     outcome        TEXT NOT NULL,      -- 'yes' for the contract itself, 'no' for its other side.
-    quantity       INTEGER NOT NULL,   -- Contracts asked for.
+    quantity       INTEGER NOT NULL,   -- Contracts asked for, to the hundredth.
     limit_price    REAL NOT NULL,      -- The worst price per contract accepted for the outcome, before fees.
     client_id      TEXT NOT NULL,      -- Our id for the order, sent with it, so an order whose answer was lost can be found at the venue.
     sent_at        TEXT NOT NULL,
@@ -161,7 +161,7 @@ CREATE TABLE IF NOT EXISTS orders (
     venue_order_id TEXT,               -- The venue's id for the order, once it answered.
     answered_at    TEXT,
     latency_ms     INTEGER,            -- From sending the order to its answer.
-    filled         INTEGER NOT NULL,   -- Contracts bought or sold.
+    filled         INTEGER NOT NULL,   -- Contracts bought or sold, to the hundredth.
     dollars        REAL NOT NULL,      -- Paid for a buy or received for a sale, fees included.
     fees           REAL NOT NULL,
     note           TEXT,               -- Why the venue rejected the order, or the error.

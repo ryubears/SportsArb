@@ -46,6 +46,8 @@ LIVE_LOW_CASH = 5.0         # Dollars on a live venue, or on one of its shards i
 LIVE_SHARDS = {"kalshi": (0, 3)}    # The exchange shards a venue splits its cash by that live trading keeps cash on, each with its own
                                     # low cash email. Kalshi trades football and hockey on shard 0 and baseball and basketball on 3,
                                     # and tools/kalshi_shards.py splits its cash evenly between them.
+LIVE_POSITION_SECONDS = 300 # Between readings of the venues' positions, which are compared with what the live trades hold, so records
+                            # gone wrong are logged, see LiveExecutor.check_positions().
 LIVE_ORDER_WINDOW = 20      # The newest orders the unknown outcome brake looks at.
 LIVE_UNKNOWN_LIMIT = 3      # Orders with an unknown outcome among the newest LIVE_ORDER_WINDOW at which live trading halts.
 LIVE_REJECT_LIMIT = 3       # Orders one venue refuses in a row at which live trading halts.

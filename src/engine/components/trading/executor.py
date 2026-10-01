@@ -51,6 +51,7 @@ from common.timeutil import epoch, hours_between, now_iso
 from db import database
 from db.models import Ledger, Leg, Trade
 from engine.helper import config, game
+from api.orders import exact
 from engine.helper.pricing import annual_pct, depth, fresh, ladder, reach, sell_ladder, sweep, trade_words
 
 
@@ -67,7 +68,7 @@ class Fill:
     What came back for one order: contracts filled, dollars paid or received
     including fees, and the latency and time of the fill.
     """
-    filled: int = 0
+    filled: float = 0           # Contracts, to the hundredth live, whole on paper.
     dollars: float = 0.0
     ms: int = 0
     ts: str | None = None
@@ -87,6 +88,7 @@ class Executor:
     """
 
     mode = None     # 'paper' or 'live', set by each subclass. It starts every log line.
+    step = 1        # The least part of a contract an order trades: whole contracts on paper, a hundredth live, see orders.STEP.
 
     def __init__(self, conn, cash, books, log=print, clock=now_iso):
         if cash.mode != self.mode:
@@ -167,7 +169,7 @@ class Executor:
         if not book:
             return []
         selling = sell_ladder(book, leg.polarity, leg.side)
-        sold, _ = sweep(selling, excess, leg.venue, leg.fee_info, config.FILL_SHARE, selling=True)
+        sold, _ = sweep(selling, excess, leg.venue, leg.fee_info, config.FILL_SHARE, selling=True, step=self.step)
         return selling if sold else []
 
     async def sell_excess(self, trade, leg, excess, average, selling):
@@ -175,13 +177,13 @@ class Executor:
         Sell the excess back on its own venue, no lower than the book said
         it would sell, and record what came back. Returns (contracts sold, note).
         """
-        fill = await self.sell_back(trade, leg, excess, reach(selling, excess, config.FILL_SHARE))
+        fill = await self.sell_back(trade, leg, excess, reach(selling, excess, config.FILL_SHARE, self.step))
         if fill.filled:
             self.cash.apply(Ledger(fill.ts, leg.venue, fill.dollars, "sell", trade.id), shard(leg))
-        leg.held -= fill.filled
+        leg.held = exact(leg.held - fill.filled)
         leg.cost -= fill.filled * average
         trade.hedge_pnl += fill.dollars - fill.filled * average
-        return fill.filled, f"sold back {fill.filled} of {excess} on {leg.venue}"
+        return fill.filled, f"sold back {fill.filled:g} of {excess:g} on {leg.venue}"
 
     async def flatten(self, trade, legs):
         """
@@ -192,14 +194,14 @@ class Executor:
         if trade.id in self.set_aside:
             return None
         long_leg, short_leg = sorted(legs, key=lambda leg: leg.held, reverse=True)
-        excess = long_leg.held - short_leg.held
+        excess = exact(long_leg.held - short_leg.held)
         average = long_leg.cost / long_leg.held         # What each contract the long leg holds cost.
         selling = self.sale_ladder(long_leg, excess, self.aging(trade))
         if not selling:
             return None
         done, note = await self.sell_excess(trade, long_leg, excess, average, selling)
         if done < excess:
-            note += f", {excess - done} exposed"
+            note += f", {exact(excess - done):g} exposed"
         return note
 
     def record_fills(self, trade, fills):
@@ -235,8 +237,8 @@ class Executor:
         trade.hedge_pnl = 0.0
         hedge = None                # How the mismatch was flattened, in words, when there was one.
         if trade.yes_filled != trade.no_filled:
-            exposed = abs(trade.yes_filled - trade.no_filled)
-            hedge = await self.flatten(trade, legs) or f"{exposed} exposed, {self.set_aside.get(trade.id, 'no book to flatten')}"
+            exposed = exact(abs(trade.yes_filled - trade.no_filled))
+            hedge = await self.flatten(trade, legs) or f"{exposed:g} exposed, {self.set_aside.get(trade.id, 'no book to flatten')}"
         self.record_holdings(trade, legs)
         notes = [f"{leg.side} leg {fill.note}" for leg, fill in zip(legs, fills) if fill.note]
         trade.hedge = ", ".join(([hedge] if hedge else []) + notes) or "none"
@@ -249,7 +251,7 @@ class Executor:
         self.totals["profit"] += trade.profit
         self.totals["hedge"] += trade.hedge_pnl
         self.done.append(trade)
-        self.log(f"{self.mode} {trade.status}: {trade.label}, {trade.trade}, wanted {trade.quantity}, filled {trade.yes_filled}/{trade.no_filled}, "
+        self.log(f"{self.mode} {trade.status}: {trade.label}, {trade.trade}, wanted {trade.quantity:g}, filled {trade.yes_filled:g}/{trade.no_filled:g}, "
                  f"locked in {trade.profit:.2f}$, hedge {trade.hedge} {trade.hedge_pnl:+.2f}$")
 
     def settled(self, trade_id):
@@ -295,11 +297,11 @@ class Executor:
             if not note or note.startswith("sold back 0"):
                 continue
             self.record_holdings(trade, legs)
-            left = abs(legs[0].held - legs[1].held)
+            left = exact(abs(legs[0].held - legs[1].held))
             trade.hedge += f", then {note} at {now[11:19]}"
             database.update_trade(self.conn, trade)
             self.totals["hedge"] += trade.hedge_pnl - before
-            self.log(f"{self.mode} flattened {trade.label}: {note}, {left} still exposed, hedge {trade.hedge_pnl:+.2f}$")
+            self.log(f"{self.mode} flattened {trade.label}: {note}, {left:g} still exposed, hedge {trade.hedge_pnl:+.2f}$")
             if not left:
                 self.forget(trade_id)
 

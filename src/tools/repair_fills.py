@@ -1,15 +1,16 @@
 """
-Repair the live trades whose Polymarket US fills were misread.
+Repair the live trades recorded under an older reading of Polymarket US fills.
 
 Polymarket US fills an order in pieces as small as a hundredth of a
-contract, 0.1 then 0.89 then 0.01 for one. Until its fills were added up
-before being cut to whole contracts, see polymarket_us.whole(), each piece
-was cut on its own, so an order that filled in full was stored as filled
-short or not at all, and its trade was flattened against what it did not
-hold. On 2026-09-30, 18 of the first 32 orders there were misread.
+contract, 0.1 then 0.89 then 0.01 for one. At first each piece was cut to
+whole contracts on its own, so an order that filled in full was stored as
+filled short or not at all, and its trade was flattened against what it
+did not hold: on 2026-09-30, 18 of the first 32 orders there were misread.
+Then fills were added up but still cut to whole contracts, so 6.42 was
+stored as 6. Now they are counted to the hundredth, see orders.exact().
 
 This reads every stored Polymarket US answer again with
-polymarket_us.read_answer(), corrects each order it misread, and works out
+polymarket_us.read_answer(), corrects each order read differently, and works out
 each trade with a corrected order again from its orders, as the executor
 does: what each leg filled and holds, what that cost, the profit locked
 in, and what flattening made or lost. The live executor flattens a
@@ -31,6 +32,7 @@ import argparse
 import dataclasses
 import json
 from api import kalshi, polymarket_us
+from api.orders import exact
 from db import database
 from db.models import Trade
 
@@ -77,9 +79,9 @@ def replay(trade, orders):
             filled[leg], paid[leg], held[leg], cost[leg] = o.filled, o.dollars, o.filled, o.dollars
         elif o.action == "sell":
             if o.filled > held[leg]:
-                raise Oversold(f"order {o.id} sold {o.filled} of the {leg} leg, which held {held[leg]}")
+                raise Oversold(f"order {o.id} sold {o.filled:g} of the {leg} leg, which held {held[leg]:g}")
             average = cost[leg] / held[leg] if held[leg] else 0.0
-            held[leg] -= o.filled
+            held[leg] = exact(held[leg] - o.filled)
             cost[leg] -= o.filled * average
             hedge += o.dollars - o.filled * average
         else:
@@ -128,7 +130,7 @@ def repair(conn, apply, positions=POSITIONS, out=print):
     for o in orders:
         if o.id in corrected:
             new = corrected[o.id]
-            out(f"order {o.id} of trade {o.trade_id}: {o.action} {o.quantity} {o.outcome} {o.status} {o.filled} -> {new.status} {new.filled}, "
+            out(f"order {o.id} of trade {o.trade_id}: {o.action} {o.quantity:g} {o.outcome} {o.status} {o.filled:g} -> {new.status} {new.filled:g}, "
                 f"{o.dollars:.4f}$ -> {new.dollars:.4f}$")
     by_trade = {}
     for o in orders:

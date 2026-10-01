@@ -14,6 +14,13 @@ was priced. Every order is stored in the orders table before it is sent
 and updated with the venue's answer, and the money is the venues' own,
 through LiveBalances from money/live.py.
 
+Both venues fill orders in hundredths of a contract, so fills, holdings,
+and the orders that flatten are all counted to the hundredth, while a
+trade opens in whole contracts. Every config.LIVE_POSITION_SECONDS the
+live executor reads each venue's positions and logs any contract the
+venue holds more or less of than the live trades say, which would mean
+the records are wrong, see check_positions().
+
 An order whose outcome cannot be known, because no answer came, the venue
 failed on its side, or its answer cannot be read, leaves what its trade
 holds unknown. That trade is set aside: no more orders are sent for it,
@@ -30,6 +37,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from api import kalshi, orders, polymarket_us
 from common import jsonutil
+from common.periodic import Periodic
 from common.timeutil import now_iso
 from common.venues import VENUES
 from db import database
@@ -39,6 +47,7 @@ from engine.components.trading.executor import Executor, Fill
 from engine.helper import config
 
 PLACE = {"kalshi": kalshi.place_order, "polymarket_us": polymarket_us.place_order}   # How each venue takes an order.
+POSITIONS = {"kalshi": kalshi.positions, "polymarket_us": polymarket_us.positions}    # How each venue reports what the account holds.
 ORDER_THREADS = 8       # Orders in flight at once. Two per trade, so a burst of signals is not held back.
 
 
@@ -48,17 +57,23 @@ class LiveExecutor(Executor):
     place maps a venue to its place_order function. notifier is the Notifier
     from notify.py, which emails a human when live trading halts and when a
     venue's cash, or one of its shards' in config.LIVE_SHARDS, runs low.
+    positions maps a venue to how it reports what the account holds, by
+    default POSITIONS, which check_positions() compares with the trades.
     """
 
     mode = "live"
+    step = orders.STEP      # The venues fill, and take orders, in hundredths of a contract.
 
-    def __init__(self, conn, cash, books, log=print, clock=now_iso, place=None, notifier=None):
+    def __init__(self, conn, cash, books, log=print, clock=now_iso, place=None, notifier=None, positions=None):
         super().__init__(conn, cash, books, log, clock)
         self.place = place or PLACE
         self.threads = ThreadPoolExecutor(ORDER_THREADS, thread_name_prefix="orders")
         self.brakes = Brakes(conn, cash, log, notifier, clock)
         self.notifier = notifier
         self.low = set()            # (venue, shard or None) whose cash is under config.LIVE_LOW_CASH, once a human has been told.
+        self.positions = POSITIONS if positions is None else positions
+        self.checks = Periodic(lambda: config.LIVE_POSITION_SECONDS, log, "live position check")
+        self.told = {}              # (venue, contract) maps to the mismatch last logged on it, so it is logged once.
 
     @property
     def halted(self):
@@ -97,6 +112,46 @@ class LiveExecutor(Executor):
                 continue
             for part in config.LIVE_SHARDS.get(venue) or (None,):
                 self.watch_cash(venue, part, now)
+
+    # POSITIONS
+
+    def watch_positions(self, clock):
+        """
+        Once a second from the desk, with the wall clock in seconds. Starts a check of the positions when one is due and none runs.
+        """
+        self.checks.tick(clock, self.check_positions)
+
+    async def check_positions(self):
+        """
+        Compare what each venue holds of each contract with what the open live
+        trades hold, and log a contract on which they differ by a hundredth
+        of one or more, once until the difference changes. Fills are counted
+        to the hundredth the venues trade in, so a difference means the
+        records are wrong, and it is left to a human, see
+        tools/repair_fills.py. Nothing is compared while a trade or a flatten
+        is in flight, or when an order went out while a venue was read, since
+        the trades may not show it yet.
+        """
+        if self.tasks:
+            return
+        for venue, read in self.positions.items():
+            before = database.last_order_id(self.conn)
+            position = await asyncio.to_thread(read)
+            if self.tasks or database.last_order_id(self.conn) != before:
+                return
+            held = database.load_holdings(self.conn, self.mode)
+            for contract in sorted(set(position) | {c for v, c in held if v == venue}):
+                key, theirs, ours = (venue, contract), position.get(contract, 0.0), held.get((venue, contract), 0)
+                if abs(round(theirs - ours, 2)) < orders.STEP:
+                    self.told.pop(key, None)
+                    continue
+                message = (f"live {venue} holds {theirs:g} of {contract}, the trades {ours:g}: the records differ from the venue, "
+                           f"see tools/repair_fills.py")
+                if self.told.get(key) != message:
+                    self.told[key] = message
+                    self.log(message)
+
+    # SIGNALS
 
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """

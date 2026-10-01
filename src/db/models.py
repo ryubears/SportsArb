@@ -148,8 +148,8 @@ class Leg:
     contract_id: str
     polarity: str           # The side the contract pays on.
     limit: float = 0.0      # The highest cost per contract the order accepts.
-    quantity: int = 0       # Contracts the order asks for.
-    held: int = 0           # Contracts held after the fill and any flattening.
+    quantity: float = 0     # Contracts the order asks for: whole to open a trade, to the hundredth to flatten one.
+    held: float = 0         # Contracts held after the fill and any flattening, to the hundredth, see orders.exact().
     cost: float = 0.0       # Dollars paid for what is held, including fees.
     fee_info: dict | None = None    # The contract's fee schedule, which the executor prices orders with. Not stored with the trade.
 
@@ -190,17 +190,17 @@ class Trade:
     no_polarity: str
     no_limit: float
     pays_at: str            # When the slower leg pays out.
-    yes_filled: int = 0
+    yes_filled: float = 0   # Contracts filled, to the hundredth the venues fill in, see orders.exact(). So are held and matched.
     yes_cost: float = 0.0   # Dollars paid including fees.
     yes_latency_ms: int = 0
     yes_fill_ts: str | None = None
-    no_filled: int = 0
+    no_filled: float = 0
     no_cost: float = 0.0
     no_latency_ms: int = 0
     no_fill_ts: str | None = None
-    yes_held: int = 0       # Contracts still held on the yes leg after any flattening.
-    no_held: int = 0
-    matched: int = 0        # Contracts held on both sides, after any flattening.
+    yes_held: float = 0     # Contracts still held on the yes leg after any flattening.
+    no_held: float = 0
+    matched: float = 0      # Contracts held on both sides, after any flattening.
     profit: float = 0.0     # Dollars locked in on the matched contracts, after fees.
     hedge: str = "none"     # How the mismatch was flattened, in words.
     hedge_pnl: float = 0.0  # Dollars gained or lost by flattening, after fees.
@@ -259,7 +259,7 @@ class Order:
     purpose: str            # 'open' for one of the trade's two legs, 'flatten' for an order that evens them.
     action: str             # 'buy' or 'sell'.
     outcome: str            # 'yes' for the contract itself, 'no' for its other side.
-    quantity: int           # Contracts asked for.
+    quantity: float         # Contracts asked for, to the hundredth.
     limit_price: float      # The worst price per contract accepted for the outcome, before fees.
     client_id: str          # Our id for the order, sent with it, so an order whose answer was lost can be found at the venue.
     sent_at: str
@@ -267,7 +267,7 @@ class Order:
     venue_order_id: str | None = None   # The venue's id for the order, once it answered.
     answered_at: str | None = None
     latency_ms: int | None = None       # From sending the order to its answer.
-    filled: int = 0         # Contracts bought or sold.
+    filled: float = 0       # Contracts bought or sold, to the hundredth, see orders.exact().
     dollars: float = 0.0    # Paid for a buy or received for a sale, fees included.
     fees: float = 0.0
     note: str | None = None             # Why the venue rejected the order, or the error.

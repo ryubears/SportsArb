@@ -378,6 +378,31 @@ def load_held(conn, mode):
     return {venue: dollars for venue, dollars in rows}
 
 
+def load_holdings(conn, mode):
+    """
+    What the unsettled trades of one mode hold of each contract, as
+    {(venue, contract_id): contracts}, positive for the contract's yes and
+    negative for its no, to compare with the venues' own positions.
+    """
+    rows = conn.execute("""
+        SELECT venue, contract_id, SUM(contracts) FROM (
+            SELECT yes_venue AS venue, yes_contract AS contract_id,
+                   CASE WHEN yes_polarity = 'yes' THEN yes_held ELSE -yes_held END AS contracts FROM trades t
+            WHERE mode = ? AND yes_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)
+            UNION ALL
+            SELECT no_venue, no_contract, CASE WHEN no_polarity = 'no' THEN no_held ELSE -no_held END FROM trades t
+            WHERE mode = ? AND no_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id))
+        GROUP BY venue, contract_id""", (mode, mode))
+    return {(venue, contract_id): round(contracts, 2) for venue, contract_id, contracts in rows if round(contracts, 2)}
+
+
+def last_order_id(conn):
+    """
+    The id of the newest live order, or None when there is none.
+    """
+    return conn.execute("SELECT MAX(id) FROM orders").fetchone()[0]
+
+
 def insert_settlement(conn, settlement):
     """
     Store how a trade's legs paid out, which marks the trade settled.

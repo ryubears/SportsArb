@@ -372,14 +372,15 @@ BOOK_SIDES = {("buy", "yes"): "bid", ("sell", "no"): "bid", ("buy", "no"): "ask"
 def order_body(ticker, action, outcome, quantity, price, client_id):
     """
     An immediate or cancel limit order for quantity contracts of one side of
-    a market, at price or better for that side. The order endpoint quotes
+    a market, to the hundredth Kalshi counts in, at price or better for that
+    side. The order endpoint quotes
     every order on the yes side, so a no side price p is sent as 1 - p. A
     sale is reduce only, so it can close what is held but never open the
     other side, and an order that would trade against one of our own is
     cancelled rather than filled.
     """
     yes_price = price if outcome == "yes" else 1 - price
-    body = {"ticker": ticker, "client_order_id": client_id, "side": BOOK_SIDES[(action, outcome)], "count": str(quantity),
+    body = {"ticker": ticker, "client_order_id": client_id, "side": BOOK_SIDES[(action, outcome)], "count": str(orders.size(quantity)),
             "price": f"{yes_price:.4f}", "time_in_force": "immediate_or_cancel", "self_trade_prevention_type": "taker_at_cross"}
     if action == "sell":
         body["reduce_only"] = True
@@ -392,10 +393,10 @@ def place_order(ticker, action, outcome, quantity, price, client_id):
     Answer. action is 'buy' or 'sell', outcome 'yes' or 'no', and
     price the worst price per contract accepted for that outcome. The answer
     gives the contracts filled, their average price on the yes side, so a no
-    side fill at p cost 1 - p, and the average fee per contract. Contracts
-    are whole in our books, so a fractional fill counts its whole contracts
-    and says so in the note. An order turned away for lack of cash on its
-    market's exchange shard is unfilled, not refused.
+    side fill at p cost 1 - p, and the average fee per contract. The fill is
+    counted to the hundredth, as Kalshi does, see orders.exact(). An order
+    turned away for lack of cash on its market's exchange shard is
+    unfilled, not refused.
     """
     try:
         answer = signed_request("POST", "/portfolio/events/orders", order_body(ticker, action, outcome, quantity, price, client_id))
@@ -405,11 +406,9 @@ def place_order(ticker, action, outcome, quantity, price, client_id):
         return orders.refused(e) if e.status < 500 else orders.unknown(e)
     except Exception as e:
         return orders.unknown(e)
-    exact = float_or_zero(answer.get("fill_count"))
-    filled = int(exact)
-    note = f"fractional fill of {exact} contracts" if exact != filled else None
+    filled = orders.exact(float_or_zero(answer.get("fill_count")))
     yes_price = float_or_zero(answer.get("average_fill_price"))
     traded = filled * (yes_price if outcome == "yes" else 1 - yes_price)
     fees = filled * float_or_zero(answer.get("average_fee_paid"))
     paid = traded + fees if action == "buy" else traded - fees
-    return orders.Answer(answer.get("order_id"), orders.status(filled, quantity), filled, paid, fees, note, answer)
+    return orders.Answer(answer.get("order_id"), orders.status(filled, quantity), filled, paid, fees, None, answer)

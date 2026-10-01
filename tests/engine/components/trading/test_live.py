@@ -7,7 +7,7 @@ import threading
 import pytest
 from api import orders
 from db import database
-from db.models import Book
+from db.models import Book, Order
 from engine.components.money.live import LiveBalances
 from engine.components.money.paper import PaperBalances
 from engine.components.trading.live import LiveExecutor
@@ -69,14 +69,14 @@ class FakeNotifier:
         self.sent.append((kind, subject, body))
 
 
-def executor(tmp_path, venues, latest=None, notifier=None, logs=None, read=True, balance=1000.0):
+def executor(tmp_path, venues, latest=None, notifier=None, logs=None, read=True, balance=1000.0, positions=None):
     conn = database.connect(tmp_path / "t.sqlite")
     cash = LiveBalances(lambda m: None, {"kalshi": lambda: (balance, {}), "polymarket_us": lambda: (balance, {})})
     if read:
         asyncio.run(cash.refresh(NOW))
     latest = books() if latest is None else latest
     ex = LiveExecutor(conn, cash, lambda: latest, (logs.append if logs is not None else lambda m: None), clock=lambda: NOW,
-                      place=venues.place(), notifier=notifier)
+                      place=venues.place(), notifier=notifier, positions=positions or {"polymarket_us": lambda: {}})
     return conn, cash, ex
 
 
@@ -364,3 +364,55 @@ def test_a_kalshi_leg_trades_only_with_the_cash_on_its_markets_shard(tmp_path):
     assert signal() is True
     assert sorted(venues.orders) == [("kalshi", "buy", "no", 3, 0.47), ("polymarket_us", "buy", "yes", 3, 0.45)]     # Sent together.
     assert cash.available("kalshi", 3) == pytest.approx(0.01) and cash.available("kalshi", 0) == 1000.0
+
+
+def test_a_leg_filled_in_hundredths_is_flattened_to_the_hundredth(tmp_path):
+    venues = Venues(polymarket_us=[fills(6.42)], kalshi=[fills(), fills()])
+    conn, cash, ex = executor(tmp_path, venues)
+    trade(ex)
+    t = stored(conn, "trades")[0]
+    # Polymarket US filled 6.42 of the 10, so the 3.58 no over on Kalshi are sold back, at 1 - 0.54, to the hundredth.
+    assert venues.orders[-1] == ("kalshi", "sell", "no", 3.58, 0.46)
+    assert (t["yes_filled"], t["no_filled"], t["matched"], t["yes_held"], t["no_held"], t["status"]) == (6.42, 10, 6.42, 6.42, 6.42, "partial")
+    assert t["profit"] == pytest.approx(6.42 * (1 - 0.45 - 0.47)) and t["hedge"] == "sold back 3.58 of 3.58 on kalshi"
+    assert t["hedge_pnl"] == pytest.approx(3.58 * (0.46 - 0.47))
+    assert ex.exposed == {}
+
+
+def check(ex):
+    asyncio.run(ex.check_positions())
+
+
+def test_a_venue_holding_other_than_the_trades_is_logged_once(tmp_path):
+    venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
+    held, logs = {"pm": 10.0}, []           # The trade holds 10 yes of pm, as the venue does.
+    conn, cash, ex = executor(tmp_path, venues, logs=logs, positions={"polymarket_us": lambda: held, "kalshi": lambda: {"k": -10.0}})
+    trade(ex)
+    check(ex)
+    assert not any("differ" in line for line in logs)
+    held.update(pm=10.42, other=-1.0)
+    check(ex)
+    check(ex)
+    assert [line for line in logs if "differ" in line] == [
+        "live polymarket_us holds -1 of other, the trades 0: the records differ from the venue, see tools/repair_fills.py",
+        "live polymarket_us holds 10.42 of pm, the trades 10: the records differ from the venue, see tools/repair_fills.py"]
+    assert len(venues.orders) == 2                                      # Only logged, nothing sent.
+
+
+def test_positions_are_not_compared_while_orders_go_out(tmp_path):
+    venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
+    logs = []
+    conn, cash, ex = executor(tmp_path, venues, logs=logs)
+    trade(ex)
+
+    def read_while_a_trade_goes_out():                                  # In a thread of its own, so on a connection of its own.
+        database.insert_order(database.connect(tmp_path / "t.sqlite"), Order(
+            trade_id=1, venue="kalshi", contract_id="k", purpose="open", action="buy", outcome="no", quantity=1, limit_price=0.47,
+            client_id="c", sent_at=NOW))
+        return {"pm": 12.0}
+    ex.positions = {"polymarket_us": read_while_a_trade_goes_out}
+    check(ex)
+    ex.positions = {"polymarket_us": lambda: {"pm": 12.0}}
+    ex.tasks.add(asyncio.Future)                                        # A trade in flight.
+    check(ex)
+    assert not any("differ" in line for line in logs)

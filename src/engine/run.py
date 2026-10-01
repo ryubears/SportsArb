@@ -155,6 +155,7 @@ class Desk:
         """
         if self.mode == "live":
             self.cash.tick(now, clock)
+            self.executor.watch_positions(clock)
         self.executor.tick(now)
         self.settler.tick(now, clock)
 

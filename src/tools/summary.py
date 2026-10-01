@@ -329,7 +329,7 @@ def print_open_trades(conn, mode):
     for label, yes, no, cap, pr, signal, pays in rows:
         days = max(days_between(signal, pays), 1 / 24)
         ret, annual = lasting_returns(cap, pr, days)
-        body.append((label[:44], f"{yes}/{no}", f"{cap:,.2f}", f"{pr:,.2f}", percent(ret), percent(annual), f"{days:,.1f}",
+        body.append((label[:44], f"{yes:g}/{no:g}", f"{cap:,.2f}", f"{pr:,.2f}", percent(ret), percent(annual), f"{days:,.1f}",
                      pays[:16].replace("T", " ")))
         capital, profit, yearly = capital + cap, profit + pr, yearly + pr * 365 / days
     held = ", ".join(f"{venue} {amount:,.2f}$" for venue, amount in sorted(load_held(conn, mode).items()))

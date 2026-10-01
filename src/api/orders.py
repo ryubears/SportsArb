@@ -7,6 +7,8 @@ never reads a venue's own field names.
 
 from typing import NamedTuple
 
+STEP = 0.01     # The least part of a contract both venues fill and take orders for, a hundredth.
+
 
 class Answer(NamedTuple):
     """
@@ -14,7 +16,7 @@ class Answer(NamedTuple):
     """
     order_id: str | None    # The venue's id for the order, None when it never took it.
     status: str             # 'filled', 'partial', 'unfilled', 'rejected' when the venue refused it, or 'error' when we cannot tell what happened.
-    filled: int             # Contracts bought or sold.
+    filled: float           # Contracts bought or sold, to the hundredth, see exact().
     dollars: float          # Paid for a buy or received for a sale, fees included.
     fees: float
     note: str | None        # Why the venue refused the order, or the error, when there is one.
@@ -26,6 +28,24 @@ def status(filled, quantity):
     The status of an order the venue took, from how much of it filled.
     """
     return "filled" if filled >= quantity else "partial" if filled else "unfilled"
+
+
+def exact(contracts):
+    """
+    A number of contracts to the hundredth both venues count in, STEP, so a
+    sum of fills, 0.1 then 0.89 then 0.01 of a contract, lands on the 1 it
+    makes rather than on a float just under it.
+    """
+    return round(contracts + 0.0, 2)
+
+
+def size(contracts):
+    """
+    A number of contracts as an order's size, to the hundredth, and a whole
+    number when it is one, as orders of whole contracts were always sent.
+    """
+    contracts = exact(contracts)
+    return int(contracts) if contracts == int(contracts) else contracts
 
 
 def unknown(error, order_id=None, response=None):

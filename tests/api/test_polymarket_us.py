@@ -180,14 +180,23 @@ def test_an_order_filled_in_pieces_of_a_contract_counts_them_together(monkeypatc
     assert answer.dollars == pytest.approx(1 - 0.58 + 0.02) and answer.fees == pytest.approx(0.02)
 
 
-def test_a_fraction_of_a_contract_over_is_left_out_and_noted(monkeypatch):
+def test_a_fill_is_counted_to_the_hundredth(monkeypatch):
     executions = [piece("PARTIAL_FILL", "0.1000", "0.5000", "0.0000"), piece("PARTIAL_FILL", "2.8000", "0.5000", "0.0300"),
                   {"type": "EXECUTION_TYPE_CANCELED"}]
     fake_api(monkeypatch, {("POST", "/orders"): {"id": "p12", "executions": executions}})
     answer = polymarket_us.place_order("slug", "buy", "yes", 3, 0.5, "c12")
-    # 2.9 filled: the 2 whole contracts are ours, and their share of the cost and the fee.
-    assert (answer.status, answer.filled, answer.note) == ("partial", 2, "fractional fill of 2.9 contracts")
-    assert answer.dollars == pytest.approx(2 * 0.5 + 0.03 * 2 / 2.9) and answer.fees == pytest.approx(0.03 * 2 / 2.9)
+    assert (answer.status, answer.filled, answer.note) == ("partial", 2.9, None)
+    assert answer.dollars == pytest.approx(2.9 * 0.5 + 0.03) and answer.fees == pytest.approx(0.03)
+    executions = [piece("PARTIAL_FILL", "1.0000", "0.7000", "0.0100"), piece("PARTIAL_FILL", "0.9000", "0.7000", "0.0100"),
+                  {"type": "EXECUTION_TYPE_CANCELED"}]
+    fake_api(monkeypatch, {("POST", "/orders"): {"id": "p16", "executions": executions}})
+    answer = polymarket_us.place_order("slug", "sell", "yes", 2, 0.7, "c16")
+    assert (answer.status, answer.filled) == ("partial", 1.9) and answer.dollars == pytest.approx(1.9 * 0.7 - 0.02)
+
+
+def test_an_order_asks_for_hundredths_of_a_contract_and_whole_ones_as_before():
+    assert polymarket_us.order_body("slug", "sell", "no", 0.58, 0.46)["quantity"] == 0.58
+    assert polymarket_us.order_body("slug", "sell", "no", 3.0000000001, 0.46)["quantity"] == 3
 
 
 def test_a_stored_answer_reads_the_same_as_it_did_when_it_came(monkeypatch):
