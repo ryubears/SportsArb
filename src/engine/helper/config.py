@@ -45,9 +45,10 @@ LIVE_BALANCE_SECONDS = 15   # Between readings of the venues' balances. Under ht
                             # venue's kept connection open for the next order: one opened afresh took Polymarket US 11 ms longer.
 LIVE_LOW_CASH = 5.0         # Dollars on a live venue, or on one of its shards in LIVE_SHARDS, under which a human is emailed, once until
                             # it is back over. Trades there go on as far as the cash pays for.
-LIVE_SHARDS = {"kalshi": (0, 3)}    # The exchange shards a venue splits its cash by that live trading keeps cash on, each with its own
-                                    # low cash email. Kalshi trades football and hockey on shard 0 and baseball and basketball on 3,
-                                    # and tools/kalshi_shards.py splits its cash evenly between them.
+LIVE_SHARDS = {"kalshi": {0: 90, 3: 10}}    # The exchange shards a venue splits its cash by that live trading keeps cash on,
+                                            # each with its own low cash email, and the whole percent of the cash each keeps.
+                                            # Kalshi trades football and hockey on shard 0 and baseball and basketball on 3,
+                                            # and tools/kalshi_shards.py splits its cash between them by these percents.
 LIVE_POSITION_SECONDS = 300 # Between readings of the venues' positions, which are compared with what the live trades hold, so records
                             # gone wrong are logged, see LiveExecutor.check_positions().
 LIVE_ORDER_WINDOW = 20      # The newest orders the unknown outcome brake looks at.

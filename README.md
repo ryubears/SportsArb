@@ -494,9 +494,10 @@ refusals in a row halt live trading.
 Live trading takes every sport the run does. A Kalshi leg spends only the
 cash on its market's shard, football's and hockey's on shard 0, baseball's
 and basketball's on 3, so `tools/kalshi_shards.py` splits the Kalshi cash
-evenly between the two (`LIVE_SHARDS`), and the live executor emails once
-when either shard, or Polymarket US, falls under $5 (`LIVE_LOW_CASH`), and
-again only after it has been back over.
+between the two, 90% to shard 0, where the football futures with the
+long-lasting edges are, and 10% to shard 3 (`LIVE_SHARDS`). The live
+executor emails once when either shard, or Polymarket US, falls under $5
+(`LIVE_LOW_CASH`), and again only after it has been back over.
 
 Live trading has brakes, in **brakes.py**, sized for a test with about $100
 on each venue. An order whose outcome cannot be known (a timeout, a dropped
@@ -597,11 +598,14 @@ read from the venues now, with Kalshi's shards. `--hours` sets the window, and
 with `--email` sends a test email, without trading. Run it before a live
 run.
 
-`src/tools/kalshi_shards.py` splits the live Kalshi cash evenly between the
-exchange shards live trading uses, 0 and 3. It reads each shard's cash and
-says what it would move, and with `--apply` moves it, then sets Kalshi's
-own target split to the same shares, which Kalshi keeps every 10 seconds,
-payouts included. The money stays in the account, and nothing is traded.
+`src/tools/kalshi_shards.py` splits the live Kalshi cash between the
+exchange shards live trading uses by the percents `LIVE_SHARDS` gives them,
+90% to shard 0 and 10% to shard 3. It reads each shard's cash and says what
+it would move, and with `--apply` moves it, then sets Kalshi's own target
+split to the same shares, which Kalshi keeps every 10 seconds, payouts
+included. Kalshi seems to count what a shard's open positions are worth
+with its cash, so it may then move some cash back toward the shard holding
+fewer. The money stays in the account, and nothing is traded.
 
 `src/tools/repair_fills.py` repairs the live trades recorded under an
 older reading of Polymarket US fills: before fills were added up, when an
@@ -835,7 +839,7 @@ permission, and emails its alerts through `data/email.json`:
 ```
 
 Before a live run, check the balances, the Kalshi key's attestation, and
-the email, and split the Kalshi cash evenly across its shards, from `src/`:
+the email, and split the Kalshi cash across its shards, from `src/`:
 
 ```bash
 python3 -m tools.live_check --email

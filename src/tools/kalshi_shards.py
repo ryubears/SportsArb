@@ -1,14 +1,18 @@
 """
-Split the Kalshi cash evenly across the exchange shards live trading uses.
+Split the Kalshi cash across the exchange shards live trading uses, by the
+percents config.LIVE_SHARDS gives them.
 
 Kalshi keeps the cash on each exchange shard apart, and an order spends
 only its market's shard's: football and hockey trade on shard 0, baseball
-and basketball on 3, as config.LIVE_SHARDS lists them. This reads the cash
-on each shard, moves what is over an even share to the shards under it,
-and then sets Kalshi's own target split to the same shares, which Kalshi
-rebalances to every 10 seconds, so payouts landing on one shard are
-shared out too. The money stays in the account, and nothing is traded.
-Without --apply it only says what it would do.
+and basketball on 3. Most of the cash goes to football's, 90 to 10, as
+the football futures are where the long-lasting edges are. This reads
+the cash on each shard, moves what is over a shard's share to the shards
+under theirs, and then sets Kalshi's own target split to the same shares,
+which Kalshi rebalances to every 10 seconds, so payouts landing on one
+shard are shared out too. Kalshi seems to count what a shard's open
+positions are worth with its cash, so it may then move some cash back
+toward the shard that holds fewer. The money stays in the account, and
+nothing is traded. Without --apply it only says what it would do.
 
 Run from src/ on the instance, where the Kalshi key is, with:
     python3 -m tools.kalshi_shards
@@ -21,14 +25,6 @@ from api import kalshi
 from engine.helper import config
 
 SETTLE_SECONDS = 5      # How long to wait after the moves before reading the shards again.
-
-
-def even_split(shards):
-    """
-    Whole percents for the shards, as even as whole numbers allow, the first taking any left over, as {shard: percent}.
-    """
-    share = 100 // len(shards)
-    return {shard: 100 - share * (len(shards) - 1) if i == 0 else share for i, shard in enumerate(shards)}
 
 
 def moves(balances, split):
@@ -69,10 +65,10 @@ def shards_line(dollars, balances):
 def split_shards(apply, read=kalshi.balances, move=kalshi.move_between_shards, set_split=kalshi.set_shard_split,
                  wait=time.sleep, out=print):
     """
-    Say how the cash would move to split it evenly over config.LIVE_SHARDS["kalshi"], and when apply is true move it,
+    Say how the cash would move to split it over config.LIVE_SHARDS["kalshi"], and when apply is true move it,
     then set Kalshi's target split, and read the shards again.
     """
-    split = even_split(config.LIVE_SHARDS["kalshi"])
+    split = dict(config.LIVE_SHARDS["kalshi"])
     dollars, balances = read()
     out(shards_line(dollars, balances))
     out("target split: " + ", ".join(f"shard {s} {p}%" for s, p in split.items()))
@@ -92,6 +88,6 @@ def split_shards(apply, read=kalshi.balances, move=kalshi.move_between_shards, s
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Split the Kalshi cash evenly across the exchange shards live trading uses.")
+    ap = argparse.ArgumentParser(description="Split the Kalshi cash across the exchange shards live trading uses, by config.LIVE_SHARDS.")
     ap.add_argument("--apply", action="store_true", help="move the money and set Kalshi's target split, rather than only saying how")
     split_shards(ap.parse_args().apply)
