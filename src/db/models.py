@@ -263,7 +263,7 @@ class Order:
     limit_price: float      # The worst price per contract accepted for the outcome, before fees.
     client_id: str          # Our id for the order, sent with it, so an order whose answer was lost can be found at the venue.
     sent_at: str
-    status: str = "sent"    # 'sent' until the venue answers, then 'filled', 'partial', 'unfilled', 'rejected', or 'error'.
+    status: str = "sent"    # 'sent' until the venue answers, then 'filled', 'partial', 'unfilled', 'unfunded', 'rejected', or 'error'.
     venue_order_id: str | None = None   # The venue's id for the order, once it answered.
     answered_at: str | None = None
     latency_ms: int | None = None       # From sending the order to its answer.

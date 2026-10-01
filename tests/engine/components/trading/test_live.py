@@ -379,6 +379,29 @@ def test_a_leg_filled_in_hundredths_is_flattened_to_the_hundredth(tmp_path):
     assert ex.exposed == {}
 
 
+UNFUNDED = orders.Answer(None, "unfunded", 0, 0.0, 0.0, "not enough funds: You don't have enough funds for this order.", {})
+
+
+def test_a_sale_turned_away_for_lack_of_cash_waits_until_the_cash_grows_and_halts_nothing(tmp_path):
+    venues = Venues(polymarket_us=[fills(), UNFUNDED, UNFUNDED, UNFUNDED, fills()], kalshi=[fills(4)])
+    logs = []
+    conn, cash, ex = executor(tmp_path, venues, logs=logs)
+    trade(ex)                                                           # Kalshi filled 4 of 10, and the 6 yes over could not be sold.
+    assert venues.orders[-1] == ("polymarket_us", "sell", "yes", 6, 0.44) and list(ex.exposed) == [1]
+    assert stored(conn, "trades")[0]["hedge"] == "sold back 0 of 6 on polymarket_us, which lacked the cash, 6 exposed"
+    assert logs[-2] == "live nfl game_winner 2026-09-22 CAR@ATL CAR: polymarket_us lacked the cash to sell back 6, which waits until its cash grows"
+    for _ in range(5):
+        asyncio.run(ex.retry(NOW))                                      # No more cash, so no order every tick.
+    assert len(venues.orders) == 3
+    for _ in range(3):
+        cash.read["polymarket_us"] += 1.0                               # A payout, say: tried again, once.
+        asyncio.run(ex.retry(NOW))
+        asyncio.run(ex.retry(NOW))
+    # Turned away twice more, then sold. Three turned away in a row halted live trading as refusals on 2026-10-01.
+    assert len(venues.orders) == 6 and ex.exposed == {} and stored(conn, "trades")[0]["yes_held"] == 4
+    assert ex.halted is None
+
+
 def check(ex):
     asyncio.run(ex.check_positions())
 

@@ -204,7 +204,7 @@ class LiveExecutor(Executor):
             self.set_trade_aside(trade, order)
         self.brakes.watch(order)
         note = f"{answer.status}: {answer.note}" if answer.note else ""
-        return Fill(answer.filled, answer.dollars, order.latency_ms, order.answered_at, note)
+        return Fill(answer.filled, answer.dollars, order.latency_ms, order.answered_at, note, answer.status == "unfunded")
 
     async def fill(self, trade, leg):
         return await self.send(trade, leg, "open", "buy", leg.quantity, leg.limit)

@@ -15,7 +15,8 @@ class Answer(NamedTuple):
     What came back for one immediate or cancel order.
     """
     order_id: str | None    # The venue's id for the order, None when it never took it.
-    status: str             # 'filled', 'partial', 'unfilled', 'rejected' when the venue refused it, or 'error' when we cannot tell what happened.
+    status: str             # 'filled', 'partial', 'unfilled', 'unfunded' when the venue lacked our cash for it, 'rejected' when it
+                            # refused it, or 'error' when we cannot tell what happened.
     filled: float           # Contracts bought or sold, to the hundredth, see exact().
     dollars: float          # Paid for a buy or received for a sale, fees included.
     fees: float
@@ -62,6 +63,15 @@ def refused(error):
     The Answer for an order the venue refused, with the reason it gave.
     """
     return Answer(None, "rejected", 0, 0.0, 0.0, error.body[:500], {"error": error.body, "status": error.status})
+
+
+def unfunded(error):
+    """
+    The Answer for an order the venue turned away for lack of cash in the
+    account. Nothing traded, and the venue is no less able to trade, so it
+    is no refusal: the same order may go through once cash arrives.
+    """
+    return Answer(None, "unfunded", 0, 0.0, 0.0, f"not enough funds: {error.body[:300]}", {"error": error.body, "status": error.status})
 
 
 def unfilled(error, why):

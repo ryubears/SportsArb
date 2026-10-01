@@ -310,6 +310,9 @@ FINAL_STATES = ("ORDER_STATE_FILLED", "ORDER_STATE_CANCELED", "ORDER_STATE_REJEC
 # The message of an order rejected by the latency stopgap: one not processed within 5 seconds, when the exchange
 # is slow, to spare a fill at a stale price. It reads like a rate limit but is not one, so it counts as unfilled.
 STOPGAP = "Global Rate Limit Exceeded"
+# The message of an order turned away for lack of cash, which counts as unfunded rather than refused. A sale can need cash too:
+# the venue keeps one position per market, so selling the No one trade holds where others hold more Yes is buying Yes.
+NO_FUNDS = "You don't have enough funds"
 NO_LIQUIDITY = "ORD_REJECT_REASON_NO_LIQUIDITY"     # A rejection for finding nothing to trade, which is also unfilled rather than refused.
 MAX_BLOCK_SECONDS = 5   # How long an order call waits for its order to end, as long as the latency stopgap gives it.
 
@@ -421,6 +424,8 @@ def place_order(slug, action, outcome, quantity, price, client_id):
     except RequestFailed as e:
         if STOPGAP in e.body:
             return orders.unfilled(e, "latency stopgap")
+        if NO_FUNDS in e.body:
+            return orders.unfunded(e)
         return orders.refused(e) if e.status < 500 else orders.unknown(e)
     except Exception as e:
         return orders.unknown(e)

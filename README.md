@@ -171,8 +171,9 @@ checks before it trades, below.
    pays, where a sale frees it at once.
 4. **Keep trying** (`retry`, every tick). Whatever stays exposed is tried
    again against newer books until it is flat, its payout time passes, or
-   it settles. A restart reads exposed trades back from the database
-   (`reload_exposed`).
+   it settles, except that a sale the venue turned away for lack of cash
+   waits until the cash there has grown. A restart reads exposed trades
+   back from the database (`reload_exposed`).
 5. **Settle** (`Settler` in `money/settle.py`). From kickoff, every 30
    seconds, the settler asks the venues how the held contracts resolved.
    It pays each winning leg a dollar a contract into the desk's money,
@@ -344,7 +345,11 @@ and every fill, holding, and order is counted to the hundredth
 the live executor and `tools/repair_fills.py` check the trades against.
 Kalshi turns away an order whose
 market's shard lacks the cash, which counts as unfilled rather than
-refused, since nothing traded. Trading calls go over kept HTTPS connections
+refused, since nothing traded. Polymarket US turns away an order the
+account lacks the cash for, which counts as `unfunded`, not refused
+either. A sale can need cash there: the venue keeps one position per
+market across all our trades, so selling the No one trade holds, in a
+market where others hold more Yes, is buying Yes. Trading calls go over kept HTTPS connections
 from **http.py**, since a new TLS connection costs round trips a race
 cannot spare, and are never retried, since an order sent twice trades
 twice. The field names come from the venues' published Python SDKs.
@@ -440,7 +445,9 @@ the excess back on its own venue, even when buying the missing side on the
 other venue would cost less, since a sale frees the money now and a
 purchase would hold it until the bet pays. Whatever stays exposed is tried
 again on every tick until it is flat, the bet pays out, or the settler
-settles it. A restart takes back from the trades table whatever is still
+settles it. A sale its venue turned away for lack of cash is tried again
+only once the cash there has grown, by a payout, a deposit, or another
+sale, rather than sent again every second. A restart takes back from the trades table whatever is still
 exposed, so a crash or a deploy does not leave it unhedged. A live sale is
 limited to the deepest price the books said it would reach, so a book that
 moved leaves the rest for the next tick rather than filling far from its
@@ -450,7 +457,8 @@ since a market that has closed may stop changing rather than empty its
 book, and its last book cannot be traded. Every trade is stored as soon as
 it is sent and updated when it is done.
 
-A trade opens in whole contracts, but a leg may fill to the hundredth,
+A trade opens in whole contracts, at least one, so no order opens a
+fraction of a contract, but a leg may fill to the hundredth,
 6.42 of 7 for one, and live trading counts it so: the other leg's 0.58
 over is sold back like any excess, in an order for 0.58 of a contract.
 Paper trading keeps to whole contracts, as its fills are worked out from
@@ -495,7 +503,8 @@ more orders of any kind, when the orders themselves fail:
   enough money, a bad price, too many requests, or a market that has
   closed. An order that found nothing at its price is unfilled, not
   refused, as is one Polymarket US turned away for no liquidity or for
-  being slow.
+  being slow, and one it turned away for lack of cash is unfunded, not
+  refused: the venue works, and the low cash email tells a human.
 
 It halts new trades, but goes on flattening what is exposed, when the
 live trades decided in the last 6 hours lost more than 10% of the live
@@ -755,6 +764,11 @@ Since both venues trade in hundredths of a contract, fills are now counted
 to the hundredth, so an order for 7 that fills 6.42 is recorded as 6.42
 and its other leg's 0.58 over is sold back like any excess, and the live
 executor checks the venues' positions against the trades every 5 minutes.
+The first such sale, 0.42 of a contract on October 1, could not go through:
+Polymarket US nets positions per market, so selling that No was buying
+Yes, and the $0.16 free there could not pay for it. Three such refusals in
+a row halted live trading, so an order turned away for lack of cash now
+counts as unfunded rather than refused, and waits for the cash to grow.
 
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.

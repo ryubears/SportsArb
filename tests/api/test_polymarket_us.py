@@ -237,6 +237,12 @@ def test_the_latency_stopgap_leaves_an_order_unfilled_rather_than_refused(monkey
         "unfilled", 'latency stopgap: {"status": 429, "message": "Global Rate Limit Exceeded"}', 429)
 
 
+def test_an_order_turned_away_for_lack_of_cash_is_unfunded_rather_than_refused(monkeypatch):
+    fake_api(monkeypatch, {("POST", "/orders"): RequestFailed(400, '{"code":9,"message":"You don\'t have enough funds for this order.","details":[]}')})
+    answer = polymarket_us.place_order("slug", "sell", "no", 0.42, 0.13, "c17")
+    assert (answer.status, answer.filled) == ("unfunded", 0) and answer.note.startswith("not enough funds: ")
+
+
 def test_an_order_waits_as_long_as_the_stopgap_for_its_answer():
     assert polymarket_us.order_body("slug", "buy", "yes", 3, 0.44)["maxBlockTime"] == "5"
 
