@@ -171,7 +171,8 @@ checks before it trades, below.
    pays, where a sale frees it at once.
 4. **Keep trying** (`retry`, every tick). Whatever stays exposed is tried
    again against newer books until it is flat, its payout time passes, or
-   it settles, except that a sale the venue turned away for lack of cash
+   it settles, except that a sale that filled nothing waits a minute
+   (`SALE_RETRY_SECONDS`), and one the venue turned away for lack of cash
    waits until the cash there has grown. A restart reads exposed trades
    back from the database (`reload_exposed`).
 5. **Settle** (`Settler` in `money/settle.py`). From kickoff, every 30
@@ -346,10 +347,12 @@ the live executor and `tools/repair_fills.py` check the trades against.
 Kalshi turns away an order whose
 market's shard lacks the cash, which counts as unfilled rather than
 refused, since nothing traded. Polymarket US turns away an order the
-account lacks the cash for, which counts as `unfunded`, not refused
-either. A sale can need cash there: the venue keeps one position per
-market across all our trades, so selling the No one trade holds, in a
-market where others hold more Yes, is buying Yes. Trading calls go over kept HTTPS connections
+account lacks the cash for, and Kalshi a sale it lacks the cash for,
+which counts as `unfunded`, not refused either. A sale can need cash:
+each venue keeps one position per market across all our trades, so
+selling the No one trade holds, in a market where others hold more Yes,
+is buying Yes. So a Kalshi sale is not reduce only, which would cancel
+such a sale unfilled every time. Trading calls go over kept HTTPS connections
 from **http.py**, since a new TLS connection costs round trips a race
 cannot spare, and are never retried, since an order sent twice trades
 twice. The field names come from the venues' published Python SDKs.
@@ -448,7 +451,9 @@ of what the contracts cost (`MIN_SALE_SHARE`): below that it would give
 away most of what was paid, so the contracts are kept, a bet that may
 still pay out, until a bid worth taking comes. Whatever stays exposed is
 tried again on every tick until it is flat, the bet pays out, or the
-settler settles it. A sale its venue turned away for lack of cash is
+settler settles it. A sale that filled nothing is tried again only a
+minute later (`SALE_RETRY_SECONDS`), since a book can show a bid an
+order never reaches. A sale its venue turned away for lack of cash is
 tried again only once the cash there has grown, by a payout, a deposit, or
 another sale, rather than sent again every second. A restart takes back
 from the trades table whatever is still exposed, so a crash or a deploy
@@ -514,8 +519,9 @@ more orders of any kind, when the orders themselves fail:
   enough money, a bad price, too many requests, or a market that has
   closed. An order that found nothing at its price is unfilled, not
   refused, as is one Polymarket US turned away for no liquidity or for
-  being slow, and one it turned away for lack of cash is unfunded, not
-  refused: the venue works, and the low cash email tells a human.
+  being slow, and one either venue turned away for lack of cash is
+  unfunded, not refused: the venue works, and the low cash email tells a
+  human.
 
 It halts new trades, but goes on flattening what is exposed, when the
 live trades decided in the last 6 hours lost more than 10% of the live
@@ -792,7 +798,13 @@ bought the Polymarket US leg, Kalshi refused the other, and two of those
 legs were sold back at a cent each. Neither venue is traded in its
 published maintenance window now, and a sale to flatten no longer gives
 away a contract for under half of what it cost. On October 2 the return a
-trade must make went up from 30% a year to 50%.
+trade must make went up from 30% a year to 50%. That day showed that
+Kalshi, too, keeps one position per market. Two trades had bought 5 Pitt
+Yes there where another held 51 No, so the account held 46 No, and when
+their Polymarket US legs missed, each sale of that Yes, sent reduce only,
+was cancelled unfilled: 113,000 times in 16 hours, as the book kept
+showing a bid. A Kalshi sale is no longer reduce only, and a sale that
+fills nothing waits a minute before the next.
 
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.

@@ -40,6 +40,10 @@ RESULTS_BATCH = 50   # Tickers per markets call when looking up results.
 # The error of an order whose market's exchange shard lacks the cash, which Kalshi moving cash between shards may cause
 # between two of our readings. Nothing traded, so it counts as unfilled rather than refused.
 SHORT_SHARD = "insufficient_shard_balance"
+# The error of an order the account lacks the cash for. A sale can need cash: Kalshi keeps one position per market, so
+# selling the Yes one trade holds where others hold more No is buying No. Such a sale is unfunded, as on Polymarket US,
+# and waits for cash. A buy turned away for it is refused, since trades are sized by the cash.
+NO_FUNDS = "insufficient_balance"
 
 
 # SIGNING
@@ -375,15 +379,15 @@ def order_body(ticker, action, outcome, quantity, price, client_id):
     a market, to the hundredth Kalshi counts in, at price or better for that
     side. The order endpoint quotes
     every order on the yes side, so a no side price p is sent as 1 - p. A
-    sale is reduce only, so it can close what is held but never open the
-    other side, and an order that would trade against one of our own is
-    cancelled rather than filled.
+    sale is not reduce only. Kalshi keeps one position per market, so
+    where one trade's Yes nets against more No held by others, selling it
+    is buying No, which reduce only would cancel unfilled every time: on
+    2026-10-01 that sent one sale 57,000 times in 16 hours. An order that
+    would trade against one of our own is cancelled rather than filled.
     """
     yes_price = price if outcome == "yes" else 1 - price
     body = {"ticker": ticker, "client_order_id": client_id, "side": BOOK_SIDES[(action, outcome)], "count": str(orders.size(quantity)),
             "price": f"{yes_price:.4f}", "time_in_force": "immediate_or_cancel", "self_trade_prevention_type": "taker_at_cross"}
-    if action == "sell":
-        body["reduce_only"] = True
     return body
 
 
@@ -396,13 +400,16 @@ def place_order(ticker, action, outcome, quantity, price, client_id):
     side fill at p cost 1 - p, and the average fee per contract. The fill is
     counted to the hundredth, as Kalshi does, see orders.exact(). An order
     turned away for lack of cash on its market's exchange shard is
-    unfilled, not refused.
+    unfilled, not refused, and a sale turned away for lack of cash is
+    unfunded.
     """
     try:
         answer = signed_request("POST", "/portfolio/events/orders", order_body(ticker, action, outcome, quantity, price, client_id))
     except RequestFailed as e:
         if SHORT_SHARD in e.body:
             return orders.unfilled(e, "insufficient shard balance")
+        if action == "sell" and NO_FUNDS in e.body:
+            return orders.unfunded(e)
         return orders.refused(e) if e.status < 500 else orders.unknown(e)
     except Exception as e:
         return orders.unknown(e)

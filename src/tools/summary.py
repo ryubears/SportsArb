@@ -61,6 +61,13 @@ def short_time(ts):
     return ts[:19].replace("T", " ") if ts else "-"
 
 
+def contracts(value):
+    """
+    A count of contracts, to the hundredth they are traded in, with thousands separated and no trailing zeros.
+    """
+    return f"{value or 0:,.2f}".rstrip("0").rstrip(".")
+
+
 def print_table(title, header, body):
     """
     Print a small aligned table with a title line.
@@ -252,7 +259,8 @@ def print_live_orders(conn, since, hours):
         SELECT venue, purpose, status, COUNT(*), SUM(quantity), SUM(filled), ROUND(SUM(dollars), 2), ROUND(SUM(fees), 2), ROUND(AVG(latency_ms))
         FROM orders WHERE sent_at >= ? GROUP BY venue, purpose, status ORDER BY venue, purpose, status""", (since,))
     if body:
-        print_table(f"live orders, last {hours} hours", ("venue", "purpose", "status", "orders", "asked", "filled", "dollars $", "fees $", "avg ms"), body)
+        print_table(f"live orders, last {hours} hours", ("venue", "purpose", "status", "orders", "asked", "filled", "dollars $", "fees $", "avg ms"),
+                    [(v, p, s, n, contracts(q), contracts(f), *rest) for v, p, s, n, q, f, *rest in body])
 
 
 def print_mode_trades(conn, since, hours, mode):
@@ -265,7 +273,8 @@ def print_mode_trades(conn, since, hours, mode):
         body = query_rows(conn, """
             SELECT status, COUNT(*), SUM(quantity), SUM(matched), ROUND(SUM(profit), 2), ROUND(SUM(hedge_pnl), 2), ROUND(SUM(profit + hedge_pnl), 2)
             FROM trades WHERE mode = ? AND signal_ts >= ? GROUP BY status ORDER BY status""", (mode, since))
-        print_table(f"{mode} by outcome, last {hours} hours", ("status", "trades", "wanted", "matched", "locked in $", "hedges $", "net $"), body)
+        print_table(f"{mode} by outcome, last {hours} hours", ("status", "trades", "wanted", "matched", "locked in $", "hedges $", "net $"),
+                    [(s, n, contracts(q), contracts(m), *rest) for s, n, q, m, *rest in body])
         body = query_rows(conn, """
             SELECT p.sport, p.kind, COUNT(*), ROUND(AVG(100 * edge), 1), ROUND(100.0 * SUM(matched) / SUM(quantity), 0),
                    ROUND(SUM(profit + hedge_pnl), 2), ROUND(AVG(julianday(pays_at) - julianday(signal_ts)), 1),

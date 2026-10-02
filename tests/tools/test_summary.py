@@ -158,3 +158,8 @@ def test_open_trades_are_listed_soonest_to_settle_first_with_their_returns(tmp_p
         ["the", "bet", "5/5", "4.75", "0.25", "5.3", "23.1", "83.2", "2026-12-20", "00:00"]]
     # Held 83.2, 7.0, and 0 days from the signal to the payout, 30.1 on average.
     assert table(out, "live by kind, last 12 hours")[0][:7] == ["nfl", "winner", "3", "6.0", "0.0", "0.48", "30.1"]
+
+
+def test_contract_counts_show_to_the_hundredth_without_float_noise():
+    # Matched contracts summed to 0.21000000000000002 in the live outcomes on 2026-10-02.
+    assert [summary.contracts(v) for v in (0.21000000000000002, 284532, 630.0, 13.6, None)] == ["0.21", "284,532", "630", "13.6", "0"]

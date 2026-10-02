@@ -132,13 +132,15 @@ def test_the_book_stream_asks_for_yes_side_prices():
     assert sent == [{"id": 1, "cmd": "subscribe", "params": {"channels": ["orderbook_delta"], "market_tickers": ["A", "B"], "use_yes_price": True}}]
 
 
-def test_an_order_is_quoted_on_the_yes_side_and_a_sale_only_reduces():
+def test_an_order_is_quoted_on_the_yes_side_and_a_sale_may_open_the_other_side():
     assert kalshi.order_body("T", "buy", "no", 5, 0.47, "c1") == {
         "ticker": "T", "client_order_id": "c1", "side": "ask", "count": "5", "price": "0.5300",
         "time_in_force": "immediate_or_cancel", "self_trade_prevention_type": "taker_at_cross"}     # Buying no at 0.47 is selling yes at 0.53.
     assert kalshi.order_body("T", "buy", "yes", 5, 0.45, "c1")[("side")] == "bid"
     sale = kalshi.order_body("T", "sell", "no", 3, 0.44, "c2")
-    assert (sale["side"], sale["price"], sale["reduce_only"]) == ("bid", "0.5600", True)       # Selling no at 0.44 is buying yes at 0.56.
+    assert (sale["side"], sale["price"]) == ("bid", "0.5600")                                  # Selling no at 0.44 is buying yes at 0.56.
+    # Not reduce only: where one trade's no nets against more yes held by others, selling it is buying yes, which reduce only cancels.
+    assert "reduce_only" not in sale
     assert kalshi.order_body("T", "sell", "yes", 3, 0.44, "c2")["side"] == "ask"
 
 
@@ -166,6 +168,12 @@ def test_a_sale_nets_the_fee_and_a_fill_is_counted_to_the_hundredth(monkeypatch)
 def test_an_order_that_did_not_fill_costs_nothing(monkeypatch):
     fake_api(monkeypatch, {("POST", "/portfolio/events/orders"): {"order_id": "o3", "fill_count": "0.00", "remaining_count": "0.00", "ts_ms": 1}})
     assert kalshi.place_order("T", "buy", "yes", 5, 0.45, "c3")[:5] == ("o3", "unfilled", 0, 0.0, 0.0)
+
+
+def test_a_sale_turned_away_for_lack_of_cash_is_unfunded_where_a_buy_is_refused(monkeypatch):
+    fake_api(monkeypatch, {("POST", "/portfolio/events/orders"): RequestFailed(400, '{"error":{"code":"insufficient_balance"}}')})
+    assert kalshi.place_order("T", "sell", "yes", 5, 0.57, "c5").status == "unfunded"
+    assert kalshi.place_order("T", "buy", "yes", 5, 0.57, "c6").status == "rejected"
 
 
 @pytest.mark.parametrize("error, status", [

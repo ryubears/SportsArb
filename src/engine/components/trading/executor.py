@@ -28,10 +28,12 @@ cost: below that it would give away most of what was paid, and the
 contracts are kept, as a bet that may still pay out.
 What it cannot sell stays on a list and is tried again on every tick,
 against the books as they are then, until it is flat, the bet pays out,
-or the settler says its contracts have resolved. A sale its venue turned
-away for lack of cash waits until the cash there has grown, since a sale
-can need cash: Polymarket US keeps one position per market, so selling
-the No one trade holds where others hold more Yes is buying Yes. The list is read back
+or the settler says its contracts have resolved. A sale that filled
+nothing is not tried again for config.SALE_RETRY_SECONDS, since a book
+can show a bid an order never reaches. A sale its venue turned away for
+lack of cash waits until the cash there has grown, since a sale can need
+cash: each venue keeps one position per market, so selling the No one
+trade holds where others hold more Yes is buying Yes. The list is read back
 from the trades table when the process starts, so a restart does not
 leave a trade exposed. The settler leaves alone a trade while an order to
 flatten it is in flight.
@@ -118,6 +120,7 @@ class Executor:
         self.flattening = set()     # Ids of exposed trades with an order in flight to flatten them, which the settler leaves alone.
         self.unfunded = {}          # Trade id maps to (venue, shard, cash) when a sale to flatten it was turned away for lack of cash: it is
                                     # tried again only once that cash has grown, by a payout, a deposit, or a sale.
+        self.unsold = {}            # Trade id maps to when, in seconds since 1970, it may be flattened again after a sale that filled nothing.
         self.set_aside = {}         # Trade id maps to why no more orders are sent for it, which only live trading does.
         self.waiting = set()        # Pairs whose edge waited for a book to catch up since the last summary, see confirmed().
         self.retrying = None        # The task flattening exposed trades while one runs.
@@ -200,7 +203,10 @@ class Executor:
             return 0, f"sold back 0 of {excess:g} on {leg.venue}, which lacked the cash"
         self.unfunded.pop(trade.id, None)
         if fill.filled:
+            self.unsold.pop(trade.id, None)
             self.cash.apply(Ledger(fill.ts, leg.venue, fill.dollars, "sell", trade.id), shard(leg))
+        else:
+            self.unsold[trade.id] = epoch(self.clock()) + config.SALE_RETRY_SECONDS
         leg.held = exact(leg.held - fill.filled)
         leg.cost -= fill.filled * average
         trade.hedge_pnl += fill.dollars - fill.filled * average
@@ -247,6 +253,7 @@ class Executor:
         self.exposed.pop(trade_id, None)
         self.games.pop(trade_id, None)
         self.unfunded.pop(trade_id, None)
+        self.unsold.pop(trade_id, None)
 
     async def run_trade(self, trade, legs):
         """
@@ -300,9 +307,10 @@ class Executor:
     async def retry(self, now):
         """
         Try once more to flatten every exposed trade against the current books.
-        A trade past its payout time is left to settle as it stands, and one
-        whose last sale its venue turned away for lack of cash waits until the
-        cash there has grown, rather than sending the same order every tick.
+        A trade past its payout time is left to settle as it stands, one
+        whose last sale filled nothing waits config.SALE_RETRY_SECONDS, and
+        one whose last sale its venue turned away for lack of cash waits until
+        the cash there has grown, rather than sending the same order every tick.
         """
         for trade_id, (trade, legs) in list(self.exposed.items()):
             if trade_id not in self.exposed:
@@ -317,6 +325,8 @@ class Executor:
                 continue
             waiting = self.unfunded.get(trade_id)
             if waiting and self.cash.available(waiting[0], waiting[1]) <= waiting[2] + 1e-9:
+                continue
+            if epoch(now) < self.unsold.get(trade_id, 0):
                 continue
             before, held = trade.hedge_pnl, [leg.held for leg in legs]
             self.flattening.add(trade_id)

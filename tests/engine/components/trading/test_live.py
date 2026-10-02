@@ -197,6 +197,13 @@ def test_flattening_losses_over_the_limit_halt_live_trading(tmp_path, monkeypatc
     assert ex.brakes.stopped is None                                    # Flattening goes on.
 
 
+def at(ex, now):
+    """
+    Move the executor's clock, and its brakes', to now.
+    """
+    ex.clock = ex.brakes.clock = lambda: now
+
+
 def test_after_a_loss_halt_flattening_goes_on_until_its_orders_fail(tmp_path):
     latest = books()
     venues = Venues(polymarket_us=[fills(), fills(0), fills(4)] + [REFUSED] * 3, kalshi=[bids_gone(latest)])
@@ -207,12 +214,14 @@ def test_after_a_loss_halt_flattening_goes_on_until_its_orders_fail(tmp_path):
     ex.brakes.halt("the live trades decided in the last 6 hours lost too much")
     assert trade(ex) == [False] and len(venues.orders) == 3             # No new trades.
     assert "; HALTED, still flattening: the live trades decided" in ex.summary()
-    ex.clock = ex.brakes.clock = lambda: "2026-09-20T17:30:01+00:00"    # A second on.
+    at(ex, "2026-09-20T17:31:00+00:00")                                  # A minute on, when a sale that sold nothing is tried again.
     asyncio.run(ex.retry(ex.clock()))
     assert venues.orders[-1] == ("polymarket_us", "sell", "yes", 10, 0.44) and stored(conn, "trades")[0]["yes_held"] == 6
-    for _ in range(3):
-        asyncio.run(ex.retry(ex.clock()))                               # Refused each time.
+    for minute in (32, 33, 34):
+        at(ex, f"2026-09-20T17:{minute}:00+00:00")
+        asyncio.run(ex.retry(ex.clock()))                               # Refused each time, a minute apart.
     assert ex.brakes.stopped == "polymarket_us refused 3 orders in a row, the last with: insufficient balance"
+    at(ex, "2026-09-20T17:35:00+00:00")
     asyncio.run(ex.retry(ex.clock()))
     assert len(venues.orders) == 7 and list(ex.exposed) == [1]          # Nothing more is sent.
     assert "; HALTED, no orders at all: polymarket_us refused 3 orders in a row" in ex.summary()
@@ -379,17 +388,35 @@ def test_a_leg_filled_in_hundredths_is_flattened_to_the_hundredth(tmp_path):
     assert ex.exposed == {}
 
 
+def test_a_sale_that_sold_nothing_is_tried_again_only_a_minute_later(tmp_path):
+    venues = Venues(polymarket_us=[fills(), fills(0), fills(0), fills()], kalshi=[fills(4)])
+    conn, cash, ex = executor(tmp_path, venues)
+    trade(ex)                                                           # The 6 yes over found no taker, though the book showed one.
+    assert len(venues.orders) == 3 and list(ex.exposed) == [1]
+    for second in range(1, 60):
+        asyncio.run(ex.retry(f"2026-09-20T17:30:{second:02d}+00:00"))    # On 2026-10-01 such a sale went out every second for 16 hours.
+    assert len(venues.orders) == 3
+    at(ex, "2026-09-20T17:31:00+00:00")
+    asyncio.run(ex.retry(ex.clock()))                                   # Sold nothing again, so a minute more.
+    asyncio.run(ex.retry("2026-09-20T17:31:30+00:00"))
+    assert len(venues.orders) == 4
+    at(ex, "2026-09-20T17:32:00+00:00")
+    asyncio.run(ex.retry(ex.clock()))
+    assert len(venues.orders) == 5 and ex.exposed == {} and stored(conn, "trades")[0]["yes_held"] == 4
+
+
 def test_a_fraction_sold_back_on_a_later_try_is_recorded(tmp_path):
     venues = Venues(polymarket_us=[fills(), fills(0), fills()], kalshi=[fills(9.58)])
     logs = []
     conn, cash, ex = executor(tmp_path, venues, logs=logs)
     trade(ex)                                                           # The 0.42 yes over found no taker at first.
     assert list(ex.exposed) == [1] and stored(conn, "trades")[0]["yes_held"] == 10
-    asyncio.run(ex.retry(NOW))
+    at(ex, "2026-09-20T17:31:00+00:00")                                  # A minute on, when a sale that sold nothing is tried again.
+    asyncio.run(ex.retry(ex.clock()))
     # On 2026-10-01 a sale of 0.42 read as one that sold nothing, "sold back 0...", and went unrecorded.
     t = stored(conn, "trades")[0]
     assert (t["yes_held"], t["no_held"]) == (9.58, 9.58) and ex.exposed == {}
-    assert t["hedge"].endswith(f"then sold back 0.42 of 0.42 on polymarket_us at {NOW[11:19]}")
+    assert t["hedge"].endswith("then sold back 0.42 of 0.42 on polymarket_us at 17:31:00")
     assert logs[-1].startswith("live flattened nfl game_winner 2026-09-22 CAR@ATL CAR: sold back 0.42 of 0.42 on polymarket_us, 0 still exposed")
 
 
