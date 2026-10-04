@@ -987,6 +987,15 @@ its way. The same day the minimum edge went from five cents to two, the
 return a year doing the weighing, and paper kept to the bets paying within
 a day.
 
+**Paper started again.** On October 4 at 16:42 UTC paper was reset to no
+open trades and 10,000 dollars on each venue, so its results are all under
+the new rules. Nothing was deleted: its 548 trades and 2 settlements until
+then carry the mode `paper_reset_2026-10-04`, which neither the paper desk
+nor `summary.py` reads, 447 of them still open, and a `transfer_in` on
+each venue's ledger, 869.54 dollars on Kalshi and 1,744.29 on Polymarket
+US, brought its cash back to 10,000. The database as it was is kept in
+`data/sportsarb-before-paper-reset.sqlite` on the instance.
+
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.
 The paper edge is real. Whether it is reachable is a question of whether
