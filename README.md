@@ -237,6 +237,7 @@ place (see the top of `db/database.py`):
 | settlements | the settler |
 | ledger | paper money, every dollar in and out |
 | alerts | every email the live process sends: low cash, halts, and the Kalshi key's attestation |
+| twins | the in-play test, each live trade in play and its paper twin |
 
 Trades and settlements carry a `mode`, `paper` or `live`, so the two modes
 never mix. Every table has a model in `db/models.py` and its schema in
@@ -457,10 +458,12 @@ desk the futures, a pair without one, bar the sports given to `--not-live`,
 `crypto` by default, whose futures are followed but traded by neither. On
 one signal the live desk's real orders would take the contracts the paper
 desk's simulated ones look for. Each desk still flattens and settles every
-trade it holds. The same loop starts the hourly catalog refresh in a child
-process and applies the result to the live connections, and with Bitcoin
-followed it refreshes Bitcoin's catalog alone 20 seconds after each 15
-minute window opens, when both venues list it, so a window is traded for
+trade it holds. With `--live-in-play`, which needs `--execute both`, the
+live desk is offered the bets on one event too, for the in-play test under
+**trading/** below. The same loop starts the hourly catalog refresh in a
+child process and applies the result to the live connections, and with
+Bitcoin followed it refreshes Bitcoin's catalog alone 20 seconds after each
+15 minute window opens, when both venues list it, so a window is traded for
 most of its 15 minutes. One run trades every sport given to `--sport`,
 comma separated as in `--sport nfl,ncaaf,mlb,nhl,nba`, or every one with
 `--sport all`, since the money is one pool and a second process would spend
@@ -514,7 +517,8 @@ while they are open, so their books are priced however old they are.
 share, which is everything but how an order is filled. Live trades only
 bets that pay out a day or more away, the futures, and never a game once it
 has kicked off: near a game and during it, faster traders take an edge
-before our Polymarket US order lands, and the leg is missed. Paper trades
+before our Polymarket US order lands, and the leg is missed. The in-play
+test, below, is the one exception. Paper trades
 the bets on one event (`in_play`), before and while they are played, that
 pay within 24 hours (`PAPER_MAX_PAYOUT_HOURS`), to see how they would do. A
 signal needs a net edge of at least two cents per contract (`MIN_EDGE`,
@@ -615,6 +619,27 @@ shard 0, where the football futures with the long-lasting edges are, and
 10% to shard 3 (`LIVE_SHARDS`). The live executor emails once when either
 shard, or Polymarket US, falls under $5 (`LIVE_LOW_CASH`), and again only
 after it has been back over.
+
+**The in-play test.** Paper's results in play are only as good as its
+fills, and no live order had been sent in play to check them against.
+With `--live-in-play` live also trades the games, matches, races, and
+windows under way that paper trades, by paper's rules: once the game has
+started by any member's kickoff, since a Kalshi contract gives none, paying
+within 24 hours, at most 5 contracts a trade (`LIVE_IN_PLAY_CONTRACTS`),
+the ladders walked only as deep as the levels that hold them, until 100
+such trades (`LIVE_IN_PLAY_TRADES`). They are counted in the `twins` table,
+so a restart goes on from there, and the futures go on as before. On each
+of those signals paper sends a twin in place of its own trade, with the
+same legs, limits, and size (`PaperExecutor.twin`). Our live orders are
+real and take from the books the twin's orders meet, so each leaves a
+footprint (**footprints.py**): from the venue's time on its answer and the
+book on the tape just before then, what it took from each level. Paper adds
+that back to every book the venue made after, until the level falls below
+what our order left of it, as other takers or cancels would have taken ours
+too, and waits up to 2 seconds for the answers of live orders sent before
+its own. The brakes cover these trades as any live trade.
+`tools/in_play_test.py` sets the live trades beside their twins. While the
+test runs paper trades those signals at 5 contracts, not at its own size.
 
 Live trading has brakes, in **brakes.py**, sized for a test with about $100
 on each venue. An order whose outcome cannot be known (a timeout, a dropped
@@ -756,6 +781,14 @@ reason, to be worked out again from them too, as trade 48 was when a
 sale of 0.42 of a contract went unrecorded. Without `--apply` it writes
 nothing, so it also serves as a check that the live records match the
 venues. Stop the recorder before `--apply`.
+
+`src/tools/in_play_test.py` reports the in-play test: the live trades in
+play beside their paper twins on the same signals, how many of each filled
+in full, in part, on one leg, or not at all, the contracts matched, how
+often each venue's leg filled, what was locked in and what the sales back
+made, the result of those settled, each venue's round trip, measured live
+and drawn on paper, how often the two matched the same contracts, and the
+newest pairs one by one, `--recent 20` of them.
 
 `src/tools/latency_report.py` reports, over a stretch such as a game, how
 far behind the venues the books ran, minute by minute from the status
@@ -1031,7 +1064,8 @@ with `--sport all --execute both`. `--no-trade` scans without trading,
 `--execute live` trades the futures with real money and `--execute both`
 runs both desks, paper trading the bets on one event. `--not-live
 crypto,politics` holds sports' futures out of live trading, `crypto` alone
-by default, and `--not-live none` holds none. The settings a run is tuned
+by default, and `--not-live none` holds none. `--live-in-play`, with
+`--execute both`, runs the in-play test. The settings a run is tuned
 by, such as the minimum edge, the annual return, and the starting balance,
 are in `src/engine/helper/config.py`. Those only paper trading reads start
 with `PAPER_`, those only live trading reads with `LIVE_`, and the rest
@@ -1062,6 +1096,7 @@ Then read the reports:
 python3 src/tools/summary.py --hours 24
 python3 src/tools/summary.py --mode paper --sport epl,ucl
 python3 src/tools/latency_report.py --hours 4
+python3 src/tools/in_play_test.py
 ```
 
 To compare ways of following the books during a game, from `src/`:
@@ -1082,10 +1117,10 @@ src/
   engine/     run, the process that wires the components together
     components/
       market/    record, feeds, streams, scan, tape: the venues' books and the edges between them
-      trading/   executor (what paper and live share), paper, live, brakes, notify
+      trading/   executor (what paper and live share), paper, live, footprints, brakes, notify
       money/     balances (what paper and live share), paper, live, settle
     helper/      config (the settings a run is tuned by), game (when a game is played and when its bets pay out), pricing, fees
-  tools/      summary report, live_check, kalshi_shards, repair_fills, latency_report, feed_check
+  tools/      summary report, live_check, kalshi_shards, repair_fills, latency_report, feed_check, in_play_test
 tests/        mirrors src, run with pytest, configured in pyproject.toml
   support/    helpers the tests share, and the streams and refreshes a child process can run
 commands.txt  operating the AWS instance, gitignored, kept locally
@@ -1114,4 +1149,5 @@ Where to look to change something:
 | how far behind the feeds run | `tools/latency_report.py`, `tools/feed_check.py` |
 | how the processes are wired | `engine/run.py` |
 | the report on the database | `tools/summary.py` |
+| the in-play test, live in play beside paper twins | `trading/live.py`, `trading/footprints.py`, `tools/in_play_test.py` |
 | live records against the venues' positions | `tools/repair_fills.py` |

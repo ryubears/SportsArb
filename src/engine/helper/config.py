@@ -75,6 +75,11 @@ LIVE_UNKNOWN_LIMIT = 3      # Orders with an unknown outcome among the newest LI
 LIVE_REJECT_LIMIT = 3       # Orders one venue refuses in a row at which live trading halts.
 LIVE_RESULT_HOURS = 6       # The sliding window the loss brake looks at, in hours.
 LIVE_MAX_LOSS_SHARE = 0.10  # Net loss of the trades decided in the window, as a share of the live money, over which live trading halts.
+# The in-play test, run.py --live-in-play: live also trades the games, matches, races, and windows under way that paper
+# trades, a few contracts at a time, each beside a paper twin of the same size on the same signal, to see whether paper's
+# fills in play are ones live gets.
+LIVE_IN_PLAY_CONTRACTS = 5  # The most contracts a live trade in play asks for.
+LIVE_IN_PLAY_TRADES = 100   # The live trades in play after which the test takes no more. Futures go on as before.
 KEY_CHECK_HOURS = 1         # Between readings of when the Kalshi key's location attestation lapses, see notify.AttestationWatch.
 KEY_WARN_HOURS = 48         # How long before it lapses the email goes out, so it comes before the day it does.
 

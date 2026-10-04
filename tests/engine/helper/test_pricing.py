@@ -42,6 +42,8 @@ def test_depth_stops_where_the_edge_falls_under_the_floor():
     assert pricing.depth(leg_a, leg_b, fee, fee, 0.05) == (0.46, 0.47, 100)      # The third level is under 5 cents.
     assert pricing.depth(leg_a, leg_b, fee, fee, 0.08) == (0.45, 0.47, 1)        # Only the top level clears 8 cents.
     assert pricing.depth(leg_a, leg_b, fee, fee, 0.09) == (None, None, 0)        # Nothing does.
+    assert pricing.depth(leg_a, leg_b, fee, fee, 0.05, most=1) == (0.45, 0.47, 1)       # The top level holds the one asked for.
+    assert pricing.depth(leg_a, leg_b, fee, fee, 0.05, most=5) == (0.46, 0.47, 100)     # Five need the second.
 
 
 def test_positive_depth_walks_both_ladders_while_the_edge_is_positive():

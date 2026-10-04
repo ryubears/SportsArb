@@ -336,6 +336,29 @@ def load_open_trades(conn, mode):
           AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id) ORDER BY t.id""", (mode,))]
 
 
+def insert_twin(conn, live_trade_id):
+    """
+    Store a live trade the in-play test took, which has no paper twin yet.
+    """
+    conn.execute("INSERT INTO twins (live_trade_id) VALUES (?)", (live_trade_id,))
+    conn.commit()
+
+
+def set_twin(conn, live_trade_id, paper_trade_id):
+    """
+    Store the paper twin of a live trade the in-play test took.
+    """
+    conn.execute("UPDATE twins SET paper_trade_id = ? WHERE live_trade_id = ?", (paper_trade_id, live_trade_id))
+    conn.commit()
+
+
+def count_twins(conn):
+    """
+    How many live trades the in-play test has taken.
+    """
+    return conn.execute("SELECT COUNT(*) FROM twins").fetchone()[0]
+
+
 def load_exposed_trades(conn, mode, now):
     """
     Trades of one mode that are done, hold more on one side than the other,

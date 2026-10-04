@@ -74,6 +74,13 @@ class Tape:
             found = book
         return found
 
+    def reaches(self, moment):
+        """
+        Whether the tape goes back to moment, the venue's clock in seconds: its first book was made by then.
+        """
+        first = self.books[0][1]
+        return first is not None and first.at is not None and first.at <= moment
+
     def complete(self, moment):
         """
         Whether every book the venue made by moment has reached us, which a book it made later shows.

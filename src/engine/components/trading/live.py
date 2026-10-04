@@ -21,6 +21,16 @@ live executor reads each venue's positions and logs any contract the
 venue holds more or less of than the live trades say, which would mean
 the records are wrong, see check_positions().
 
+Live trades the futures, see executor.py. In the in-play test, which run.py
+--live-in-play starts, it also trades the games, matches, races, and windows
+under way that paper trades, by paper's rules, at most
+config.LIVE_IN_PLAY_CONTRACTS a trade, until config.LIVE_IN_PLAY_TRADES
+of them, counted in the twins table so a restart goes on from there. Each
+one has a paper twin on the same signal, of the same size and limits, see
+paper.py, so live fills in play can be set against paper's, and each order
+leaves a footprint of what it took, which paper adds back, see
+footprints.py.
+
 An order whose outcome cannot be known, because no answer came, the venue
 failed on its side, or its answer cannot be read, leaves what its trade
 holds unknown. That trade is set aside: no more orders are sent for it,
@@ -44,7 +54,7 @@ from db import database
 from db.models import Order
 from engine.components.trading.brakes import Brakes
 from engine.components.trading.executor import Executor, Fill
-from engine.helper import config
+from engine.helper import config, game
 
 PLACE = {"kalshi": kalshi.place_order, "polymarket_us": polymarket_us.place_order}   # How each venue takes an order.
 POSITIONS = {"kalshi": kalshi.positions, "polymarket_us": polymarket_us.positions}    # How each venue reports what the account holds.
@@ -65,8 +75,12 @@ class LiveExecutor(Executor):
     step = orders.STEP      # The venues fill, and take orders, in hundredths of a contract.
 
     def __init__(self, conn, cash, books, log=print, clock=now_iso, place=None, notifier=None, positions=None,
-                 is_maintenance=is_maintenance):
+                 is_maintenance=is_maintenance, in_play=False, footprints=None):
         super().__init__(conn, cash, books, log, clock, is_maintenance)
+        self.in_play_test = in_play     # Whether the in-play test runs, trading games under way too.
+        self.in_play_trades = database.count_twins(conn)    # Live trades the test has taken, this run and before it.
+        self.twins = {}             # Pair id maps to (now, yes, no, Trade, legs) for an in-play trade just taken, for paper's twin.
+        self.footprints = footprints    # Where each order leaves what it took, for paper to give back, or None.
         self.place = place or PLACE
         self.threads = ThreadPoolExecutor(ORDER_THREADS, thread_name_prefix="orders")
         self.brakes = Brakes(conn, cash, log, notifier, clock)
@@ -162,6 +176,58 @@ class LiveExecutor(Executor):
             return False
         return super().signal(pair, yes, no, edge, size, fee_infos, now)
 
+    def in_play(self, pair):
+        """
+        Whether the pair is traded by the in-play test's rules: one on a game, match, race, or window while the test runs.
+        """
+        return self.in_play_test and pair.get("game_date") is not None
+
+    def plays(self, pair, yes, no, now):
+        """
+        In the in-play test a game, match, race, or window only once it is
+        under way, until the test has taken all its trades. Whether it is
+        under way is judged by every member of the pair, since a Kalshi
+        contract gives no kickoff. Otherwise as the shared Executor says:
+        live's desk offers it only futures then, see run.py.
+        """
+        if not self.in_play(pair):
+            return super().plays(pair, yes, no, now)
+        return self.in_play_trades < config.LIVE_IN_PLAY_TRADES and game.started(pair["game_date"], pair.get("members") or (yes, no), now)
+
+    def pays_in_time(self, hours, pair):
+        """
+        In the in-play test, as on paper, a game paying within config.PAPER_MAX_PAYOUT_HOURS. Otherwise a bet paying
+        config.MIN_PAYOUT_HOURS or more out.
+        """
+        if not self.in_play(pair):
+            return super().pays_in_time(hours, pair)
+        return hours <= config.PAPER_MAX_PAYOUT_HOURS
+
+    def most(self, pair):
+        """
+        In the in-play test no more than config.LIVE_IN_PLAY_CONTRACTS on a game.
+        """
+        return config.LIVE_IN_PLAY_CONTRACTS if self.in_play(pair) else None
+
+    def opened(self, pair, yes, no, trade, legs, now):
+        """
+        Count an in-play trade, store it in the twins table, and keep it for paper's twin on the same signal.
+        """
+        if not self.in_play(pair):
+            return
+        self.in_play_trades += 1
+        database.insert_twin(self.conn, trade.id)
+        self.twins[pair["id"]] = (now, yes, no, trade, legs)
+        if self.in_play_trades >= config.LIVE_IN_PLAY_TRADES:
+            self.log(f"live in-play test: {self.in_play_trades} trades taken, so no more in play; futures go on")
+
+    def twin_of(self, pair_id, now):
+        """
+        The in-play trade this executor took on the pair at now, as (yes, no, Trade, legs), for paper's twin, or None.
+        """
+        taken = self.twins.pop(pair_id, None)
+        return taken[1:] if taken and taken[0] == now else None
+
     # ORDERS
 
     def set_trade_aside(self, trade, order):
@@ -189,6 +255,7 @@ class LiveExecutor(Executor):
         order = Order(trade_id=trade.id, venue=leg.venue, contract_id=leg.contract_id, purpose=purpose, action=action, outcome=outcome,
                       quantity=quantity, limit_price=price, client_id=str(uuid.uuid4()), sent_at=self.clock())
         database.insert_order(self.conn, order)
+        footprint = self.footprints.sent(leg, action == "sell", price) if self.footprints else None
         started = time.perf_counter()
         try:
             answer = await asyncio.get_running_loop().run_in_executor(
@@ -201,6 +268,8 @@ class LiveExecutor(Executor):
             answer.status, answer.order_id, answer.filled, answer.dollars, answer.fees, answer.note)
         order.response = jsonutil.dump(answer.response)
         database.update_order(self.conn, order)
+        if footprint:
+            self.footprints.answer(footprint, leg.venue, answer.response, answer.filled)
         if order.status == "error":
             self.set_trade_aside(trade, order)
         self.brakes.watch(order)

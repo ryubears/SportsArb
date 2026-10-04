@@ -390,19 +390,33 @@ class Executor:
         task.add_done_callback(on_failure(self.log, f"{self.mode} trade task"))
         return task
 
-    def pays_in_time(self, hours):
+    def plays(self, pair, yes, no, now):
         """
-        Whether this executor trades a bet paying out hours from now: live, one config.MIN_PAYOUT_HOURS or more away.
+        Whether this executor trades the pair now, by whether its game may
+        have started: live, a game not yet started or a future, which never
+        starts; paper, whose in_play is set, a game under way too.
+        """
+        return self.in_play or not game.started(pair.get("game_date"), (yes, no), now)
+
+    def pays_in_time(self, hours, pair):
+        """
+        Whether this executor trades a bet on the pair paying out hours from now: live, one config.MIN_PAYOUT_HOURS or more away.
         """
         return hours >= config.MIN_PAYOUT_HOURS
 
-    def pays_enough(self, edge, now, pays_at):
+    def most(self, pair):
+        """
+        The most contracts a trade on the pair asks for, or None for as many as the books and the cash allow.
+        """
+        return None
+
+    def pays_enough(self, edge, now, pays_at, pair):
         """
         Whether an edge is worth the capital it ties up until the bet pays at
         pays_at: when this executor trades, see pays_in_time(), and returning
         config.MIN_ANNUAL_PCT a year or more until then.
         """
-        if not pays_at or not self.pays_in_time(hours_between(now, pays_at)):
+        if not pays_at or not self.pays_in_time(hours_between(now, pays_at), pair):
             return False
         return annual_pct(edge, game.days_until(now, pays_at)) >= config.MIN_ANNUAL_PCT
 
@@ -428,7 +442,7 @@ class Executor:
                 wait = max(wait, other + config.CONFIRM_SECONDS.get(member["venue"], 0) - clock)
         return wait
 
-    def quantity_for(self, legs):
+    def quantity_for(self, legs, most=None):
         """
         Set each leg's limit and return how many contracts to ask for. The
         two ladders are walked together through the levels that keep
@@ -436,7 +450,8 @@ class Executor:
         quantity is config.FILL_SHARE of what those levels show, the share we
         expect to get, so an unchanged book fills in full, and no more than
         the cash free pays for, both legs' at once where they share a venue's
-        cash.
+        cash. Given most, it is no more than that, and the walk stops at the
+        levels that hold it, so no limit goes deeper than those.
         """
         yes_leg, no_leg = legs
         yes_book, no_book = self.book(yes_leg.key), self.book(no_leg.key)
@@ -445,33 +460,35 @@ class Executor:
         yes_ladder = ladder(yes_book, yes_leg.polarity, "yes")
         no_ladder = ladder(no_book, no_leg.polarity, "no")
         yes_leg.limit, no_leg.limit, available = depth(yes_ladder, no_ladder, (yes_leg.venue, yes_leg.fee_info),
-                                                       (no_leg.venue, no_leg.fee_info), config.MIN_EDGE)
+                                                       (no_leg.venue, no_leg.fee_info), config.MIN_EDGE,
+                                                       None if most is None else most / config.FILL_SHARE)
         if not available:
             return 0
         per_contract = {}           # What one contract of both legs costs from each venue's cash, its shard's where it has them.
         for leg in legs:
             per_contract[(leg.venue, shard(leg))] = per_contract.get((leg.venue, shard(leg)), 0.0) + leg.limit
         affordable = min(self.cash.spendable(venue, part) // cost for (venue, part), cost in per_contract.items())
-        return int(min(available * config.FILL_SHARE, affordable))
+        quantity = min(available * config.FILL_SHARE, affordable)
+        return int(quantity if most is None else min(quantity, most))
 
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """
         Called by the scanner when a pair shows an edge. Sends the two legs
-        when the edge, the game not having started, unless this executor
-        trades in play, the time until the bet pays, its return a year, both
-        venues trading, and the balances allow. Returns True when orders
-        were sent, so the scanner sends no more for this episode. The
-        scanner's size counts every level with a positive edge, while the
-        legs are sized from the levels that keep config.MIN_EDGE, see
-        quantity_for(). The cost is reserved here, before anything is
-        awaited, so a second signal in the same moment sees what is left.
+        when the edge, whether its game has started, see plays(), the time
+        until the bet pays, its return a year, both venues trading, and the
+        balances allow. Returns True when orders were sent, so the scanner
+        sends no more for this episode. The scanner's size counts every
+        level with a positive edge, while the legs are sized from the levels
+        that keep config.MIN_EDGE, see quantity_for(), up to most(). The
+        cost is reserved here, before anything is awaited, so a second
+        signal in the same moment sees what is left.
         """
         if edge < config.MIN_EDGE:
             return False
-        if not self.in_play and game.started(pair.get("game_date"), (yes, no), now):
+        if not self.plays(pair, yes, no, now):
             return False
         pays_at = game.pays_at((yes, no), pair["sport"])
-        if not self.pays_enough(edge, now, pays_at):
+        if not self.pays_enough(edge, now, pays_at, pair):
             return False
         wait = self.confirm_wait(yes, no, now)
         if wait is None or wait > 0:
@@ -483,9 +500,17 @@ class Executor:
                 for side, m in (("yes", yes), ("no", no))]
         if any(self.is_maintenance(leg.venue, now) for leg in legs):
             return False
-        quantity = self.quantity_for(legs)
+        quantity = self.quantity_for(legs, self.most(pair))
         if quantity < 1:
             return False
+        self.opened(pair, yes, no, self.open(pair, yes, no, edge, legs, quantity, pays_at, now), legs, now)
+        return True
+
+    def open(self, pair, yes, no, edge, legs, quantity, pays_at, now):
+        """
+        Send a trade of quantity contracts on both legs, whose limits are
+        set: reserve its cost, store it, and start its orders. Returns the Trade.
+        """
         for leg in legs:
             leg.quantity = quantity
             self.cash.reserve(leg.venue, quantity * leg.limit, shard(leg))
@@ -497,7 +522,13 @@ class Executor:
         database.insert_trade(self.conn, trade)
         self.games[trade.id] = (pair.get("game_date"), (yes, no))
         self.spawn(self.run_trade(trade, legs))
-        return True
+        return trade
+
+    def opened(self, pair, yes, no, trade, legs, now):
+        """
+        Called once a signal on the pair, through the members yes and no, has sent trade, with its legs. Nothing
+        more here, see LiveExecutor.opened().
+        """
 
     def tick(self, now):
         """

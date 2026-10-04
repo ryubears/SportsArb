@@ -10,12 +10,13 @@ import pytest
 from common.timeutil import at_seconds, epoch
 from common.venues import VENUES
 from db import database
-from db.models import Book
+from db.models import Book, Leg
 from engine.components.market import scan
 from engine.components.market.tape import Tapes
 from engine.components.money import settle
 from engine.components.money.paper import PaperBalances
 from engine.components.trading.executor import Executor
+from engine.components.trading.footprints import Footprints
 from engine.components.trading.paper import PaperExecutor
 from engine.helper import config
 from trade_setup import CLOSE, FEES, KICKOFF, NO, NO_K_FEES, NO_PM_FEES, NOW, PAIR, PAYS_AT, YES, books, stored
@@ -581,3 +582,59 @@ def test_a_change_the_venue_made_after_the_order_arrived_does_not_stop_it(tmp_pa
     conn, t = taped(tmp_path, [stamped("kalshi", 0.53, 0.54, 0.020, 0.032),
                                stamped("polymarket_us", 0.49, 0.50, 0.070, 0.150)])
     assert (t["status"], t["yes_filled"], t["no_filled"], t["yes_cost"]) == ("filled", 50, 50, pytest.approx(50 * 0.45))
+
+
+# THE IN-PLAY TEST, paper twins of live trades on the same signal
+
+def twinned(tmp_path, footprints, start=config.PAPER_START_BALANCE):
+    """
+    Send the paper twin of a live trade of 5 contracts at NOW, on books of 5 a level. Live's own yes order reached
+    Polymarket US 30 ms after the signal and bought all 5 at 0.45, so the venue's books from then show the level gone.
+    footprints, when given, is where that live order left what it took. Returns the database and the twin, or None.
+    """
+    latest, tapes = {}, Tapes()
+    for key, book in books(size=5).items():
+        latest[key] = dataclasses.replace(book, at=T - 1)
+    conn = database.connect(tmp_path / "t.sqlite")
+    ex = PaperExecutor(conn, PaperBalances(conn, start), lambda: latest, lambda m: None, random.Random(1), clock=lambda: NOW,
+                       tapes=tapes, footprints=footprints)
+    legs = [Leg("yes", "polymarket_us", "pm", "yes", limit=0.45, quantity=5, fee_info=NO_PM_FEES),
+            Leg("no", "kalshi", "k", "yes", limit=0.47, quantity=5, fee_info=NO_K_FEES)]
+    live = types.SimpleNamespace(id=7, quantity=5, edge=0.08, pays_at=PAYS_AT)
+
+    async def scenario():
+        sent = footprints.sent(legs[0], False, 0.45) if footprints else None
+        twin = ex.twin(PAIR, YES, NO, live, legs, NOW)
+        await asyncio.sleep(0)                  # The twin starts, and tapes its books from here.
+        for book in (stamped("polymarket_us", 0.44, 0.46, 0.030, 0.110), stamped("polymarket_us", 0.44, 0.46, 0.100, 0.180),
+                     stamped("kalshi", 0.53, 0.54, 0.020, 0.032)):
+            latest[(book.venue, book.contract_id)] = book
+            tapes.add((book.venue, book.contract_id), book)
+        if sent:
+            footprints.answer(sent, "polymarket_us", {"executions": [{"transactTime": at_seconds(T + 0.030)}]}, 5)
+        await asyncio.gather(*ex.tasks)
+        return twin
+    return conn, asyncio.run(scenario())
+
+
+@pytest.mark.full_share
+def test_a_paper_twin_has_the_live_trades_size_and_limits_and_gets_back_what_our_live_order_took(tmp_path, timed):
+    conn, twin = twinned(tmp_path, Footprints(clock=lambda: T))
+    t = stored(conn)[0]
+    assert (t["id"], t["mode"], t["signal_ts"], t["quantity"], t["yes_limit"], t["no_limit"], t["edge"], t["pays_at"]) == (
+        twin.id, "paper", NOW, 5, 0.45, 0.47, 0.08, PAYS_AT)
+    # Its yes order reached Polymarket US at 60 ms, after our live order had bought the 5 at 0.45 there, which paper
+    # gives back, so the twin is judged on the book as it would have been without our own order.
+    assert (t["status"], t["yes_filled"], t["no_filled"]) == ("filled", 5, 5)
+
+
+@pytest.mark.full_share
+def test_without_giving_back_a_paper_twin_would_find_what_our_live_order_took_gone(tmp_path, timed):
+    conn, twin = twinned(tmp_path, None)
+    t = stored(conn)[0]
+    assert (t["yes_filled"], t["no_filled"], t["hedge"]) == (0, 5, "sold back 5 of 5 on kalshi")
+
+
+def test_no_paper_twin_is_sent_when_the_paper_money_falls_short(tmp_path, timed):
+    conn, twin = twinned(tmp_path, Footprints(clock=lambda: T), start=2.0)
+    assert twin is None and stored(conn) == []

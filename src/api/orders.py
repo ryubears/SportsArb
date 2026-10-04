@@ -6,6 +6,7 @@ never reads a venue's own field names.
 """
 
 from typing import NamedTuple
+from common.timeutil import epoch
 
 STEP = 0.01     # The least part of a contract both venues fill and take orders for, a hundredth.
 
@@ -82,3 +83,17 @@ def unfilled(error, why):
     ahead of what the venue said.
     """
     return Answer(None, "unfilled", 0, 0.0, 0.0, f"{why}: {error.body[:300]}", {"error": error.body, "status": error.status})
+
+
+def venue_time(venue, response):
+    """
+    When the venue handled an order, by its own clock, the one it stamps
+    its books with, in seconds since 1970, from its answer as it came, or
+    None when the answer does not say: Kalshi's ts_ms, and the time of
+    Polymarket US's last execution, or its order's creation without one.
+    """
+    response = response or {}
+    if venue == "kalshi":
+        return response["ts_ms"] / 1000 if response.get("ts_ms") else None
+    execution = (response.get("executions") or [{}])[-1]
+    return epoch(execution.get("transactTime") or (execution.get("order") or {}).get("createTime"))

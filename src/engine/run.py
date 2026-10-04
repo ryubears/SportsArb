@@ -26,7 +26,13 @@ venues, trading/ makes the trades, and money/ keeps the cash.
   --not-live. On the same signal live's real orders took the contracts
   paper's simulated ones looked for: from 2026-10-04, when live began
   asking for all it saw, paper twins of live trades failed 10 times in 13.
-  Each desk still flattens and settles every trade it holds.
+  Each desk still flattens and settles every trade it holds. With
+  --live-in-play, which needs --execute both, live also trades the
+  games, matches, races, and windows under way, at most
+  LIVE_IN_PLAY_CONTRACTS a trade for LIVE_IN_PLAY_TRADES trades, and paper
+  sends a twin of each on the same signal, of the same size, giving back
+  what our live orders took from the books, so live fills in play can be
+  set against paper's. See trading/live.py and trading/footprints.py.
   - Paper: trading/paper.py fills against the same books with the paper
     money of money/paper.py.
   - Live: trading/live.py sends real orders with the money the venues
@@ -53,6 +59,7 @@ Run with:
     python3 -m engine.run --sport all --execute live
     python3 -m engine.run --sport all --execute both
     python3 -m engine.run --sport all --execute both --not-live crypto,politics
+    python3 -m engine.run --sport all --execute both --live-in-play
     python3 -m engine.run --sport nfl --seconds 120 --catalog-minutes 0
     python3 -m engine.run --sport nfl --skip-refresh
     python3 -m engine.run --sport nfl --no-scan
@@ -85,6 +92,7 @@ from engine.components.money import settle
 from engine.components.money.live import LiveBalances
 from engine.components.money.paper import PaperBalances
 from engine.components.trading import notify
+from engine.components.trading.footprints import Footprints
 from engine.components.trading.live import LiveExecutor
 from engine.components.trading.paper import PaperExecutor
 from engine.helper import config
@@ -107,6 +115,7 @@ class RunOptions:
     scan: bool = True                               # Price the books and store episodes.
     executors: tuple = ("paper",)                   # The modes that trade the scanner's signals, 'paper' and 'live', when scanning.
     not_live: tuple = ("crypto",)                   # Sports whose futures the live desk leaves alone.
+    live_in_play: bool = False                      # Whether live also trades games under way, in the in-play test.
 
 
 def code_version():
@@ -160,20 +169,24 @@ class Desk:
     and the settler that pays its trades out. books is a function returning
     the recorder's newest books. markets are the bets it trades, 'events',
     those on one game, match, race, or window, or 'futures', or None for
-    both, and held_out the sports it leaves alone. tapes are the recorder's
-    tapes, which paper orders meet the venues' books on, see market/tape.py.
+    both, and held_out the sports whose futures it leaves alone. tapes are
+    the recorder's tapes, which paper orders meet the venues' books on, see
+    market/tape.py. in_play starts live's in-play test, and footprints keep
+    what live orders took for paper to give back, see trading/footprints.py.
+    twins, paper's, is the live executor whose in-play trades it twins.
     """
 
-    def __init__(self, mode, conn, books, notifier, markets=None, held_out=(), tapes=None):
+    def __init__(self, mode, conn, books, notifier, markets=None, held_out=(), tapes=None, in_play=False, footprints=None, twins=None):
         self.mode = mode
         self.markets = markets
         self.held_out = tuple(held_out)
+        self.twins = twins
         if mode == "paper":
             self.cash = PaperBalances(conn)
-            self.executor = PaperExecutor(conn, self.cash, books, log, tapes=tapes)
+            self.executor = PaperExecutor(conn, self.cash, books, log, tapes=tapes, footprints=footprints)
         elif mode == "live":
             self.cash = LiveBalances(log)
-            self.executor = LiveExecutor(conn, self.cash, books, log, notifier=notifier)
+            self.executor = LiveExecutor(conn, self.cash, books, log, notifier=notifier, in_play=in_play, footprints=footprints)
         else:
             raise ValueError(f"unknown mode {mode!r}")
         self.settler = settle.Settler(conn, self.cash, log, executor=self.executor)
@@ -181,17 +194,29 @@ class Desk:
     def trades(self, pair):
         """
         Whether this desk trades a pair: one on an event, which has a game date, or a future, which has none, as its
-        markets say, of a sport it does not hold out.
+        markets say, a future only of a sport it does not hold out.
         """
-        if pair["sport"] in self.held_out:
+        event = pair.get("game_date") is not None
+        if self.markets is not None and event != (self.markets == "events"):
             return False
-        return self.markets is None or (pair.get("game_date") is not None) == (self.markets == "events")
+        return event or pair["sport"] not in self.held_out
 
-    def signal(self, pair, *args):
+    def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """
-        Offer the executor a scanner signal on a pair this desk trades. Returns whether it traded.
+        Offer the executor a scanner signal on a pair this desk trades.
+        Paper sends the twin of a live trade just taken on the same signal
+        in its place, see PaperExecutor.twin(). Returns whether it traded.
         """
-        return self.executor.signal(pair, *args) if self.trades(pair) else False
+        if not self.trades(pair):
+            return False
+        taken = self.twins.twin_of(pair["id"], now) if self.twins else None
+        if taken:
+            live_yes, live_no, live, live_legs = taken
+            twin = self.executor.twin(pair, live_yes, live_no, live, live_legs, now)
+            if twin:
+                database.set_twin(self.executor.conn, live.id, twin.id)
+            return twin is not None
+        return self.executor.signal(pair, yes, no, edge, size, fee_infos, now)
 
     def tick(self, now, clock):
         """
@@ -216,21 +241,29 @@ class Session:
     the venue connections, the scanner, and a Desk for each mode it trades
     in. Without a scanner only the books are recorded, and without a desk
     the scanner only stores what it sees. The paper desk trades the bets on
-    one event and the live desk the futures, bar the sports in not_live.
+    one event and the live desk the futures, bar the sports in not_live,
+    and with live_in_play the events under way too, each with a paper twin.
     """
 
-    def __init__(self, conn, sports, with_scanner=True, executors=("paper",), not_live=("crypto",)):
+    def __init__(self, conn, sports, with_scanner=True, executors=("paper",), not_live=("crypto",), live_in_play=False):
+        if live_in_play and set(executors) != {"live", "paper"}:
+            raise ValueError("the in-play test needs both desks, live and paper")
         self.conn = conn
         self.sports = sports
         self.not_live = tuple(s for s in sports if s in not_live)
+        self.live_in_play = live_in_play
         self.notifier = notify.Notifier(conn, log)
         self.attestation = notify.AttestationWatch(conn, self.notifier, log)
         # The executors trade against the recorder's books, which exist once the recorder does, below. The desks trade
         # apart, since on one signal live's real orders take what paper's look for.
         self.tapes = Tapes()
-        rules = {"paper": dict(markets="events", tapes=self.tapes), "live": dict(markets="futures", held_out=self.not_live)}
-        self.desks = [Desk(mode, conn, lambda: self.recorder.books, self.notifier, **rules[mode])
-                      for mode in executors] if with_scanner else []
+        footprints = Footprints() if live_in_play else None
+        rules = {"paper": dict(markets="events", tapes=self.tapes, footprints=footprints),
+                 "live": dict(markets=None if live_in_play else "futures", held_out=self.not_live, in_play=live_in_play, footprints=footprints)}
+        self.desks = []
+        for mode in executors if with_scanner else ():     # Live first, so a paper twin follows its live trade.
+            twins = next((d.executor for d in self.desks if d.mode == "live"), None) if mode == "paper" and live_in_play else None
+            self.desks.append(Desk(mode, conn, lambda: self.recorder.books, self.notifier, twins=twins, **rules[mode]))
         self.scanner = scan.Scanner(conn, sports, log, [d.signal for d in self.desks], books=lambda: self.recorder.books) if with_scanner else None
         for desk in self.desks:
             desk.executor.recheck = self.scanner.recheck
@@ -249,6 +282,11 @@ class Session:
             live = [s for s in self.sports if s not in self.not_live]
             log(f"live trades the futures of {', '.join(live) or 'no sport'}"
                 + (f", not of {', '.join(self.not_live)}" if self.not_live else ""))
+            if self.live_in_play:
+                taken = next(d.executor.in_play_trades for d in self.desks if d.mode == "live")
+                log(f"live in-play test: live also trades the games, matches, races, and windows under way that pay within "
+                    f"{config.PAPER_MAX_PAYOUT_HOURS}h, at most {config.LIVE_IN_PLAY_CONTRACTS} contracts a trade, for "
+                    f"{config.LIVE_IN_PLAY_TRADES} trades, {taken} taken so far, each with a paper twin on the same signal")
             if not notify.EMAIL_FILE.exists():
                 log(f"no email settings in {notify.EMAIL_FILE}, alerts are only logged and stored")
         if any(d.mode == "paper" for d in self.desks):
@@ -395,7 +433,7 @@ async def run(conn, options):
             log(await refresh_in_child(sports))
         except Exception as e:
             log(with_traceback(f"catalog refresh failed ({e!r}), starting with the stored catalog", e))
-    session = Session(conn, sports, options.scan, options.executors, options.not_live)
+    session = Session(conn, sports, options.scan, options.executors, options.not_live, options.live_in_play)
     session.start()
     started = last_catalog = last_window = time.time()
     refresh = None      # The background catalog refresh while one is running, of every sport or of Bitcoin's windows.
@@ -435,6 +473,8 @@ if __name__ == "__main__":
     ap.add_argument("--not-live", default="crypto",
                     help="sports whose futures live leaves alone, comma separated, crypto by default, or none")
     ap.add_argument("--no-trade", action="store_true", help="scan without trading")
+    ap.add_argument("--live-in-play", action="store_true",
+                    help="with --execute both, live also trades a few contracts of games under way, beside paper twins")
     ap.add_argument("--execute", choices=sorted(EXECUTE), default="paper",
                     help="trade on paper, the bets on one event, with real money on the venues, the futures, or both")
     ap.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
@@ -446,13 +486,15 @@ if __name__ == "__main__":
     not_live = () if args.not_live.strip() == "none" else tuple(s.strip() for s in args.not_live.split(",") if s.strip())
     if any(s not in fetch.SPORTS for s in not_live):
         ap.error(f"--not-live takes sports from {', '.join(sorted(fetch.SPORTS))}, or none, not {args.not_live!r}")
+    if args.live_in_play and (args.execute != "both" or args.no_trade or args.no_scan):
+        ap.error("--live-in-play needs --execute both, scanning and trading")
     try:
         config.override(args.set)
     except ValueError as e:
         ap.error(str(e))
     options = RunOptions(sports=sports, seconds=args.seconds,
                          catalog_seconds=args.catalog_minutes * 60, refresh_at_start=not args.skip_refresh, scan=not args.no_scan,
-                         executors=() if args.no_trade else EXECUTE[args.execute], not_live=not_live)
+                         executors=() if args.no_trade else EXECUTE[args.execute], not_live=not_live, live_in_play=args.live_in_play)
     sys.stdout.reconfigure(line_buffering=True)     # Print immediately even when output goes to a file.
     with database.connect() as conn:
         try:

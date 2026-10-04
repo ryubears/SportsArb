@@ -35,9 +35,9 @@ from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))     # src, so the script runs from any folder.
+from api import orders
 from common.paths import DATA_DIR
 from common.stats import quantile
-from common.timeutil import epoch
 from common.venues import VENUES
 from db.database import read_only
 from engine.helper import config
@@ -144,16 +144,13 @@ def print_feeds(rows, every):
 
 def venue_time(venue, response):
     """
-    When the venue handled an order, in seconds since 1970, from its stored answer, or None when the answer does not say.
+    When the venue handled an order, in seconds since 1970, from its stored answer, or None when the answer does not say, see orders.venue_time().
     """
     try:
         answer = json.loads(response or "{}")
     except ValueError:
         return None
-    if venue == "kalshi":
-        return answer["ts_ms"] / 1000 if answer.get("ts_ms") else None
-    execution = (answer.get("executions") or [{}])[-1]
-    return epoch(execution.get("transactTime") or (execution.get("order") or {}).get("createTime"))
+    return orders.venue_time(venue, answer) if isinstance(answer, dict) else None
 
 
 def print_orders(conn, since, until):

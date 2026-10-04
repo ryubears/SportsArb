@@ -175,17 +175,18 @@ def positive_depth(leg_a, leg_b, fee_a, fee_b, min_edge):
     return (top_edge if top_edge is not None else -1.0), size, profit, worth_size, worth_profit
 
 
-def depth(leg_a, leg_b, fee_a, fee_b, min_edge):
+def depth(leg_a, leg_b, fee_a, fee_b, min_edge, most=None):
     """
     Buy equal amounts of two ladders while the net edge per contract stays
-    at or above min_edge. Returns the deepest cost included on each leg,
-    which is the limit an order needs to sweep those levels, and the
-    contracts within them: (limit_a, limit_b, contracts).
+    at or above min_edge, and, given most, only until most contracts are
+    reached. Returns the deepest cost included on each leg, which is the
+    limit an order needs to sweep those levels, and the contracts within
+    them: (limit_a, limit_b, contracts).
     """
     limit_a = limit_b = None
     total = 0.0
     for cost_a, cost_b, contracts, edge in walk_pair(leg_a, leg_b, fee_a, fee_b):
-        if edge < min_edge:
+        if edge < min_edge or (most is not None and total >= most):
             break
         limit_a, limit_b = cost_a, cost_b
         total += contracts

@@ -495,3 +495,89 @@ def test_positions_are_not_compared_while_orders_go_out(tmp_path):
     ex.tasks.add(asyncio.Future)                                        # A trade in flight.
     check(ex)
     assert not any("differ" in line for line in logs)
+
+
+# THE IN-PLAY TEST, live trading a few contracts of games under way beside paper twins
+
+UNDER_WAY = "2026-09-22T18:00:00+00:00"     # An hour into the game, which pays within the day.
+GAME = {**PAIR, "members": [YES, NO]}       # The pair as the scanner offers it, with every member.
+
+
+def in_play(tmp_path, venues, latest, logs=None):
+    """
+    A live executor running the in-play test an hour into the game, with books of then.
+    """
+    conn = database.connect(tmp_path / "t.sqlite")
+    cash = LiveBalances(lambda m: None, {"kalshi": lambda: (1000.0, {}), "polymarket_us": lambda: (1000.0, {})})
+    asyncio.run(cash.refresh(UNDER_WAY))
+    for key, book in latest.items():
+        latest[key] = Book(book.venue, book.contract_id, UNDER_WAY, book.bids, book.asks)
+    ex = LiveExecutor(conn, cash, lambda: latest, (logs.append if logs is not None else lambda m: None), clock=lambda: UNDER_WAY,
+                      place=venues.place(), positions={"polymarket_us": lambda: {}}, in_play=True)
+    return conn, ex
+
+
+def signal(ex, pair=GAME, now=UNDER_WAY):
+    async def scenario():
+        sent = ex.signal(pair, YES, NO, 0.08, 100, FEES, now)
+        while ex.tasks:
+            await asyncio.gather(*ex.tasks)
+        return sent
+    return asyncio.run(scenario())
+
+
+@pytest.mark.full_share
+def test_in_the_in_play_test_live_trades_a_game_under_way_a_few_contracts_and_keeps_it_for_its_paper_twin(tmp_path):
+    latest = books(size=100)
+    latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [[0.44, 100]], [[0.45, 10], [0.46, 100]])
+    venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
+    conn, ex = in_play(tmp_path, venues, latest)
+    assert signal(ex)
+    t = stored(conn)[0]
+    # Five contracts at most, which the top 10 at 0.45 hold, so neither limit goes deeper than the levels that hold them.
+    assert (t["quantity"], t["yes_limit"], t["no_limit"], t["status"]) == (5, 0.45, 0.47, "filled")
+    assert sorted(venues.orders) == [("kalshi", "buy", "no", 5, 0.47), ("polymarket_us", "buy", "yes", 5, 0.45)]
+    assert [tuple(r) for r in conn.execute("SELECT * FROM twins")] == [(t["id"], None)]
+    yes, no, live, legs = ex.twin_of(GAME["id"], UNDER_WAY)
+    assert (yes, no, live.id, [leg.limit for leg in legs]) == (YES, NO, t["id"], [0.45, 0.47])
+    assert ex.twin_of(GAME["id"], UNDER_WAY) is None                    # Paper twins it once.
+
+
+def test_in_the_in_play_test_a_game_not_yet_under_way_and_one_paying_too_late_are_left_to_paper(tmp_path):
+    venues = Venues()
+    conn, ex = in_play(tmp_path, venues, books())
+    assert not signal(ex, now="2026-09-22T16:00:00+00:00")             # An hour before kickoff.
+    later = {**GAME, "game_date": "2026-09-22", "members": [{**YES, "start_time": "2026-09-20T12:00:00+00:00"}, NO]}
+    assert not signal(ex, later, now="2026-09-20T18:00:00+00:00")       # Under way by its first member, but paying two days out.
+    assert venues.orders == [] and stored(conn) == []
+
+
+def test_without_the_in_play_test_live_trades_no_game_under_way(tmp_path):
+    venues = Venues()
+    conn, ex = in_play(tmp_path, venues, books())
+    ex.in_play_test = False
+    assert not signal(ex) and venues.orders == []
+
+
+def test_the_in_play_test_stops_after_its_trades_and_counts_those_before_a_restart(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "LIVE_IN_PLAY_TRADES", 2)
+    logs = []
+    venues = Venues(polymarket_us=[fills(), fills()], kalshi=[fills(), fills()])
+    conn, ex = in_play(tmp_path, venues, books(), logs)
+    assert signal(ex)
+    restarted = LiveExecutor(conn, ex.cash, ex.books, logs.append, clock=lambda: UNDER_WAY, place=venues.place(),
+                             positions={"polymarket_us": lambda: {}}, in_play=True)
+    assert restarted.in_play_trades == 1
+    assert signal(restarted) and not signal(restarted)
+    assert "live in-play test: 2 trades taken, so no more in play; futures go on" in logs
+    future = {**PAIR, "game_date": None, "kind": "champion", "label": "nfl champion 2027 CAR"}
+    sure = {**YES, "start_time": None, "close_time": "2026-10-20T00:00:00+00:00"}, {**NO, "start_time": None, "close_time": "2026-10-20T00:00:00+00:00"}
+    venues.scripts.update(polymarket_us=[fills()], kalshi=[fills()])
+
+    async def scenario():
+        sent = restarted.signal(future, *sure, 0.08, 100, FEES, UNDER_WAY)
+        while restarted.tasks:
+            await asyncio.gather(*restarted.tasks)
+        return sent
+    assert asyncio.run(scenario())
+    assert stored(conn)[-1]["quantity"] == 10                           # A future is sized as ever, half the 20 the books show.

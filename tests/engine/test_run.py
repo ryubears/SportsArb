@@ -5,6 +5,7 @@ Tests for the live process's refresh loop.
 import asyncio
 import multiprocessing
 import os
+import types
 import pytest
 import scripted_refresh
 from db import database
@@ -172,6 +173,53 @@ def test_paper_trades_the_bets_on_one_event_and_live_the_futures_of_sports_not_h
     assert results == [False, True, True, False, False, True, False, False]
     out = capsys.readouterr().out
     assert "live trades the futures of nfl, not of crypto" in out and "paper trades the games, matches, races, and windows" in out
+
+
+def test_in_the_in_play_test_live_is_offered_games_too_and_paper_twins_each_trade_it_takes(tmp_path, monkeypatch, capsys, fake_stream):
+    monkeypatch.setattr(money_live, "READERS", {"kalshi": lambda: (800.0, {}), "polymarket_us": lambda: (600.0, {})})
+    monkeypatch.setattr(trading_live, "POSITIONS", {"kalshi": lambda: {}, "polymarket_us": lambda: {}})
+    monkeypatch.setattr(notify, "EMAIL_FILE", tmp_path / "email.json")
+    with pytest.raises(ValueError, match="needs both desks"):
+        session(tmp_path, monkeypatch, fake_stream, executors=("live",), live_in_play=True)
+
+    async def scenario():
+        s = session(tmp_path, monkeypatch, fake_stream, executors=run.EXECUTE["both"], live_in_play=True)
+        s.start()
+        live, paper = s.desks
+        offered = []
+
+        def live_signal(pair, yes, no, edge, size, fee_infos, now):     # Takes the game, as the in-play test would.
+            offered.append(("live", pair["game_date"]))
+            if pair["game_date"]:
+                database.insert_twin(s.conn, 41)
+                live.executor.twins[pair["id"]] = (now, yes, no, types.SimpleNamespace(id=41), ["legs"])
+            return True
+        live.executor.signal = live_signal
+        paper.executor.signal = lambda pair, *args: offered.append(("paper", pair["game_date"])) or True
+        paper.executor.twin = lambda pair, yes, no, trade, legs, now: offered.append(("twin", trade.id, legs)) or types.SimpleNamespace(id=42)
+        game, future = {"id": 1, "sport": "nfl", "game_date": "2026-10-11"}, {"id": 2, "sport": "nfl", "game_date": None}
+        results = [desk.signal(pair, "y", "n", 0.1, 5, {}, "now") for pair in (game, future) for desk in s.desks]
+        results.append(paper.signal(game, "y", "n", 0.1, 5, {}, "later"))           # Live took nothing then.
+        twins = [tuple(r) for r in s.conn.execute("SELECT * FROM twins")]
+        await s.close()
+        return s, offered, results, twins
+    s, offered, results, twins = asyncio.run(scenario())
+    assert s.desks[0].markets is None and s.desks[0].executor.in_play_test and s.desks[1].twins is s.desks[0].executor
+    assert s.desks[0].executor.footprints is s.desks[1].executor.footprints is not None
+    # Paper sends the twin of live's trade on the game in place of its own, and trades the game itself when live did not.
+    assert offered == [("live", "2026-10-11"), ("twin", 41, ["legs"]), ("live", None), ("paper", "2026-10-11")]
+    assert results == [True, True, True, False, True] and twins == [(41, 42)]
+    assert "live in-play test: live also trades the games, matches, races, and windows under way that pay within 24h, at most " \
+           "5 contracts a trade, for 100 trades, 0 taken so far, each with a paper twin on the same signal" in capsys.readouterr().out
+
+
+def test_the_in_play_test_needs_both_desks_on_the_command_line():
+    import subprocess, sys
+    from pathlib import Path
+    src = Path(run.__file__).resolve().parents[1]
+    done = subprocess.run([sys.executable, "-m", "engine.run", "--live-in-play", "--execute", "live"], cwd=src, capture_output=True,
+                          text=True, timeout=60)
+    assert done.returncode == 2 and "--live-in-play needs --execute both, scanning and trading" in done.stderr
 
 
 def test_bitcoins_catalog_is_refreshed_once_a_window_has_opened_and_been_listed():
