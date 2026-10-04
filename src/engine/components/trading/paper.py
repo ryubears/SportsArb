@@ -18,7 +18,7 @@ on the books we had seen by then, as live trading would, with a sale that
 meets the venue's book when it would arrive. Without tapes, as in tests,
 an order fills against our newest book when it would arrive.
 
-Until 2026-10-05 an order filled against our newest book a drawn 50 or
+Until 2026-10-04 an order filled against our newest book a drawn 50 or
 60 ms after the signal. For Polymarket US that was the venue's book of
 some 20 ms before the signal, while a live order met the one of some 60
 ms after, so paper missed the changes in between, when edges go.

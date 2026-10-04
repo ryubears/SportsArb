@@ -196,7 +196,7 @@ def print_opportunities(conn, since, hours, sports, modes=("paper", "live")):
     Capital is what buying every contract fillable at that edge through its longest stretch at it would have cost with
     fees, and profit what it locks in. The annual rates weight each episode by its capital, over the days until it pays.
     How long the edge stayed at config.MIN_EDGE or more is the longest unbroken stretch of each episode, in seconds to
-    the thousandth. Episodes before 2026-10-05 kept their stretch at 5 cents, the minimum then.
+    the thousandth. Episodes before 2026-10-04 16:03 UTC kept their stretch at 5 cents, the minimum then.
     """
     for mode in modes:
         print_mode_opportunities(conn, since, hours, sports, mode)

@@ -15,7 +15,7 @@ Override one for a run with --set, for example:
 # TRADING, trading/executor.py
 
 MIN_EDGE = 0.02             # Net dollars per contract at the top before orders are sent, and the floor for the deeper levels they sweep.
-                            # Five cents to 2026-10-05. MIN_ANNUAL_PCT weighs an edge against the time it ties the money up, so this
+                            # Five cents to 2026-10-04. MIN_ANNUAL_PCT weighs an edge against the time it ties the money up, so this
                             # floor only keeps out the noise of an edge of a cent or so.
 MIN_PAYOUT_HOURS = 24       # The soonest a bet live trades may pay out, so it trades no game once it is near or under way. There the
                             # fast traders take an edge before our Polymarket US leg lands, and the leg is missed.

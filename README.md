@@ -517,7 +517,7 @@ before our Polymarket US order lands, and the leg is missed. Paper trades
 the bets on one event (`in_play`), before and while they are played, that
 pay within 24 hours (`PAPER_MAX_PAYOUT_HOURS`), to see how they would do.
 A signal needs a net edge of at least two cents per contract (`MIN_EDGE`,
-five until 2026-10-05), for live a payout at least 24 hours away
+five until 2026-10-04 16:03 UTC), for live a payout at least 24 hours away
 (`MIN_PAYOUT_HOURS`), and a return of at least 50% a year on the money it
 ties up until then (`MIN_ANNUAL_PCT`), which is what weighs an edge
 against the time it ties the money up; the two cents only keep out the
@@ -704,9 +704,9 @@ on a future paying `MIN_PAYOUT_HOURS` or more out: what they could have
 taken and locked in at full size, how long the edge stayed at `MIN_EDGE`
 or more, in seconds to the thousandth, at the median, the 90th percentile,
 and the longest, the same by sport and kind, and the largest five. Episodes
-before 2026-10-05 kept that stretch at five cents. It then shows the trades
-by outcome, filled, partial, then failed, and by sport and kind in the
-window, the legs settled in it by venue, and
+before 2026-10-04 16:03 UTC kept that stretch at five cents. It then shows
+the trades by outcome, filled, partial, then failed, and by sport and kind
+in the window, the legs settled in it by venue, and
 the open trades: in a few lines, how many, how many of them opened in the
 last hour, day, and week and the capital those still hold, the capital
 they all hold on each venue and the profit they are expected to return
@@ -979,7 +979,7 @@ ms later, and a Polymarket US one 59 ms after, its median hour by hour from
 34 to 79, and answered 31 later. A Polymarket US order met the venue's book
 of some 60 ms after the signal, while paper read the venue's book of some
 20 ms before it, our copy being some 85 ms behind, so paper missed the very
-changes an edge goes in. From October 5 paper keeps every book of the
+changes an edge goes in. From October 4 paper keeps every book of the
 contracts its orders are in flight on, and an order meets the one the venue
 had when it would have arrived, once a later one shows nothing is still on
 its way. The same day the minimum edge went from five cents to two, the
