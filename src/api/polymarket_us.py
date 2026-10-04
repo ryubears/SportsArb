@@ -103,8 +103,9 @@ def is_game(event):
 
 def contracts(sport, tags):
     """
-    One Contract per open market on events carrying one of the tag slugs.
-    The contract is the market's long side, which is Yes, Over, or the away team.
+    One Contract per open market on events carrying one of the tag slugs,
+    bar a game's, which are not cataloged. The contract is the market's
+    long side, which is Yes or Over.
     """
     result, seen_events = [], set()
     for event in (e for tag in tags for e in fetch_events(tag)):
@@ -112,10 +113,10 @@ def contracts(sport, tags):
             continue
         seen_events.add(event["slug"])
         for m in event.get("markets", []):
-            if m.get("closed"):
+            future = m.get("sportsMarketType") == "futures"
+            if m.get("closed") or (is_game(event) and not future):     # Games are not cataloged, only futures.
                 continue
             long_side = next((s for s in m.get("marketSides", []) if s.get("long")), {})
-            future = m.get("sportsMarketType") == "futures"
             result.append(Contract(
                 venue="polymarket_us",
                 contract_id=m["slug"],
@@ -130,7 +131,7 @@ def contracts(sport, tags):
                 market_type=m.get("sportsMarketType"),
                 line=float_or_none(m.get("line")),
                 rules=m.get("description"),
-                start_time=iso(event.get("startTime")) if is_game(event) and not future else None,
+                start_time=None,        # A future has no kickoff: an award's event carries a sports data id like a game's.
                 # A future's market stays open two weeks past its event in case the event moves. The event's end is when it
                 # is expected to settle, which the payout time and how long it is recorded go by.
                 close_time=iso((event.get("endDate") if future else None) or m.get("endDate")),

@@ -4,3 +4,4 @@
 testpaths = ["tests"]
 pythonpath = ["src", "tests/support"]     # Tests import modules the same way the scripts do from src/, and share helpers from tests/support/.
 addopts = "-q --import-mode=importlib"    # By path, so test files with the same name in different folders do not collide.
+markers = ["full_share: a trading test that runs with the configured FILL_SHARE, not the half the others were written for"]

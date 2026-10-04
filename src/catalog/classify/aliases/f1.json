@@ -1,0 +1,6 @@
+{
+  "FER": {"names": ["Ferrari"], "codes": {"kalshi": ["FER"], "polymarket_us": ["fer"]}},
+  "MCL": {"names": ["McLaren"], "codes": {"kalshi": ["MCL"], "polymarket_us": ["mcla"]}},
+  "MER": {"names": ["Mercedes AMG Motorsport"], "codes": {"kalshi": ["MER"], "polymarket_us": ["merce"]}},
+  "RED": {"names": ["Red Bull Racing"], "codes": {"kalshi": ["RED"], "polymarket_us": ["rbr"]}}
+}

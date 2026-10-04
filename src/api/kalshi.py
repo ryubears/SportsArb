@@ -1,9 +1,9 @@
 """
 Kalshi API client.
 
-Three jobs. The query half walks sports series to events to markets on
-the public API, turns every open market into a Contract, and reads the
-account's balance. The streaming half opens one websocket with a signed
+Three jobs. The query half walks series to events to markets on the
+public API, sports' and elections', turns every open market into a
+Contract, and reads the account's balance. The streaming half opens one websocket with a signed
 API key, subscribes to order book updates, and keeps a live book for each
 ticker restated from the Yes side so it matches Polymarket US's shape.
 Tickers can be added and removed while the connection runs. The trading
@@ -37,6 +37,7 @@ WS_PATH = "/trade-api/ws/v2"
 KEY_ID_FILE = DATA_DIR / "kalshi_key_id.txt"
 PRIVATE_KEY_FILE = DATA_DIR / "kalshi_private_key.pem"
 RESULTS_BATCH = 50   # Tickers per markets call when looking up results.
+SERIES_SECONDS = 600    # How long the list of every series is kept, so one catalog refresh of many sports reads it once.
 # The error of an order whose market's exchange shard lacks the cash, which Kalshi moving cash between shards may cause
 # between two of our readings. Nothing traded, so it counts as unfilled rather than refused.
 SHORT_SHARD = "insufficient_shard_balance"
@@ -105,12 +106,24 @@ def paged(path, params, key):
         time.sleep(SLEEP)
 
 
-def fetch_series(tickers):
+_series = {"at": None, "list": []}    # Every series, and when it was read.
+
+
+def all_series():
     """
-    The sports series with the tickers, with their fee settings.
+    Every series on the exchange, of every category, read again once it is SERIES_SECONDS old. Some 15,000, read in 75
+    pages, so a refresh of twenty sports reads them once rather than twenty times.
     """
-    all_series = paged("/series", {"category": "Sports", "limit": 200}, "series")
-    return [s for s in all_series if s["ticker"] in tickers]
+    if _series["at"] is None or time.time() - _series["at"] > SERIES_SECONDS:
+        _series["list"], _series["at"] = paged("/series", {"limit": 200}, "series"), time.time()
+    return _series["list"]
+
+
+def fetch_series(tickers, patterns=()):
+    """
+    The series with the tickers, or whose tickers match one of the compiled patterns, with their fee settings.
+    """
+    return [s for s in all_series() if s["ticker"] in tickers or any(p.match(s["ticker"]) for p in patterns)]
 
 
 def fetch_events(series_ticker):
@@ -148,12 +161,12 @@ def strict_line(m):
     return line
 
 
-def contracts(sport, tickers):
+def contracts(sport, tickers, patterns=()):
     """
-    One Contract per open market of the series with the tickers, meaning its Yes side.
+    One Contract per open market of the series with the tickers or matching the patterns, meaning its Yes side.
     """
     result = []
-    for series in fetch_series(tickers):
+    for series in fetch_series(tickers, patterns):
         fee_info = {
             "fee_type": series.get("fee_type"),
             "fee_multiplier": series.get("fee_multiplier"),

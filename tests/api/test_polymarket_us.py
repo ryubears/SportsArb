@@ -112,7 +112,7 @@ def fake_api(monkeypatch, answers):
     return calls
 
 
-def test_a_game_gives_its_start_time_with_either_game_id_and_a_future_never(monkeypatch):
+def test_a_games_markets_are_left_out_by_either_game_id_and_a_future_has_no_start_time(monkeypatch):
     def event(slug, **ids):
         return {"slug": slug, "startTime": "2026-09-29T21:00:00Z", "markets": [{"slug": f"aec-{slug}", "id": 1}], **ids}
     events = [event("nfl-pit-cle-2026-10-01", gameId=19503, sportradarGameId="a"),
@@ -124,9 +124,7 @@ def test_a_game_gives_its_start_time_with_either_game_id_and_a_future_never(monk
     events[-1]["endDate"] = "2027-06-09T23:59:00Z"
     monkeypatch.setattr(polymarket_us, "fetch_events", lambda tag: events)
     found = {c.event_id: c for c in polymarket_us.contracts("nhl", ["nhl"])}
-    assert {event: c.start_time for event, c in found.items()} == {
-        "nfl-pit-cle-2026-10-01": "2026-09-29T21:00:00+00:00", "nhl-fla-car-2026-09-29": "2026-09-29T21:00:00+00:00",
-        "nhl-champ-2027-06-18-w": None, "nhl-hart-2027-06-09-w": None}
+    assert {event: c.start_time for event, c in found.items()} == {"nhl-champ-2027-06-18-w": None, "nhl-hart-2027-06-09-w": None}
     assert found["nhl-hart-2027-06-09-w"].title == "Connor McDavid"         # A future's title is its player, not the event's question.
     assert found["nhl-hart-2027-06-09-w"].close_time == "2027-06-09T23:59:00+00:00"   # The award, not the market's two weeks after.
 

@@ -1,0 +1,20 @@
+{
+  "BMG": {"names": ["M'gladbach", "Borussia Mönchengladbach"], "codes": {"kalshi": ["BMG"], "polymarket_us": ["bmg"]}},
+  "BMU": {"names": ["Bayern Munich", "FC Bayern München"], "codes": {"kalshi": ["BMU"], "polymarket_us": ["fcb"]}},
+  "BVB": {"names": ["Dortmund", "BV Borussia 09 Dortmund"], "codes": {"kalshi": ["BVB"], "polymarket_us": ["bvb"]}},
+  "FCA": {"names": ["Augsburg", "FC Augsburg"], "codes": {"kalshi": ["FCA"], "polymarket_us": ["aug"]}},
+  "HSV": {"names": ["Hamburg", "Hamburger SV"], "codes": {"kalshi": ["HSV"], "polymarket_us": ["hsv"]}},
+  "KOE": {"names": ["FC Cologne", "FC Köln"], "codes": {"kalshi": ["KOE"], "polymarket_us": ["koe"]}},
+  "LEV": {"names": ["Leverkusen", "Bayer 04 Leverkusen"], "codes": {"kalshi": ["LEV"], "polymarket_us": ["lev"]}},
+  "M05": {"names": ["Mainz", "FSV Mainz 05"], "codes": {"kalshi": ["M05"], "polymarket_us": ["mai"]}},
+  "PAD": {"names": ["Paderborn", "SC Paderborn 07"], "codes": {"kalshi": ["PAD"], "polymarket_us": ["scp"]}},
+  "RBL": {"names": ["Leipzig", "RB Leipzig"], "codes": {"kalshi": ["RBL"], "polymarket_us": ["rbl"]}},
+  "SCF": {"names": ["Freiburg", "SC Freiburg"], "codes": {"kalshi": ["SCF"], "polymarket_us": ["scf"]}},
+  "SCH": {"names": ["Schalke", "FC Schalke 04"], "codes": {"kalshi": ["SCH"], "polymarket_us": ["s04"]}},
+  "SGE": {"names": ["Frankfurt", "Eintracht Frankfurt"], "codes": {"kalshi": ["SGE"], "polymarket_us": ["fra"]}},
+  "SVE": {"names": ["Elversberg", "SV 07 Elversberg"], "codes": {"kalshi": ["SVE"], "polymarket_us": ["elv"]}},
+  "SVW": {"names": ["Bremen", "SV Werder Bremen"], "codes": {"kalshi": ["SVW"], "polymarket_us": ["bre"]}},
+  "TSG": {"names": ["Hoffenheim", "TSG 1899 Hoffenheim"], "codes": {"kalshi": ["TSG"], "polymarket_us": ["hof"]}},
+  "UNI": {"names": ["Union Berlin", "FC Union Berlin"], "codes": {"kalshi": ["UNI"], "polymarket_us": ["unb"]}},
+  "VFB": {"names": ["Stuttgart", "VfB Stuttgart"], "codes": {"kalshi": ["VFB"], "polymarket_us": ["stu"]}}
+}

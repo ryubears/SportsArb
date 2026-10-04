@@ -22,44 +22,10 @@ def bet_fields(bet):
     return (bet.kind, bet.season, bet.game_date, bet.team_a, bet.team_b, bet.subject, bet.line, bet.polarity)
 
 
-def test_split_codes_handles_two_and_three_letter_codes():
-    assert kalshi.split_codes("CARATL", "nfl") == ("CAR", "ATL")
-    assert kalshi.split_codes("GBNYJ", "nfl") == ("GB", "NYJ")
-    assert kalshi.split_codes("LACBUF", "nfl") == ("LAC", "BUF")
-    assert kalshi.split_codes("LVLAC", "nfl") == ("LV", "LAC")
-    assert kalshi.split_codes("NEJAC", "nfl") == ("NE", "JAX")
-    assert kalshi.split_codes("XXYY", "nfl") == (None, None)
-
-
-def test_split_codes_takes_college_codes_of_any_length_and_refuses_to_guess():
-    assert kalshi.split_codes("WKUNMSU", "ncaaf") == ("WKU", "NMSU")
-    assert kalshi.split_codes("BCSMU", "ncaaf") == ("BC", "SMU")
-    assert kalshi.split_codes("UTRGVETAM", "ncaaf") == ("UTRGV", "ETAM")
-    assert kalshi.split_codes("TCUND", "ncaaf") == (None, None)     # TCU and Notre Dame, or Tusculum and North Dakota.
-    assert kalshi.split_codes("CARATL", "ncaaf") == (None, None)    # NFL codes mean nothing in college football.
-
-
-def test_game_kinds():
-    winner = kalshi.classify(row("KXNFLGAME", "KXNFLGAME-26SEP20CARATL", "KXNFLGAME-26SEP20CARATL-ATL"))
-    spread = kalshi.classify(row("KXNFLSPREAD", "KXNFLSPREAD-26SEP20CARATL", "KXNFLSPREAD-26SEP20CARATL-ATL5", line=4.5))
-    total = kalshi.classify(row("KXNFLTOTAL", "KXNFLTOTAL-26SEP20CARATL", "KXNFLTOTAL-26SEP20CARATL-27", line=26.5))
-    assert bet_fields(winner) == ("game_winner", 2027, "2026-09-20", "CAR", "ATL", "CAR", None, "no")
-    assert bet_fields(spread) == ("spread", 2027, "2026-09-20", "CAR", "ATL", "ATL", 4.5, "yes")
-    assert bet_fields(total) == ("total", 2027, "2026-09-20", "CAR", "ATL", None, 26.5, "yes")
-
-
-def test_game_with_two_letter_codes():
-    bet = kalshi.classify(row("KXNFLGAME", "KXNFLGAME-26SEP24ATLGB", "KXNFLGAME-26SEP24ATLGB-GB"))
-    assert (bet.game_date, bet.team_a, bet.team_b, bet.subject, bet.polarity) == ("2026-09-24", "ATL", "GB", "ATL", "no")
-
-
-def test_college_games_read_like_the_nfls():
-    winner = kalshi.classify(row("KXNCAAFGAME", "KXNCAAFGAME-26OCT01WKUNMSU", "KXNCAAFGAME-26OCT01WKUNMSU-NMSU", sport="ncaaf"))
-    spread = kalshi.classify(row("KXNCAAFSPREAD", "KXNCAAFSPREAD-26OCT03BCSMU", "KXNCAAFSPREAD-26OCT03BCSMU-SMU10", sport="ncaaf", line=9.5))
-    total = kalshi.classify(row("KXNCAAFTOTAL", "KXNCAAFTOTAL-26OCT03BCSMU", "KXNCAAFTOTAL-26OCT03BCSMU-44", sport="ncaaf", line=43.5))
-    assert bet_fields(winner) == ("game_winner", 2027, "2026-10-01", "WKU", "NMSU", "WKU", None, "no")
-    assert bet_fields(spread) == ("spread", 2027, "2026-10-03", "BC", "SMU", "SMU", 9.5, "yes")
-    assert bet_fields(total) == ("total", 2027, "2026-10-03", "BC", "SMU", None, 43.5, "yes")
+def test_split_codes_handles_codes_of_any_length_and_refuses_to_guess():
+    assert kalshi.split_codes("PHIATL", "mlb") == ("PHI", "ATL")
+    assert kalshi.split_codes("SDMIL", "mlb") == ("SD", "MIL")
+    assert kalshi.split_codes("XXYY", "mlb") == (None, None)
 
 
 def future(series, event, ticker, close, **fields):
@@ -104,114 +70,81 @@ def test_season_totals_name_the_team_from_the_event_and_keep_the_strict_line():
     assert bet_fields(points) == ("season_points", 2027, None, None, None, "ANA", 69.5, "yes")
 
 
-def test_skips_unknown_series_and_missing_lines_and_settlement_times():
+def test_skips_games_unknown_series_and_missing_lines_and_settlement_times():
+    assert kalshi.classify(row("KXNFLGAME", "KXNFLGAME-26SEP20CARATL", "KXNFLGAME-26SEP20CARATL-ATL")) is None
     assert kalshi.classify(row("KXNFLRECYDS", "KXNFLRECYDS-26SEP20", "KXNFLRECYDS-26SEP20-X")) is None
     assert future("KXNFLWINS", "KXNFLWINS-27BUF", "KXNFLWINS-27BUF-10", "2027-01-18T05:00:00+00:00") is None
     assert kalshi.classify(row("KXSB", "KXSB-27", "KXSB-27-KC")) is None       # No close time, so no season.
     assert future("KXSB", "KXSB-27", "KXSB-27-XYZ", "2027-02-14T23:30:00+00:00") is None
 
 
-def test_player_props_name_the_player_and_keep_the_strict_line():
-    yards = kalshi.classify(row("KXNFLRECYDS", "KXNFLRECYDS-26SEP24ATLGB", "KXNFLRECYDS-26SEP24ATLGB-ATLBROBINSON7-100",
-                                title="Bijan Robinson: 100+ receiving yards", line=99.5))
-    first = kalshi.classify(row("KXNFLFIRSTTD", "KXNFLFIRSTTD-26SEP24ATLGB", "KXNFLFIRSTTD-26SEP24ATLGB-ATLBROBINSON7",
-                                title="Bijan Robinson: 1st Touchdown"))
-    senior = kalshi.classify(row("KXNFLRSHYDS", "KXNFLRSHYDS-26SEP24ATLGB", "KXNFLRSHYDS-26SEP24ATLGB-GBAJONES33-40",
-                                 title="Aaron Jones Sr.: 40+ rushing yards", line=39.5))
-    assert bet_fields(yards) == ("player_receiving_yards", 2027, "2026-09-24", "ATL", "GB", "bijan robinson", 99.5, "yes")
-    assert bet_fields(first) == ("player_first_touchdown", 2027, "2026-09-24", "ATL", "GB", "bijan robinson", None, "yes")
-    assert (senior.subject, senior.line) == ("aaron jones", 39.5)
+def test_leaders_and_title_holders_name_the_person_and_their_event_the_stat():
+    yards = future("KXLEADERNFLRYDS", "KXLEADERNFLRYDS-27", "KXLEADERNFLRYDS-27-JSMITHNJIGBA11", "2027-02-01T15:00:00+00:00",
+                   outcome="Jaxon Smith-Njigba")
+    boot = future("KXEPLLEADER", "KXEPLLEADER-27GOAL", "KXEPLLEADER-27GOAL-EHAALA9", "2027-06-01T15:00:00+00:00", sport="epl",
+                  outcome="Erling Haaland")
+    sec = future("KXNCAAFSECLEADER", "KXNCAAFSECLEADER-26PASSYDS", "KXNCAAFSECLEADER-26PASSYDS-MISSTCHA", "2026-12-31T15:00:00+00:00",
+                 sport="ncaaf", outcome="Trinidad Chambliss")
+    homers = future("KXMLBLEADERPLAYOFF", "KXMLBLEADERPLAYOFF-26HR", "KXMLBLEADERPLAYOFF-26HR-KTUCKER30", "2026-12-01T15:00:00+00:00",
+                    sport="mlb", outcome="Kyle Tucker")
+    ufc = future("KXUFCLHEAVYWEIGHTTITLE", "KXUFCLHEAVYWEIGHTTITLE-26", "KXUFCLHEAVYWEIGHTTITLE-26-CULB", "2026-12-31T17:00:00+00:00",
+                 sport="ufc", outcome="Carlos Ulberg")
+    f1 = future("KXF1", "KXF1-26", "KXF1-26-KA", "2026-12-08T15:00:00+00:00", sport="f1", outcome="Andrea Kimi Antonelli")
+    assert bet_fields(yards) == ("receiving_yards_leader", 2027, None, None, None, "jaxon smith njigba", None, "yes")
+    assert (boot.kind, boot.subject) == ("goals_leader", "erling haaland")
+    assert (sec.kind, sec.season) == ("sec_passing_yards_leader", 2027)
+    assert (homers.kind, homers.season) == ("postseason_home_runs_leader", 2026)
+    assert (ufc.kind, ufc.season, f1.kind, f1.subject) == ("light_heavyweight_champion", 2027, "drivers_champion", "kimi antonelli")
+    assert future("KXUFCHEAVYWEIGHTTITLE", "KXUFCHEAVYWEIGHTTITLE-26", "KXUFCHEAVYWEIGHTTITLE-26-VAC", "2026-12-31T17:00:00+00:00",
+                  sport="ufc", outcome="Vacant") is None
+    assert future("KXEPLLEADER", "KXEPLLEADER-27SAVES", "KXEPLLEADER-27SAVES-X", "2027-06-01T15:00:00+00:00", sport="epl",
+                  outcome="David Raya") is None       # An event key the table does not have.
 
 
-def test_player_props_skip_team_units_and_missing_lines():
-    assert kalshi.classify(row("KXNFLTD", "KXNFLTD-26SEP24ATLGB", "KXNFLTD-26SEP24ATLGB-ATLATLDST-1", title="ATL Falcons D/ST: 1+ touchdowns", line=0.5)) is None
-    assert kalshi.classify(row("KXNFLRECYDS", "KXNFLRECYDS-26SEP24ATLGB", "KXNFLRECYDS-26SEP24ATLGB-ATLBROBINSON7-100",
-                               title="Bijan Robinson: 100+ receiving yards")) is None
+def test_a_players_season_total_keeps_the_strict_line():
+    yards = future("KXNFLSEASONRECYDS", "KXNFLSEASONRECYDS-27C1000", "KXNFLSEASONRECYDS-27C1000-JCHASE1", "2027-01-31T15:00:00+00:00",
+                   outcome="Ja'Marr Chase", line=999.5)
+    assert bet_fields(yards) == ("season_receiving_yards", 2027, None, None, None, "jamarr chase", 999.5, "yes")
 
 
-def mlb(series, event, ticker, **fields):
-    return kalshi.classify(row(series, event, ticker, sport="mlb", **fields))
+def test_team_futures_by_their_event_and_the_teams_new_leagues():
+    top4 = future("KXEPLTOP", "KXEPLTOP-27TOP4", "KXEPLTOP-27TOP4-MCI", "2027-06-14T15:00:00+00:00", sport="epl")
+    points = future("KXEPLTEAMPOINTS", "KXEPLTEAMPOINTS-27", "KXEPLTEAMPOINTS-27-ARS70", "2027-05-30T15:00:00+00:00", sport="epl", line=69.5)
+    final = future("KXUCLROUND", "KXUCLROUND-27FINAL", "KXUCLROUND-27FINAL-MCI", "2027-05-06T15:00:00+00:00", sport="ucl")
+    apertura = future("KXLIGAMX", "KXLIGAMX-27APER", "KXLIGAMX-27APER-TOL", "2027-01-02T15:00:00+00:00", sport="ligamx")
+    worst = future("KXNBARECORD", "KXNBARECORD-27WORST", "KXNBARECORD-27WORST-WAS", "2027-05-01T15:00:00+00:00", sport="nba")
+    conference = future("KXNCAAFCONF", "KXNCAAFCONF-26", "KXNCAAFCONF-26-B10", "2027-02-01T15:00:00+00:00", sport="ncaaf")
+    assert bet_fields(top4) == ("top_4", 2027, None, None, None, "MCI", None, "yes")
+    assert (points.kind, points.subject, points.line) == ("season_points", "ARS", 69.5)
+    assert (final.kind, final.subject, apertura.kind, apertura.subject) == ("reach_final", "MCI", "apertura_champion", "TOL")
+    assert (worst.kind, worst.subject, conference.kind, conference.subject) == ("worst_record", "WAS", "champion_conference", "big_ten")
+    plzen = future("KXUEL", "KXUEL-27", "KXUEL-27-VIK", "2027-05-26T15:00:00+00:00", sport="uel")
+    viking = future("KXUCL", "KXUCL-27", "KXUCL-27-VIK", "2027-06-05T15:00:00+00:00", sport="ucl")
+    assert (plzen.subject, viking.subject) == ("VIK", "VIK")      # One code, a team in each competition's own aliases.
+    assert future("KXNCAAFCONF", "KXNCAAFCONF-26", "KXNCAAFCONF-26-OTHER", "2027-02-01T15:00:00+00:00", sport="ncaaf") is None
 
 
-def test_baseball_tickers_carry_the_start_time_and_read_like_footballs():
-    event = "26SEP291400PHIATL"
-    winner = mlb("KXMLBGAME", f"KXMLBGAME-{event}", f"KXMLBGAME-{event}-ATL")
-    spread = mlb("KXMLBSPREAD", f"KXMLBSPREAD-{event}", f"KXMLBSPREAD-{event}-ATL4", line=3.5)
-    total = mlb("KXMLBTOTAL", f"KXMLBTOTAL-{event}", f"KXMLBTOTAL-{event}-2", line=1.5)
-    team_total = mlb("KXMLBTEAMTOTAL", f"KXMLBTEAMTOTAL-{event}", f"KXMLBTEAMTOTAL-{event}-ATL2", line=1.5)
-    assert bet_fields(winner) == ("game_winner", 2026, "2026-09-29", "PHI", "ATL", "PHI", None, "no")     # Atlanta winning is Philadelphia not.
-    assert bet_fields(spread) == ("spread", 2026, "2026-09-29", "PHI", "ATL", "ATL", 3.5, "yes")
-    assert bet_fields(total) == ("total", 2026, "2026-09-29", "PHI", "ATL", None, 1.5, "yes")
-    assert bet_fields(team_total) == ("team_total", 2026, "2026-09-29", "PHI", "ATL", "ATL", 1.5, "yes")
+def election(series, event, ticker, outcome=""):
+    return kalshi.classify(row(series, event, ticker, sport="politics", outcome=outcome))
 
 
-def test_baseball_player_props_name_the_player_and_keep_the_strict_line():
-    hits = mlb("KXMLBHIT", "KXMLBHIT-26SEP291400PHIATL", "KXMLBHIT-26SEP291400PHIATL-PHIBHARPER3-1", title="Bryce Harper: 1+ hits?", line=0.5)
-    strikeouts = mlb("KXMLBKS", "KXMLBKS-26SEP291400PHIATL", "KXMLBKS-26SEP291400PHIATL-ATLCSALE51-4", title="Chris Sale: 4+ strikeouts?", line=3.5)
-    accent = mlb("KXMLBHR", "KXMLBHR-26SEP292000BOSNYY", "KXMLBHR-26SEP292000BOSNYY-NYYJPENA3-1", title="Jeremy Peña: 1+ home runs?", line=0.5)
-    assert bet_fields(hits) == ("player_hits", 2026, "2026-09-29", "PHI", "ATL", "bryce harper", 0.5, "yes")
-    assert bet_fields(strikeouts) == ("player_strikeouts", 2026, "2026-09-29", "PHI", "ATL", "chris sale", 3.5, "yes")
-    assert accent.subject == "jeremy pena"
+def test_elections_name_the_race_and_the_party_or_candidate():
+    house = election("CONTROLH", "CONTROLH-2026", "CONTROLH-2026-D", "Democratic Party")
+    senate = election("SENATEGA", "SENATEGA-26", "SENATEGA-26-R", "Mike Collins")
+    osborn = election("SENATENE", "SENATENE-26", "SENATENE-26-DOSB", "Dan Osborn")
+    seat = election("HOUSEAZ1", "HOUSEAZ1-26", "HOUSEAZ1-26-D", "Amish Shah")
+    race = election("KXHOUSERACE", "KXHOUSERACE-NY17-26", "KXHOUSERACE-NY17-26-R", "Mike Lawler")
+    at_large = election("KXHOUSERACE", "KXHOUSERACE-WYAL-26", "KXHOUSERACE-WYAL-26-R", "Chuck Gray")
+    governor = election("GOVPARTYMI", "GOVPARTYMI-26", "GOVPARTYMI-26-MD", "Mike Duggan")
+    assert bet_fields(house) == ("house_control", 2026, None, None, None, "D", None, "yes")
+    assert (senate.kind, senate.season, senate.subject) == ("senate_race", 2026, "GA R")
+    assert (osborn.subject, seat.subject, race.subject, at_large.subject) == ("NE dan osborn", "AZ-01 D", "NY-17 R", "WY-AL R")
+    assert (governor.kind, governor.subject) == ("governor_race", "MI mike duggan")
+    assert election("SENATEGA", "SENATEGA-28", "SENATEGA-28-D").season == 2028
 
 
-def nhl(series, event, ticker, **fields):
-    return kalshi.classify(row(series, event, ticker, sport="nhl", **fields))
-
-
-def test_hockey_tickers_read_like_footballs_and_its_two_letter_codes_name_the_nhls_teams():
-    event = "26SEP29FLACAR"
-    winner = nhl("KXNHLGAME", f"KXNHLGAME-{event}", f"KXNHLGAME-{event}-CAR")
-    spread = nhl("KXNHLSPREAD", f"KXNHLSPREAD-{event}", f"KXNHLSPREAD-{event}-CAR2", line=1.5)
-    total = nhl("KXNHLTOTAL", f"KXNHLTOTAL-{event}", f"KXNHLTOTAL-{event}-3", line=2.5)
-    team_total = nhl("KXNHLTEAMTOTAL", f"KXNHLTEAMTOTAL-{event}", f"KXNHLTEAMTOTAL-{event}-FLA2", line=1.5)
-    kings = nhl("KXNHLGAME", "KXNHLGAME-26OCT03LASJ", "KXNHLGAME-26OCT03LASJ-LA")
-    # A season runs October to June, so a game from August on is in the season that ends the next year, as in football.
-    assert bet_fields(winner) == ("game_winner", 2027, "2026-09-29", "FLA", "CAR", "FLA", None, "no")     # Carolina winning is Florida not.
-    assert bet_fields(spread) == ("spread", 2027, "2026-09-29", "FLA", "CAR", "CAR", 1.5, "yes")
-    assert bet_fields(total) == ("total", 2027, "2026-09-29", "FLA", "CAR", None, 2.5, "yes")
-    assert bet_fields(team_total) == ("team_total", 2027, "2026-09-29", "FLA", "CAR", "FLA", 1.5, "yes")
-    assert bet_fields(kings) == ("game_winner", 2027, "2026-10-03", "LAK", "SJS", "LAK", None, "yes")
-    assert kalshi.split_codes("NJNYI", "nhl") == ("NJD", "NYI") and kalshi.split_codes("WSHTB", "nhl") == ("WSH", "TBL")
-
-
-def test_hockey_player_props_name_the_player_and_keep_the_strict_line():
-    goals = nhl("KXNHLGOAL", "KXNHLGOAL-26SEP29FLACAR", "KXNHLGOAL-26SEP29FLACAR-FLAABARKOV16-2", title="Aleksander Barkov: 2+ goals",
-                line=1.5)
-    points = nhl("KXNHLPTS", "KXNHLPTS-26SEP29FLACAR", "KXNHLPTS-26SEP29FLACAR-FLAAEKBLAD5-1", title="Aaron Ekblad: 1+ points", line=0.5)
-    assert bet_fields(goals) == ("player_goals", 2027, "2026-09-29", "FLA", "CAR", "aleksander barkov", 1.5, "yes")
-    assert bet_fields(points) == ("player_points", 2027, "2026-09-29", "FLA", "CAR", "aaron ekblad", 0.5, "yes")
-
-
-def nba(series, event, ticker, **fields):
-    return kalshi.classify(row(series, event, ticker, sport="nba", **fields))
-
-
-def test_basketball_tickers_read_like_footballs():
-    event = "26JUN13NYKSAS"                         # Game 5 of the 2026 finals, New York at San Antonio.
-    winner = nba("KXNBAGAME", f"KXNBAGAME-{event}", f"KXNBAGAME-{event}-SAS")
-    spread = nba("KXNBASPREAD", f"KXNBASPREAD-{event}", f"KXNBASPREAD-{event}-SAS31", line=31.5)
-    total = nba("KXNBATOTAL", f"KXNBATOTAL-{event}", f"KXNBATOTAL-{event}-172", line=172.5)
-    team_total = nba("KXNBATEAMTOTAL", f"KXNBATEAMTOTAL-{event}", f"KXNBATEAMTOTAL-{event}-SAS124", line=124.5)
-    assert bet_fields(winner) == ("game_winner", 2026, "2026-06-13", "NYK", "SAS", "NYK", None, "no")     # San Antonio winning is New York not.
-    assert bet_fields(spread) == ("spread", 2026, "2026-06-13", "NYK", "SAS", "SAS", 31.5, "yes")
-    assert bet_fields(total) == ("total", 2026, "2026-06-13", "NYK", "SAS", None, 172.5, "yes")
-    assert bet_fields(team_total) == ("team_total", 2026, "2026-06-13", "NYK", "SAS", "SAS", 124.5, "yes")
-    opener = nba("KXNBAGAME", "KXNBAGAME-26OCT20BOSDET", "KXNBAGAME-26OCT20BOSDET-BOS")
-    assert (opener.season, opener.team_a, opener.team_b, opener.polarity) == (2027, "BOS", "DET", "yes")
-
-
-def test_basketball_player_props_name_the_player_and_keep_the_strict_line():
-    event = "26JUN13NYKSAS"
-    points = nba("KXNBAPTS", f"KXNBAPTS-{event}", f"KXNBAPTS-{event}-SASVWEMBANYAMA1-40", title="Victor Wembanyama: 40+ points", line=39.5)
-    threes = nba("KXNBA3PT", f"KXNBA3PT-{event}", f"KXNBA3PT-{event}-NYKMMCBRIDE2-5", title="Miles McBride: 5+ threes", line=4.5)
-    assert bet_fields(points) == ("player_points", 2026, "2026-06-13", "NYK", "SAS", "victor wembanyama", 39.5, "yes")
-    assert bet_fields(threes) == ("player_threes", 2026, "2026-06-13", "NYK", "SAS", "miles mcbride", 4.5, "yes")
-
-
-def test_a_doubleheader_is_two_start_times_for_one_date_and_teams():
-    rows = [row("KXMLBGAME", "KXMLBGAME-26MAY231310STLCIN", "KXMLBGAME-26MAY231310STLCIN-STL", sport="mlb"),
-            row("KXMLBHIT", "KXMLBHIT-26MAY231840STLCIN", "KXMLBHIT-26MAY231840STLCIN-STLNARENADO28-1", sport="mlb"),
-            row("KXMLBGAME", "KXMLBGAME-26SEP291400PHIATL", "KXMLBGAME-26SEP291400PHIATL-PHI", sport="mlb"),
-            row("KXMLBHIT", "KXMLBHIT-26SEP291400PHIATL", "KXMLBHIT-26SEP291400PHIATL-PHIBHARPER3-1", sport="mlb"),
-            row("KXNFLGAME", "KXNFLGAME-26SEP20CARATL", "KXNFLGAME-26SEP20CARATL-CAR")]
-    assert kalshi.doubleheaders(rows) == {"KXMLBGAME-26MAY231310STLCIN-STL", "KXMLBHIT-26MAY231840STLCIN-STLNARENADO28-1"}
+def test_a_top_two_state_pairs_only_candidates():
+    assert election("KXHOUSERACE", "KXHOUSERACE-CA06-26", "KXHOUSERACE-CA06-26-R", "Republican party") is None
+    assert election("KXHOUSERACE", "KXHOUSERACE-CA06-26", "KXHOUSERACE-CA06-26-KKIL", "Kevin Kiley").subject == "CA-06 kevin kiley"
+    assert election("KXGOVAK", "KXGOVAK-26", "KXGOVAK-26-CBIS", "Click Bishop").subject == "AK click bishop"
+    assert election("SENATEXX", "SENATEXX-26", "SENATEXX-26-D") is None      # No such state.

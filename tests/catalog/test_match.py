@@ -81,41 +81,16 @@ def test_two_kalshi_contracts_alone_do_not_form_a_pair():
     assert pairs == [] and len(unmatched) == 2
 
 
-def test_player_props_pair_across_venues_and_carry_the_rules_note():
-    prop = dict(kind="player_receiving_yards", game_date="2026-09-24", team_a="ATL", team_b="GB", subject="bijan robinson", line=39.5)
-    pairs, unmatched = match.match([bet("kalshi", "k", **prop), bet("polymarket_us", "us", **prop),
-                                    bet("polymarket_us", "us50", **dict(prop, line=49.5))], "nfl")
-    assert len(pairs) == 1 and [b["contract_id"] for b in unmatched] == ["us50"]
-    assert pairs[0].label == "nfl player_receiving_yards 2026-09-24 ATL@GB bijan robinson 39.5"
-    assert notes.PLAYER_NOTES["nfl"] in pairs[0].flags
-
-
-def test_baseball_pairs_carry_baseballs_notes_not_footballs():
-    game = dict(game_date="2026-09-29", team_a="BOS", team_b="NYY", subject="BOS")
-    prop = dict(kind="player_strikeouts", game_date="2026-09-29", team_a="BOS", team_b="NYY", subject="payton tolle", line=4.5)
-    pairs, _ = match.match([bet("kalshi", "k", **game), bet("polymarket_us", "us", **game),
-                            bet("kalshi", "kp", **prop), bet("polymarket_us", "usp", **prop)], "mlb")
-    winner, strikeouts = sorted(pairs, key=lambda p: p.kind)
-    assert winner.flags == [notes.BASEBALL_POSTPONED] and strikeouts.flags == [notes.PLAYER_NOTES["mlb"]]
-
-
-def test_hockey_pairs_carry_hockeys_notes():
-    game = dict(game_date="2026-09-29", team_a="FLA", team_b="CAR")
-    spread = dict(game, kind="spread", subject="CAR", line=1.5)
-    prop = dict(game, kind="player_goals", subject="aleksander barkov", line=1.5)
-    pairs, _ = match.match([bet("kalshi", "k", subject="FLA", **game), bet("polymarket_us", "us", subject="FLA", **game),
-                            bet("kalshi", "ks", **spread), bet("polymarket_us", "uss", polarity="no", **spread),
-                            bet("kalshi", "kp", **prop), bet("polymarket_us", "usp", **prop)], "nhl")
-    winner, goals, covers = sorted(pairs, key=lambda p: p.kind)
-    assert winner.label == "nhl game_winner 2026-09-29 FLA@CAR FLA"
-    assert winner.flags == [notes.HOCKEY_NOTES["game_winner"]] and covers.flags == [notes.HOCKEY_GOALS]
-    assert goals.flags == [notes.PLAYER_NOTES["nhl"]]
-
-
-def test_basketball_pairs_carry_basketballs_notes():
-    game = dict(game_date="2026-06-13", team_a="NYK", team_b="SAS")
-    prop = dict(game, kind="player_points", subject="victor wembanyama", line=39.5)
-    pairs, _ = match.match([bet("kalshi", "k", subject="NYK", **game), bet("polymarket_us", "us", subject="NYK", **game),
-                            bet("kalshi", "kp", **prop), bet("polymarket_us", "usp", **prop)], "nba")
-    winner, points = sorted(pairs, key=lambda p: p.kind)
-    assert winner.flags == [notes.BASKETBALL_POSTPONED] and points.flags == [notes.PLAYER_NOTES["nba"]]
+def test_leader_and_race_pairs_carry_their_notes_and_a_kind_settled_alike_none():
+    future = dict(game_date=None, team_a=None, team_b=None)
+    leader = dict(future, kind="passing_yards_leader", subject="joe burrow")
+    race = dict(future, kind="senate_race", subject="GA D")
+    total = dict(future, kind="season_receiving_yards", subject="jamarr chase", line=999.5)
+    pairs, _ = match.match([bet("kalshi", "k", **leader), bet("polymarket_us", "us", **leader),
+                            bet("kalshi", "kr", **race), bet("polymarket_us", "usr", **race),
+                            bet("kalshi", "kt", **total), bet("polymarket_us", "ust", **total)], "nfl")
+    by_kind = {p.kind: p for p in pairs}
+    assert by_kind["passing_yards_leader"].flags == [notes.LEADER_NOTE]
+    assert by_kind["senate_race"].flags == [notes.RACE_NOTE]
+    assert by_kind["season_receiving_yards"].flags == []
+    assert by_kind["senate_race"].label == "nfl senate_race 2027 GA D"

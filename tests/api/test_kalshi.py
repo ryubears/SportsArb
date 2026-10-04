@@ -15,6 +15,26 @@ def test_close_time_takes_the_earlier_of_close_and_expected_expiration():
     assert kalshi.close_time({}) is None
 
 
+def test_series_are_read_once_in_a_while_and_picked_by_ticker_or_shape(monkeypatch):
+    import re
+    calls = []
+
+    def paged(path, params, key):
+        calls.append((path, params))
+        return [{"ticker": t} for t in ("KXSB", "SENATEGA", "SENATEXXX", "CONTROLH", "KXNFLGAME")]
+
+    clock = [1000.0]
+    monkeypatch.setattr(kalshi, "paged", paged)
+    monkeypatch.setattr(kalshi, "_series", {"at": None, "list": []})
+    monkeypatch.setattr(kalshi.time, "time", lambda: clock[0])
+    picked = kalshi.fetch_series(["KXSB", "CONTROLH"], [re.compile(r"^SENATE([A-Z]{2})$")])
+    assert [s["ticker"] for s in picked] == ["KXSB", "SENATEGA", "CONTROLH"]
+    kalshi.fetch_series(["KXSB"])                                  # Within SERIES_SECONDS, from the list already read.
+    clock[0] += kalshi.SERIES_SECONDS + 1
+    kalshi.fetch_series(["KXSB"])                                  # Read again once it is old.
+    assert calls == [("/series", {"limit": 200})] * 2               # Every category, not only Sports, for the elections.
+
+
 def test_update_frame():
     frame = kalshi.update_frame(7, 3, ["A", "B"], "add_markets")
     assert frame == {"id": 7, "cmd": "update_subscription", "params": {"sids": [3], "market_tickers": ["A", "B"], "action": "add_markets"}}

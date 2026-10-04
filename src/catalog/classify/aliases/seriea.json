@@ -1,0 +1,22 @@
+{
+  "ACM": {"names": ["Milan"], "codes": {"kalshi": ["ACM"], "polymarket_us": ["mil"]}},
+  "ATA": {"names": ["Atalanta"], "codes": {"kalshi": ["ATA"], "polymarket_us": ["ata"]}},
+  "BFC": {"names": ["Bologna"], "codes": {"kalshi": ["BFC"], "polymarket_us": ["bol"]}},
+  "CAG": {"names": ["Cagliari"], "codes": {"kalshi": ["CAG"], "polymarket_us": ["cag"]}},
+  "COM": {"names": ["Como"], "codes": {"kalshi": ["COM"], "polymarket_us": ["com"]}},
+  "FIO": {"names": ["Fiorentina"], "codes": {"kalshi": ["FIO"], "polymarket_us": ["fio"]}},
+  "FRO": {"names": ["Frosinone"], "codes": {"kalshi": ["FRO"], "polymarket_us": ["fro"]}},
+  "GEN": {"names": ["Genoa"], "codes": {"kalshi": ["GEN"], "polymarket_us": ["gen"]}},
+  "INT": {"names": ["Inter"], "codes": {"kalshi": ["INT"], "polymarket_us": ["int"]}},
+  "JUV": {"names": ["Juventus", "Juventus FC"], "codes": {"kalshi": ["JUV"], "polymarket_us": ["juv"]}},
+  "LAZ": {"names": ["Lazio"], "codes": {"kalshi": ["LAZ"], "polymarket_us": ["laz"]}},
+  "LEC": {"names": ["Lecce"], "codes": {"kalshi": ["LEC"], "polymarket_us": ["lec"]}},
+  "MON": {"names": ["Monza"], "codes": {"kalshi": ["MON"], "polymarket_us": ["mon"]}},
+  "NAP": {"names": ["Napoli"], "codes": {"kalshi": ["NAP"], "polymarket_us": ["nap"]}},
+  "PAR": {"names": ["Parma Calcio", "Parma"], "codes": {"kalshi": ["PAR"], "polymarket_us": ["par"]}},
+  "ROM": {"names": ["Roma"], "codes": {"kalshi": ["ROM"], "polymarket_us": ["rom"]}},
+  "SAS": {"names": ["Sassuolo"], "codes": {"kalshi": ["SAS"], "polymarket_us": ["sas"]}},
+  "TOR": {"names": ["Torino", "Torino FC"], "codes": {"kalshi": ["TOR"], "polymarket_us": ["tor"]}},
+  "UDI": {"names": ["Udinese"], "codes": {"kalshi": ["UDI"], "polymarket_us": ["udi"]}},
+  "VEN": {"names": ["Venezia"], "codes": {"kalshi": ["VEN"], "polymarket_us": ["ven"]}}
+}

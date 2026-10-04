@@ -1,0 +1,6 @@
+{
+  "ATL": {"names": ["Atlanta"], "codes": {"kalshi": ["ATL"], "polymarket_us": ["atl"]}},
+  "GS": {"names": ["Golden State"], "codes": {"kalshi": ["GS"], "polymarket_us": ["gsv"]}},
+  "LV": {"names": ["Las Vegas"], "codes": {"kalshi": ["LV"], "polymarket_us": ["lv"]}},
+  "NY": {"names": ["New York"], "codes": {"kalshi": ["NY"], "polymarket_us": ["ny"]}}
+}

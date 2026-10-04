@@ -1,29 +1,37 @@
 # SportsArb
 
-A bot that looks for cross-venue arbitrage between the two US prediction
-markets that list NFL, college football, MLB, NHL, and NBA contracts,
-Kalshi and Polymarket US, and trades what it finds, on paper, with real
-money, or both at once. When the cheapest way to hold *yes* on one venue
-and the cheapest way to hold *no* on the other add up to less than a dollar
-after fees, buying both locks in the difference whatever the game does.
+A bot that looks for cross-venue arbitrage on futures between the two US
+prediction markets, Kalshi and Polymarket US, and trades what it finds, on
+paper, with real money, or both at once. It covers the NFL, college
+football, MLB, NHL, NBA, WNBA, and men's college basketball, the Premier
+League, La Liga, Serie A, the Bundesliga, Ligue 1, Liga MX, MLS, the
+Champions League and Europa League, Formula 1, NASCAR, UFC, tennis, darts,
+and the 2026 US elections: titles, awards, a season's leaders, season
+totals, and races, never a single game. When the cheapest way to hold *yes*
+on one venue and the cheapest way to hold *no* on the other add up to less
+than a dollar after fees, buying both locks in the difference whatever
+happens.
 
 The whole thing runs on an EC2 instance in us-east-1, as one process with
 each venue's feed in a child process of its own: it follows every order
 book change for thousands of contracts, prices every cross-venue pair on
 every change, sends orders when a pair shows an edge worth the time its
 money is tied up, and settles the trades when the contracts resolve. It
-trades before games and on season futures, not games under way, where
-faster traders take the edges first. By default the orders are paper.
-With `--execute live` or `--execute both` it sends real ones.
+trades futures only, where an edge lasts long enough for our orders to
+reach it, not games, where faster traders take the edges first. By default
+the orders are paper. With `--execute live` or `--execute both` it sends
+real ones. The service on the instance trades the NFL, college football,
+MLB, NHL, and NBA live and on paper, and every other sport and the
+elections on paper only, until they show what they can do.
 
 ## How it works
 
 Everything lives in `src/`, in two programs.
 
 **The catalog** (`src/catalog`) works out what can be traded. It fetches
-the open NFL, college football, MLB, NHL, and NBA game markets and futures
-from both venues, restates each one as a `Bet` in venue neutral terms, and
-pairs up the bets both venues list. The pairs go into the database. You can
+each sport's open futures, and the elections', from both venues, restates
+each one as a `Bet` in venue neutral terms, and pairs up the bets both
+venues list. The pairs go into the database. You can
 run it on its own (`python3 -m catalog.pipeline`), and the live process
 reruns it every hour.
 
@@ -228,83 +236,98 @@ and writes.
 
 ### Catalog (`src/catalog`)
 
-**fetch.py** pulls a sport's open contracts from both venues into the
-`contracts` table. Of the hundreds of series Kalshi lists for a sport it
-takes only those classified: the game winner, spread, and total,
-baseball's, hockey's, and basketball's team totals, and player props: the
-NFL's and MLB's, the NHL's goals and points, and the NBA's points,
-rebounds, assists, threes, and blocks, and each sport's futures. Kalshi is
-read through its public REST catalog, paged under the rate limit, and each
-series brings the exchange shard its markets trade on. Polymarket US is
-read through its gateway, one call per tag, deduplicated across tags,
-baseball through the `mlb` tag, since `baseball` brings Korean and Japanese
-league games too. An event there is a game, whose start time is its
-kickoff, when it has a game id, the venue's own or Sportradar's, which NHL
-preseason games and many small college games carry alone. A future's start
-time is left out.
+**fetch.py** pulls a sport's open futures from both venues into the
+`contracts` table. Games are not cataloged, since the bot trades futures
+only. Our sport keys are `nfl`, `ncaaf`, `mlb`, `nhl`, `nba`, `wnba`,
+`ncaab`, `epl`, `laliga`, `seriea`, `bundesliga`, `ligue1`, `ligamx`,
+`mls`, `ucl`, `uel`, `f1`, `nascar`, `ufc`, `tennis`, `darts`, and
+`politics`. Of the thousands of series Kalshi lists it takes only those
+classified, by ticker, and for elections, which have a series per state or
+district, by the shapes the classifier reads, `SENATEGA` or `HOUSEAZ1`.
+Kalshi's list of series, every category of it, is read once and kept ten
+minutes, so a refresh of every sport reads it once. Kalshi is read through
+its public REST catalog, paged under the rate limit, and each series brings
+the exchange shard its markets trade on: shard 0 for football, hockey,
+soccer, motorsport, UFC, darts, and elections, shard 3 for baseball,
+basketball, and tennis. Polymarket US is read through its gateway, one
+call per tag, deduplicated across tags, baseball through the `mlb` tag,
+since `baseball` brings Korean and Japanese league games too, and a game's
+markets are left out: an event is a game when it has a game id, the
+venue's own or Sportradar's. A futures market on such an event, an award's,
+is kept.
 
 **classify/** turns each contract into a `Bet`, a venue neutral statement
-of what the contract is about: kind, season, game date, the two teams, a
-subject, and a line. Each venue has its own parser, since the two describe
-the same thing very differently. Kalshi encodes the game in the ticker,
-`KXNFLGAME-26SEP24ATLGB-GB`, and the prop in a series code and a title like
-*Player: 100+ receiving yards*. Polymarket US encodes it in a slug and a
-title like *Will Bijan Robinson record 100+ rushing yards?*. Team aliases
-are resolved through `teams.py` and `aliases/`, which has a file for each
-sport, since leagues reuse codes (DAL is the Cowboys and the Mavericks).
-College football's file lists each venue's codes apart, since the venues
-give some codes to different schools: SDST is South Dakota State on Kalshi
-and San Diego State on Polymarket US. Its Kalshi codes run from two letters
-to five, so a ticker's two glued codes are split every way, and one that
-splits into two teams more than one way is left out. Hockey's file lists
-four teams' codes per venue too, Montreal being MTL on Kalshi and `mon` on
-Polymarket US, and basketball's five, New York being NYK and `ny`.
-Polymarket US typed every sport's game markets `moneyline`, `spreads`, and
-`totals` until June 2026 and names them by sport since, so basketball's,
-which it has not listed yet for the new season, are read by the names the
-other sports' now have, `basketball_team_full_game_winner` and the like.
-Baseball's Kalshi event tickers carry the start time too,
-`KXMLBGAME-26SEP291400PHIATL`, and a team total names its team in the
-market's ticker or slug. A bet knows a game by its date and teams, which a
-doubleheader's two games share, so both venues' contracts on doubleheaders
-are left out for now. A football, hockey, or basketball season is named for
-the year it ends, a baseball season for the year it is played. Player names
-are normalized to a key that ignores accents, punctuation, and suffixes, so
-Kalshi's *Ronald Acuña Jr.* is Polymarket US's *Ronald Acuna*, and lines
-are made strict, so *100+* on one venue and *over 99.5* on the other become
-the same bet. Futures, bets on a season rather than a game, are read too:
-champions, conference and division winners, top seeds, playoff places,
-awards, and season win and point totals. Kalshi gives each kind a series of
-its own, and Polymarket US tells them apart by the shape of the event slug,
-`nfl-afceast-D-w` being a division winner. The venues number seasons
-differently, so a future's season is the one it settles in. Polymarket US's
-futures do not always use its games' team codes, gluing city and nickname,
-`bufbil`, or borrowing Kalshi's, `gsw`, so a future's team is the code
-whose team its market title could name. Contracts no parser understands are
-counted and left out.
+of what the contract is about: kind, season, subject, and a line, with the
+game date and teams left empty, since every bet is a future. Each venue has
+its own parser, since the two describe the same thing very differently.
+Kalshi gives each kind a series of its own, `KXSB` the Super Bowl, or an
+event of its own within one, `KXEPLTOP-27TOP4` the Premier League's top
+four, and the market ticker ends in the team, `KXSB-27-KC`. Polymarket US
+tells kinds apart by the shape of the event slug with its sport's prefix
+taken off and its date written as D, `nfl-afceast-D-w` being a division
+winner, looked up with its prefix first where two sports share a shape
+that means different things, `ucl-D-lastplace`. The kinds:
+
+- Team futures: champions, conference and division winners, top seeds,
+  playoff places and rounds, best and worst records, the last undefeated
+  and winless teams, college football's unbeaten teams and the conference
+  that wins its title, and in soccer the top two, four, and six, relegation,
+  last place, and the Champions League's league phase.
+- People: awards, a season's leaders in a stat, the NFL's, college
+  football's by conference, the baseball postseason's, and soccer's goals
+  and assists, and champions and title holders, F1 and NASCAR drivers, UFC
+  title holders on December 31, the year-end No. 1 in men's and women's
+  tennis, and darts' world champion. A person's market names them in its
+  subtitle on Kalshi and its title on Polymarket US.
+- Season totals: a team's wins or points at a line, and a player's
+  passing, receiving, or rushing yards or touchdowns at a line, the line in
+  the market on Kalshi and in the title or the event's shape on Polymarket
+  US, `nfl-D-1000recyds` being 1,000 receiving yards or more.
+- Elections: control of the House and the Senate, and each Senate,
+  governor, and House race, by party, D or R, or by candidate. A race's
+  season is its election year. In California and Washington, whose top two
+  can be of one party, and Alaska, whose top four can, the venues read a
+  party's win differently, Kalshi paying on any member of it taking the
+  seat and Polymarket US on its nominee winning, so there only candidates
+  are paired.
+
+Team aliases are resolved through `teams.py` and `aliases/`, which has a
+file for each sport, since leagues reuse codes (DAL is the Cowboys and the
+Mavericks), and an empty one for a sport whose futures name only people.
+The new leagues' files list each venue's codes apart, and the Champions
+League and Europa League are two sports, since Kalshi's VIK is Viking in
+one and Plzen in the other. Player names are normalized to a key that
+ignores accents, punctuation, and suffixes, reads a hyphen as a space, and
+turns letters like ø into o, so Kalshi's *Ronald Acuña Jr.* is Polymarket
+US's *Ronald Acuna* and *Martin Ødegaard* is *Martin Odegaard*, and the few
+names the venues spell apart are in `PLAYER_ALIASES`. A market on no one,
+Kalshi's *Vacant* title, is never paired. Lines are made strict, so *1000+*
+on one venue and *over 999.5* on the other become the same bet. The venues
+number seasons differently, so a future's season is the one it settles in,
+or on Polymarket US its event's end when the slug's date is half a year
+earlier, since the Champions League final's slug carries the wrong year.
+Polymarket US's futures do not always use its games' team codes, gluing
+city and nickname, `bufbil`, or borrowing Kalshi's, `gsw`, so a future's
+team is the code whose team its market title could name. Contracts no
+parser understands are counted and left out.
 
 **match.py** groups a sport's bets whose identity agrees into a `Pair`,
-whose label starts with the sport, for example `nfl spread 2026-09-20
-CAR@ATL ATL 4.5`. A pair only exists when both venues list the bet, and it
-carries every contract that expresses it, since a game winner can be held
-through either team's contract and a spread through either side. Kinds with
-settlement rules that differ between venues carry a note for their sport,
-from **notes.py**. For example both venues settle football props to the
-pre-game price if the player never takes a snap, but Polymarket US ignores
-stat corrections made after the game, and a postponed baseball game settles
-at a fair price on Kalshi after two days while Polymarket US waits up to
-two weeks for it. Hockey's rules agree: both venues count overtime, and a
-shootout as one goal for its winner in spreads and totals, but not in a
-player's goals. Basketball's postponed games part as baseball's do: Kalshi
-settles at a fair price after 48 hours, while Polymarket US waits up to two
-weeks. A future's label names its season in place of the game, `nfl
-champion 2027 KC`, and an award's pair notes that Polymarket US divides the
-dollar among players who share the award, where Kalshi's rules do not
-always say.
+whose label starts with the sport, for example `nfl champion 2027 KC` or
+`politics senate_race 2026 GA D`. A pair only exists when both venues list
+the bet, and it carries every contract that expresses it. Kinds with
+settlement rules that differ between venues carry a note from
+**notes.py**: Polymarket US divides the dollar among players or teams that
+tie for an award, a lead, or a record, where Kalshi's rules do not always
+say; Kalshi reads a UFC title holder and a tennis ranking at noon Eastern
+on December 31 and Polymarket US at 11:59 PM; and Kalshi pays a race on
+the party of whoever is sworn in, in January, and control of a house on
+February 1, Polymarket US on the election. A note is a warning to read,
+not a bar.
 
 **pipeline.py** runs fetch, classify, and match in one call. The live
-process runs it every hour in a child process, so new games and props
-enter the pairs while it runs.
+process runs it every hour in a child process, so new futures enter the
+pairs while it runs. A refresh of every sport takes some five minutes, the
+elections a third of it.
 
 ### Venue clients (`src/api`)
 
@@ -368,10 +391,14 @@ money, and its settler. `--execute` picks the desks: `paper`, the default,
 so measures how far the paper fills are from real ones. The same loop
 starts the hourly catalog refresh in a child process and applies the result
 to the live connections. One run trades every sport given to `--sport`,
-comma separated as in `--sport nfl,ncaaf,mlb,nhl,nba`, since the money is
-one pool and a second process would spend the same dollars. How long a game
-is expected to last is set for each sport in `GAME_HOURS`, which sets when
-the bets on it pay out. The pieces it wires together are in
+comma separated as in `--sport nfl,ncaaf,mlb,nhl,nba`, or every one with
+`--sport all`, since the money is one pool and a second process would
+spend the same dollars. A sport given to `--paper-sport` is followed and
+traded on paper only: the live desk is offered no signal on its pairs, so
+a new sport can show what it does before real money goes on it, and
+`--paper-sport all` takes every sport not given to `--sport`. How long a game is expected to last is set for the
+first five sports in `GAME_HOURS`, which the engine's game timing still
+reads should a game ever be cataloged again. The pieces it wires together are in
 `engine/components/`, in three folders by what they do: `market/` follows
 the venues, `trading/` makes the trades, and `money/` keeps the cash. What
 they share is in `engine/helper/`: the settings, game timing, pricing, and
@@ -428,16 +455,16 @@ paying within 38 days, ten cents within 81, twenty within 182. One limit
 order is sent per leg, both at once. Both ladders are walked together and
 each leg's limit is set at the deepest level that still leaves the minimum
 edge, so an order sweeps every level above the floor rather than only the
-top one. A trade asks for half of what those levels show (`FILL_SHARE`),
-as far as the cash free on each venue pays for, both legs from one venue's
+top one. A trade asks for all of what those levels show (`FILL_SHARE`,
+half until 2026-10-04), as far as the cash free on each venue pays for, both legs from one venue's
 cash when they share it, live as on paper, with no cap on contracts. No
 cash is held back: trades may spend all that is free.
 
 In **paper.py** each order arrives after a latency drawn from what was
 measured from us-east-1 (about 50 ms to Kalshi, 60 ms to Polymarket US,
 lognormal) and fills against the book as it is at that moment, from the
-same in memory books. Only half the visible size at a level is assumed to
-be ours, and 3% of orders are rejected outright. A paper order leaves the
+same in memory books. `FILL_SHARE` of the visible size at a level is
+assumed to be ours, and 3% of orders are rejected outright. A paper order leaves the
 venue's book as it was, so paper remembers what it took from each level
 and takes it off the books it later sizes, fills, and sells into, until
 the level shrinks below that or goes. In **live.py** each order is a real
@@ -580,24 +607,24 @@ its own.
 
 ### Tools
 
-`src/tools/summary.py` prints a report from the database: row counts, pairs
-by sport and kind, feed drops, and opportunities during games apart from
-those before games and on futures. Each group shows all its episodes by
-sport and kind, with how many beat `MIN_ANNUAL_PCT` a year, and the
-largest, then those whose edge reached `MIN_EDGE`: how long it held there
-unbroken, and the money it could have taken and locked in at full size,
-with the return and annual return. Before games and futures are shown once
-more, only those within the trading rules: paying `MIN_PAYOUT_HOURS` or
-more out and `MIN_ANNUAL_PCT` a year or more. For paper and live apart it
-shows the trades by outcome and by sport and kind, with the days their
-money is held, and the settled legs by venue. Then it lists the open
-trades, soonest to settle first, each with the capital it holds, the
-profit it is expected to make, that as a return and a year's rate, and
-when it settles, and over all of them what they hold on each venue and the
-average annual return weighted by capital. Last come the paper balances,
-the real orders sent by venue and what came back, and the live balances
-read from the venues now, with Kalshi's shards. `--hours` sets the window, and
-`--no-live` leaves out the live balances.
+`src/tools/summary.py` prints a short report from the database: its size
+and the pairs of each sport in one line, feed drops, and the opportunities
+within the trading rules, an edge of `MIN_EDGE` or more paying
+`MIN_PAYOUT_HOURS` or more out and `MIN_ANNUAL_PCT` a year or more: what
+they could have taken and locked in at full size, by sport and kind, and
+the largest five. For the live trades and then the paper ones, or one of
+them with `--mode live` or `--mode paper`, it shows the trades by outcome
+and by sport and kind
+in the window, the legs settled in it by venue, and the open trades in
+three lines: how many, how many of them opened in the last hour, day, and
+week, the capital they hold on each venue and the profit they are expected
+to return with its rate a year weighted by capital, and the first, next,
+average, and last dates they resolve, the first maybe past and waiting on a
+venue, the average weighted by capital. Last come the real orders sent by
+venue and what came back, and the live balances read from the venues now,
+with Kalshi's shards. `--hours` sets the window, `--sport nfl,ncaaf`
+narrows everything to some sports, and `--no-live` leaves out the live
+balances.
 
 `src/tools/live_check.py` reads both venues' balances with the keys in
 `data/` and says when the Kalshi key's location attestation lapses, and
@@ -645,14 +672,13 @@ The live process runs on a c7a.large in us-east-1, the region Polymarket
 US's exchange runs in, about 10 ms from Kalshi's API hosts in us-east-2. A
 signed round trip is about 35 ms to Kalshi and 30 ms to Polymarket US. A
 systemd service, `sportsarb-recorder`, starts `python3 -m engine.run
---sport nfl,ncaaf,mlb,nhl,nba --execute paper` from `~/SportsArb/src` on
-boot and restarts it on any exit, and the process starts a child for each
-venue's feed and each catalog refresh, which stop with it. That trades all
-five sports on paper only, and going live means `--execute both` in the
-service's command. The venue API keys live in `data/`, which is
+--sport nfl,ncaaf,mlb,nhl,nba --paper-sport all --execute both` from
+`~/SportsArb/src` on boot and restarts it on any exit, and the process
+starts a child for each venue's feed and each catalog refresh, which stop
+with it. The venue API keys live in `data/`, which is
 gitignored, and are copied to the instance by `scp` only. Deploying is
 `git pull` on the instance, the tests, and a service restart only if they
-pass, which refreshes the catalog for about 40 seconds and then
+pass, which refreshes the catalog for some five minutes and then
 resubscribes. Each run logs the commit it runs and every setting when it
 starts, so the log says what produced its results. The instance was first
 placed in Mexico to reach polymarket.com, which was then dropped as a venue
@@ -806,6 +832,23 @@ was cancelled unfilled: 113,000 times in 16 hours, as the book kept
 showing a bid. A Kalshi sale is no longer reduce only, and a sale that
 fills nothing waits a minute before the next.
 
+On October 4 a trade went from asking for half of what the books showed to
+all of it. Of the 231 live trades to then that had a paper twin, 222 were
+sized by the share rather than the cash, at a median of 2 contracts, while
+every Kalshi order filled in full, Polymarket US orders of 10 or more
+filled in full 45 times in 46, and Kalshi's public trades showed another
+taker buying the same side at our price within 10 seconds of us on 4 of
+140 orders. Selling back legs that missed had cost $5.59 against $144.98
+locked in. The same day the catalog dropped games for futures only, and it
+grew from five sports to 21 and the elections, the new ones traded on paper
+only at first, with `--paper-sport`:
+some 4,400 sports pairs and 887 election pairs, about 5,300 contracts a
+venue to follow. Election races pay out on Kalshi when the winner is sworn
+in, in January, and control of a house on February 1, so at 50% a year an
+election edge must be some 11 to 14 cents. Two hundred of the new pairs,
+every kind among them, were read against both venues' own wording, and
+each named the same team, person, race, or line on both.
+
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.
 The paper edge is real. Whether it is reachable is a question of whether
@@ -829,9 +872,11 @@ python3 -m catalog.pipeline --sport nfl
 python3 -m engine.run --sport nfl
 ```
 
-`--sport ncaaf`, `--sport mlb`, `--sport nhl`, or `--sport nba` builds or
-runs college football, baseball, hockey, or basketball, and `--sport
-nfl,ncaaf,mlb,nhl,nba` runs them all from one pool of money. `--no-trade`
+`--sport ncaaf`, `--sport epl`, `--sport politics`, and the rest build or
+run one sport's futures, `--sport nfl,ncaaf,mlb` several from one pool of
+money, and `--sport all` every one. `--paper-sport` adds sports traded on
+paper only, as the instance does with `--sport nfl,ncaaf,mlb,nhl,nba
+--paper-sport all --execute both`. `--no-trade`
 scans without trading, `--no-scan` only records, and `--seconds 120` runs a
 short test. `--execute live` trades with real money and `--execute both`
 trades the same signals on paper and for real. The settings a run is tuned
@@ -863,6 +908,7 @@ Then read the reports:
 
 ```bash
 python3 src/tools/summary.py --hours 24
+python3 src/tools/summary.py --mode paper --sport epl,ucl
 python3 src/tools/latency_report.py --hours 4
 ```
 

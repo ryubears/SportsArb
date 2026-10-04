@@ -1,0 +1,22 @@
+{
+  "ARS": {"names": ["Arsenal"], "codes": {"kalshi": ["ARS"], "polymarket_us": ["ars"]}},
+  "AVL": {"names": ["Aston Villa"], "codes": {"kalshi": ["AVL"], "polymarket_us": ["ast"]}},
+  "BOU": {"names": ["Bournemouth"], "codes": {"kalshi": ["BOU"], "polymarket_us": ["bor"]}},
+  "BRE": {"names": ["Brentford"], "codes": {"kalshi": ["BRE"], "polymarket_us": ["bre"]}},
+  "BRI": {"names": ["Brighton", "Brighton & Hove", "Brighton & Hove Albion"], "codes": {"kalshi": ["BRI"], "polymarket_us": ["bha"]}},
+  "CFC": {"names": ["Chelsea"], "codes": {"kalshi": ["CFC"], "polymarket_us": ["cfc"]}},
+  "COV": {"names": ["Coventry City", "Coventry", "Coventry City FC"], "codes": {"kalshi": ["COV"], "polymarket_us": ["cov"]}},
+  "CRY": {"names": ["Crystal Palace"], "codes": {"kalshi": ["CRY"], "polymarket_us": ["cry"]}},
+  "EVE": {"names": ["Everton"], "codes": {"kalshi": ["EVE"], "polymarket_us": ["eve"]}},
+  "FUL": {"names": ["Fulham"], "codes": {"kalshi": ["FUL"], "polymarket_us": ["ful"]}},
+  "HUL": {"names": ["Hull City"], "codes": {"kalshi": ["HUL"], "polymarket_us": ["hul"]}},
+  "IPS": {"names": ["Ipswich Town", "Ipswich"], "codes": {"kalshi": ["IPS"], "polymarket_us": ["ips"]}},
+  "LEE": {"names": ["Leeds United", "Leeds"], "codes": {"kalshi": ["LEE"], "polymarket_us": ["lee"]}},
+  "LFC": {"names": ["Liverpool"], "codes": {"kalshi": ["LFC"], "polymarket_us": ["liv"]}},
+  "MCI": {"names": ["Manchester City", "Man City"], "codes": {"kalshi": ["MCI"], "polymarket_us": ["mnc"]}},
+  "MUN": {"names": ["Manchester United", "Man Utd"], "codes": {"kalshi": ["MUN"], "polymarket_us": ["mnu"]}},
+  "NEW": {"names": ["Newcastle United", "Newcastle"], "codes": {"kalshi": ["NEW"], "polymarket_us": ["new"]}},
+  "NFO": {"names": ["Nottingham Forest"], "codes": {"kalshi": ["NFO"], "polymarket_us": ["not"]}},
+  "SUN": {"names": ["Sunderland"], "codes": {"kalshi": ["SUN"], "polymarket_us": ["sun"]}},
+  "TOT": {"names": ["Tottenham", "Tottenham Hotspur"], "codes": {"kalshi": ["TOT"], "polymarket_us": ["tot"]}}
+}

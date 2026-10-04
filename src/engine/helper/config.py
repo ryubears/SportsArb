@@ -20,7 +20,9 @@ MIN_PAYOUT_HOURS = 24       # The soonest a bet may pay out and still be traded,
                             # There the fast traders take an edge before our Polymarket US leg lands, and the leg is missed.
 MIN_ANNUAL_PCT = 50         # The least an edge must return a year on the capital it ties up until the bet pays, before a game or on
                             # a future. A 5 cent edge clears it if it pays within 38 days, 10 cents within 81, and 20 within 182.
-FILL_SHARE = 0.5            # The share of visible size at a level a trade asks for. Other takers get the rest.
+FILL_SHARE = 1.0            # The share of visible size at a level a trade asks for. At 0.5 to 2026-10-03, 222 of 231 live trades were
+                            # sized by it, not the cash, every Kalshi order filled in full, Polymarket US orders of 10 or more filled
+                            # in full 45 times in 46, and another taker bought the same side at our price within 10 s of 4 of 140.
 MIN_SALE_SHARE = 0.5        # The least share of what contracts cost a sale to flatten them takes. Below it they are kept, a bet that
                             # may still pay out, rather than given away: a 4 cent contract is not sold at the 1 cent bid.
 SALE_RETRY_SECONDS = 60     # After a sale to flatten a trade fills nothing, how long until the trade is tried again. A book can

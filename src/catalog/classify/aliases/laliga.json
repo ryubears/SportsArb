@@ -1,0 +1,22 @@
+{
+  "ALA": {"names": ["Alaves", "Deportivo Alavés"], "codes": {"kalshi": ["ALA"], "polymarket_us": ["ala"]}},
+  "ATH": {"names": ["Athletic Bilbao", "Athletic Club"], "codes": {"kalshi": ["ATH"], "polymarket_us": ["ath"]}},
+  "ATM": {"names": ["Atletico Madrid", "Club Atlético de Madrid"], "codes": {"kalshi": ["ATM"], "polymarket_us": ["atm"]}},
+  "BAR": {"names": ["Barcelona", "FC Barcelona"], "codes": {"kalshi": ["BAR"], "polymarket_us": ["fcb"]}},
+  "DEP": {"names": ["Deportivo De La Coruna", "RC Deportivo La Coruña"], "codes": {"kalshi": ["DEP"], "polymarket_us": ["dep"]}},
+  "ELC": {"names": ["Elche"], "codes": {"kalshi": ["ELC"], "polymarket_us": ["elc"]}},
+  "ESP": {"names": ["Espanyol", "RCD Espanyol de Barcelona"], "codes": {"kalshi": ["ESP"], "polymarket_us": ["esp"]}},
+  "GET": {"names": ["Getafe"], "codes": {"kalshi": ["GET"], "polymarket_us": ["get"]}},
+  "LEV": {"names": ["Levante", "Levante UD"], "codes": {"kalshi": ["LEV"], "polymarket_us": ["lev"]}},
+  "MCF": {"names": ["Malaga", "Málaga CF", "Malaga CF"], "codes": {"kalshi": ["MCF"], "polymarket_us": ["mal", "malcf"]}},
+  "OSA": {"names": ["Osasuna", "CA Osasuna"], "codes": {"kalshi": ["OSA"], "polymarket_us": ["osa"]}},
+  "RBB": {"names": ["Betis", "Real Betis Balompié"], "codes": {"kalshi": ["RBB"], "polymarket_us": ["bet"]}},
+  "RCC": {"names": ["Celta Vigo", "RC Celta de Vigo"], "codes": {"kalshi": ["RCC"], "polymarket_us": ["cel"]}},
+  "RMA": {"names": ["Real Madrid"], "codes": {"kalshi": ["RMA"], "polymarket_us": ["rma"]}},
+  "RSO": {"names": ["Real Sociedad", "Real Sociedad de Fútbol"], "codes": {"kalshi": ["RSO"], "polymarket_us": ["rso"]}},
+  "RVC": {"names": ["Rayo Vallecano", "Rayo Vallecano de Madrid"], "codes": {"kalshi": ["RVC"], "polymarket_us": ["ray"]}},
+  "SAN": {"names": ["Racing Santander", "Real Racing Club"], "codes": {"kalshi": ["SAN"], "polymarket_us": ["rrc"]}},
+  "SEV": {"names": ["Sevilla"], "codes": {"kalshi": ["SEV"], "polymarket_us": ["sev"]}},
+  "VCF": {"names": ["Valencia"], "codes": {"kalshi": ["VCF"], "polymarket_us": ["val"]}},
+  "VIL": {"names": ["Villarreal"], "codes": {"kalshi": ["VIL"], "polymarket_us": ["vil"]}}
+}

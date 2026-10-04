@@ -33,16 +33,16 @@ def test_every_team_has_a_code_on_each_venue_and_no_code_names_two_teams():
 
 
 def test_classify_all_routes_by_venue_and_counts_the_rest():
-    rows = [{"venue": "kalshi", "sport": "nfl", "series_id": "KXNFLGAME", "event_id": "KXNFLGAME-26SEP20CARATL",
-             "contract_id": "KXNFLGAME-26SEP20CARATL-CAR", "title": "", "outcome": "", "market_type": None, "line": None, "start_time": None},
-            {"venue": "polymarket_us", "sport": "nfl", "contract_id": "aec-nfl-car-atl-2026-09-20", "event_id": "nfl-car-atl-2026-09-20",
-             "market_type": "football_team_full_game_winner", "line": None, "start_time": "2026-09-20T17:00:00+00:00", "title": "", "outcome": ""},
+    rows = [{"venue": "kalshi", "sport": "nfl", "series_id": "KXSB", "event_id": "KXSB-27", "contract_id": "KXSB-27-KC", "title": "",
+             "outcome": "", "market_type": None, "line": None, "start_time": None, "close_time": "2027-02-14T23:30:00+00:00"},
+            {"venue": "polymarket_us", "sport": "nfl", "contract_id": "tec-nfl-champ-2027-02-14-w-kc", "event_id": "nfl-champ-2027-02-14-w",
+             "market_type": "futures", "line": None, "start_time": None, "close_time": None, "title": "KC Chiefs", "outcome": ""},
             {"venue": "polymarket_us", "sport": "nfl", "contract_id": "x", "event_id": "nfl-champ-2027-02-14-w", "market_type": "futures",
-             "line": None, "start_time": None, "title": "", "outcome": "", "series_id": None, "event_title": "Champion"},
+             "line": None, "start_time": None, "close_time": None, "title": "", "outcome": "", "series_id": None, "event_title": "Champion"},
             {"venue": "polymarket", "sport": "nfl", "contract_id": "old", "event_id": "e", "market_type": None, "line": None, "start_time": None,
              "title": "", "outcome": "", "series_id": None, "event_title": "gone"}]
     bets, unclassified = classify.classify_all(rows)
-    assert [(b.venue, b.kind, b.subject) for b in bets] == [("kalshi", "game_winner", "CAR"), ("polymarket_us", "game_winner", "CAR")]
+    assert [(b.venue, b.kind, b.subject) for b in bets] == [("kalshi", "champion", "KC"), ("polymarket_us", "champion", "KC")]
     assert [r["contract_id"] for r in unclassified] == ["x", "old"]
 
 
@@ -53,18 +53,17 @@ def test_player_key_drops_punctuation_and_suffixes():
     assert teams.player_key("Ja'Marr Chase") == "jamarr chase"
 
 
-def test_classify_all_leaves_out_doubleheaders():
-    def kalshi_row(event, ticker):
-        return {"venue": "kalshi", "sport": "mlb", "series_id": "KXMLBGAME", "event_id": event, "contract_id": ticker,
-                "title": "", "outcome": "", "market_type": None, "line": None, "start_time": None}
-    rows = [kalshi_row("KXMLBGAME-26MAY231310STLCIN", "KXMLBGAME-26MAY231310STLCIN-STL"),
-            kalshi_row("KXMLBGAME-26MAY231840STLCIN", "KXMLBGAME-26MAY231840STLCIN-STL"),
-            kalshi_row("KXMLBGAME-26SEP291400PHIATL", "KXMLBGAME-26SEP291400PHIATL-PHI")]
-    bets, unclassified = classify.classify_all(rows)
-    assert [b.contract_id for b in bets] == ["KXMLBGAME-26SEP291400PHIATL-PHI"]
-    assert len(unclassified) == 2
-
-
-def test_player_key_drops_accents():
+def test_player_key_drops_accents_reads_hyphens_as_spaces_and_takes_known_spellings():
     assert teams.player_key("Ronald Acuña Jr.") == teams.player_key("Ronald Acuna") == "ronald acuna"
     assert teams.player_key("Jesús Luzardo") == "jesus luzardo"
+    assert teams.player_key("Martin Ødegaard") == "martin odegaard"
+    assert teams.player_key("Kiernan Dewsbury-Hall") == teams.player_key("Kiernan Dewsbury Hall") == "kiernan dewsbury hall"
+    assert teams.player_key("Andrea Kimi Antonelli") == teams.player_key("Kimi Antonelli")
+
+
+def test_person_is_none_for_what_names_no_one():
+    assert teams.person("Vacant") is None and teams.person("") is None and teams.person("Josh Allen") == "josh allen"
+
+
+def test_a_race_is_its_state_and_a_house_seat_its_district():
+    assert (teams.race("GA"), teams.race("AZ", "1"), teams.race("WY", "al")) == ("GA", "AZ-01", "WY-AL")

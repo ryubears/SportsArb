@@ -29,12 +29,19 @@ CATALOG_MINUTES the catalog of each sport is refreshed in a child process,
 fetch then classify then match, and the new pairs' contracts are added to
 the running feeds and the closed ones removed, without reconnecting.
 
-One run trades every sport given to --sport, comma separated, since the
-money is one pool: a second process would spend the same dollars.
+One run trades every sport given to --sport, comma separated, or every
+sport the catalog knows with --sport all, since the money is one pool: a
+second process would spend the same dollars. Only futures are cataloged,
+so a run trades seasons, titles, awards, leaders, and elections. A sport
+given to --paper-sport is followed and traded on paper only, the live desk
+leaving its signals alone, to see how it does before real money goes on
+it. --paper-sport all takes every sport not given to --sport.
 
 Run with:
     python3 -m engine.run --sport nfl
     python3 -m engine.run --sport nfl,ncaaf,mlb,nhl,nba
+    python3 -m engine.run --sport all --execute live
+    python3 -m engine.run --sport nfl,ncaaf,mlb,nhl,nba --paper-sport all --execute both
     python3 -m engine.run --sport nfl --seconds 120 --catalog-minutes 0
     python3 -m engine.run --sport nfl --skip-refresh
     python3 -m engine.run --sport nfl --no-scan
@@ -85,6 +92,7 @@ class RunOptions:
     refresh_at_start: bool = True                   # Refresh the catalog before streaming, when refreshes are on.
     scan: bool = True                               # Price the books and store episodes.
     executors: tuple = ("paper",)                   # The modes that trade the scanner's signals, 'paper' and 'live', when scanning.
+    paper_sports: tuple = ()                        # Sports, among the ones followed, that only the paper desk trades.
 
 
 def code_version():
@@ -134,11 +142,13 @@ class Desk:
     """
     One mode of trading, paper or live: its executor, the money it trades,
     and the settler that pays its trades out. books is a function returning
-    the recorder's newest books.
+    the recorder's newest books. sports are the sports it trades, or None
+    for every sport the run follows.
     """
 
-    def __init__(self, mode, conn, books, notifier):
+    def __init__(self, mode, conn, books, notifier, sports=None):
         self.mode = mode
+        self.sports = sports
         if mode == "paper":
             self.cash = PaperBalances(conn)
             self.executor = PaperExecutor(conn, self.cash, books, log)
@@ -148,6 +158,14 @@ class Desk:
         else:
             raise ValueError(f"unknown mode {mode!r}")
         self.settler = settle.Settler(conn, self.cash, log, executor=self.executor)
+
+    def signal(self, pair, *args):
+        """
+        Offer the executor a scanner signal on a pair of a sport this desk trades. Returns whether it traded.
+        """
+        if self.sports is not None and pair["sport"] not in self.sports:
+            return False
+        return self.executor.signal(pair, *args)
 
     def tick(self, now, clock):
         """
@@ -171,17 +189,21 @@ class Session:
     The recorder and everything that runs on its books, wired together:
     the venue connections, the scanner, and a Desk for each mode it trades
     in. Without a scanner only the books are recorded, and without a desk
-    the scanner only stores what it sees.
+    the scanner only stores what it sees. The sports in paper_sports are
+    traded by the paper desk only.
     """
 
-    def __init__(self, conn, sports, with_scanner=True, executors=("paper",)):
+    def __init__(self, conn, sports, with_scanner=True, executors=("paper",), paper_sports=()):
         self.conn = conn
         self.sports = sports
+        self.paper_sports = tuple(s for s in sports if s in paper_sports)
         self.notifier = notify.Notifier(conn, log)
         self.attestation = notify.AttestationWatch(conn, self.notifier, log)
         # The executors trade against the recorder's books, which exist once the recorder does, below.
-        self.desks = [Desk(mode, conn, lambda: self.recorder.books, self.notifier) for mode in executors] if with_scanner else []
-        self.scanner = scan.Scanner(conn, sports, log, [d.executor.signal for d in self.desks]) if with_scanner else None
+        live_sports = tuple(s for s in sports if s not in self.paper_sports)
+        self.desks = [Desk(mode, conn, lambda: self.recorder.books, self.notifier, sports=live_sports if mode == "live" else None)
+                      for mode in executors] if with_scanner else []
+        self.scanner = scan.Scanner(conn, sports, log, [d.signal for d in self.desks]) if with_scanner else None
         self.recorder = Recorder(conn, self.scanner)
         self.streams = Streams(self.recorder)
         self.last_status = self.last_summary = time.time()
@@ -194,6 +216,8 @@ class Session:
             log(trading_settings())
         if any(d.mode == "live" for d in self.desks):
             log(live_settings())
+            if self.paper_sports:
+                log(f"paper only, not traded live: {', '.join(self.paper_sports)}")
             if not notify.EMAIL_FILE.exists():
                 log(f"no email settings in {notify.EMAIL_FILE}, alerts are only logged and stored")
         targets = load_targets(self.conn, self.sports)
@@ -327,7 +351,7 @@ async def run(conn, options):
             log(await refresh_in_child(sports))
         except Exception as e:
             log(with_traceback(f"catalog refresh failed ({e!r}), starting with the stored catalog", e))
-    session = Session(conn, sports, options.scan, options.executors)
+    session = Session(conn, sports, options.scan, options.executors, options.paper_sports)
     session.start()
     started = last_catalog = time.time()
     refresh = None      # The background catalog refresh while one is running.
@@ -354,29 +378,37 @@ async def run(conn, options):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Stream the books of paired contracts, scan them, and trade.")
-    ap.add_argument("--sport", default="nfl", help=f"the sports to trade, comma separated, from {', '.join(sorted(fetch.SPORTS))}")
+    ap.add_argument("--sport", default="nfl", help=f"the sports to trade, comma separated, from {', '.join(sorted(fetch.SPORTS))}, or all")
     ap.add_argument("--seconds", type=int, default=0, help="stop after this many seconds, 0 means run forever")
     ap.add_argument("--catalog-minutes", type=int, default=CATALOG_MINUTES,
                     help="minutes between catalog refreshes, 0 means never refresh")
     ap.add_argument("--skip-refresh", action="store_true",
                     help="start streaming at once from the stored catalog instead of refreshing first")
     ap.add_argument("--no-scan", action="store_true", help="stream the books only, without the scanner, to check the connections")
+    ap.add_argument("--paper-sport", default="",
+                    help="sports to follow and trade on paper only, comma separated, or all for every sport not given to --sport")
     ap.add_argument("--no-trade", action="store_true", help="scan without trading")
     ap.add_argument("--execute", choices=sorted(EXECUTE), default="paper",
                     help="trade on paper, with real money on the venues, or both at once on the same signals")
     ap.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
                     help="override a setting from engine/helper/config.py for this run, for example --set min_edge=0.03, repeatable")
     args = ap.parse_args()
-    sports = tuple(s.strip() for s in args.sport.split(",") if s.strip())
+    sports = tuple(fetch.SPORTS) if args.sport.strip() == "all" else tuple(s.strip() for s in args.sport.split(",") if s.strip())
     if not sports or any(s not in fetch.SPORTS for s in sports):
-        ap.error(f"--sport takes sports from {', '.join(sorted(fetch.SPORTS))}, not {args.sport!r}")
+        ap.error(f"--sport takes sports from {', '.join(sorted(fetch.SPORTS))}, or all, not {args.sport!r}")
+    paper_sports = (tuple(s for s in fetch.SPORTS if s not in sports) if args.paper_sport.strip() == "all"
+                    else tuple(s.strip() for s in args.paper_sport.split(",") if s.strip()))
+    if any(s not in fetch.SPORTS for s in paper_sports):
+        ap.error(f"--paper-sport takes sports from {', '.join(sorted(fetch.SPORTS))}, or all, not {args.paper_sport!r}")
+    if paper_sports and "paper" not in EXECUTE[args.execute]:
+        ap.error("--paper-sport needs a paper desk: --execute paper or both")
     try:
         config.override(args.set)
     except ValueError as e:
         ap.error(str(e))
-    options = RunOptions(sports=sports, seconds=args.seconds, catalog_seconds=args.catalog_minutes * 60,
-                         refresh_at_start=not args.skip_refresh, scan=not args.no_scan,
-                         executors=() if args.no_trade else EXECUTE[args.execute])
+    options = RunOptions(sports=tuple(dict.fromkeys(sports + paper_sports)), seconds=args.seconds,
+                         catalog_seconds=args.catalog_minutes * 60, refresh_at_start=not args.skip_refresh, scan=not args.no_scan,
+                         executors=() if args.no_trade else EXECUTE[args.execute], paper_sports=paper_sports)
     sys.stdout.reconfigure(line_buffering=True)     # Print immediately even when output goes to a file.
     with database.connect() as conn:
         try:

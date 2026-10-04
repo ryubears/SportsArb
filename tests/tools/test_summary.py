@@ -11,22 +11,26 @@ BEFORE = "2026-09-27T11:00:00+00:00"    # An hour before the window.
 INSIDE = "2026-09-27T20:00:00+00:00"    # Eight hours into it.
 
 
-def report(tmp_path, monkeypatch, capsys, fill):
+NOW = "2026-09-28T00:00:00+00:00"       # When the report runs, twelve hours into the window.
+
+
+def report(tmp_path, monkeypatch, capsys, fill, modes=("live",), sports=()):
     """
-    What the report prints for the 12 hours from SINCE, on a database with one pair that fill(conn) adds to.
+    What the report prints for the 12 hours from SINCE, on a database with one nfl pair and one nba pair that fill(conn) adds to.
     """
     path = tmp_path / "t.sqlite"
     conn = database.connect(path)
-    conn.execute("INSERT INTO pairs (id, label, kind, venues, contracts, flags, matched_at) "
-                 "VALUES (1, 'the bet', 'winner', 'kalshi,polymarket_us', 2, '[]', ?)", (BEFORE,))
+    conn.execute("INSERT INTO pairs (id, sport, label, kind, venues, contracts, flags, matched_at) "
+                 "VALUES (1, 'nfl', 'the bet', 'winner', 'kalshi,polymarket_us', 2, '[]', ?)", (BEFORE,))
+    conn.execute("INSERT INTO pairs (id, sport, label, kind, venues, contracts, flags, matched_at) "
+                 "VALUES (2, 'nba', 'other bet', 'champion', 'kalshi,polymarket_us', 2, '[]', ?)", (BEFORE,))
     fill(conn)
     conn.commit()
     monkeypatch.setattr(summary, "DB_PATH", path)
     ro = database.read_only(path)      # As the script opens it.
-    summary.print_storage(ro)
-    summary.print_pairs(ro)
-    summary.print_opportunities(ro, SINCE, 12)
-    summary.print_trades(ro, SINCE, 12)
+    summary.print_overview(ro, sports)
+    summary.print_opportunities(ro, SINCE, 12, sports)
+    summary.print_trades(ro, SINCE, 12, modes, sports, now=NOW)
     return capsys.readouterr().out
 
 
@@ -44,66 +48,38 @@ def table(out, title):
     return rows
 
 
-def test_episodes_are_covered_from_the_first_start_to_the_newest_end(tmp_path, monkeypatch, capsys):
-    def fill(conn):
-        episodes = [("2026-09-27T13:00:00+00:00", "2026-09-27T13:05:00+00:00"),      # Stored first, as it ended first.
-                    ("2026-09-27T13:30:00+00:00", "2026-09-27T15:00:00+00:00")]
-        database.insert_opportunities(conn, [
-            Opportunity(pair_id=1, trade="t", yes_venue="kalshi", yes_contract="k", no_venue="polymarket_us", no_contract="pm",
-                        start_ts=start, end_ts=end, seconds=60, peak_ts=start, peak_edge=0.05, peak_size=10, peak_profit=0.5,
-                        live=1, days_held=0.1, return_pct=5, annual_pct=50) for start, end in episodes])
-    out = report(tmp_path, monkeypatch, capsys, fill)
-    assert "2 episodes in all, covering 2026-09-27 13:00:00 to 2026-09-27 15:00:00 UTC, 2 in the last 12 hours" in out
-    assert [row[:3] for row in table(out, "live game opportunities, by kind, last 12 hours")] == [["nfl", "winner", "2"]]
+def episode(start, days, edge, size, live=0, pair_id=1):
+    """
+    An episode of the pair at start, paying days out, edge at its peak, and size fillable at 5c or more for ten minutes.
+    """
+    return Opportunity(pair_id=pair_id, trade="t", yes_venue="kalshi", yes_contract="k", no_venue="polymarket_us", no_contract="pm",
+                       start_ts=start, end_ts=start, seconds=600, peak_ts=start, peak_edge=edge, peak_size=size, peak_profit=size * edge,
+                       live=live, days_held=days, return_pct=100 * edge / (1 - edge), annual_pct=100 * edge / (1 - edge) * 365 / days,
+                       min_edge_seconds=600.0, min_edge_size=size, min_edge_profit=size * edge)
 
 
-def test_live_game_episodes_are_shown_apart_from_the_rest_with_those_at_the_minimum_edge(tmp_path, monkeypatch, capsys):
-    def episode(start, live, days, edge, stretch):
-        seconds, size, profit = stretch
-        return Opportunity(pair_id=1, trade="t", yes_venue="kalshi", yes_contract="k", no_venue="polymarket_us", no_contract="pm",
-                           start_ts=start, end_ts=start, seconds=600, peak_ts=start, peak_edge=edge, peak_size=100, peak_profit=100 * edge,
-                           live=live, days_held=days, return_pct=100 * edge / (1 - edge), annual_pct=100 * edge / (1 - edge) * 365 / days,
-                           min_edge_seconds=seconds, min_edge_size=size, min_edge_profit=profit)
-
+def test_only_episodes_within_the_rules_are_shown(tmp_path, monkeypatch, capsys):
     def fill(conn):
         database.insert_opportunities(conn, [
-            episode("2026-09-27T13:00:00+00:00", 1, 0.1, 0.08, (0.2, 100, 8.0)),     # In a game, gone in 0.2s.
-            episode("2026-09-27T14:00:00+00:00", 0, 70, 0.09, (3600.0, 40, 3.6)),    # A future, 40 contracts at 5c+ for an hour.
-            episode("2026-09-27T15:00:00+00:00", 0, 120, 0.04, (0.0, 0, 0.0))])      # A future never at 5c.
+            episode("2026-09-27T13:00:00+00:00", 2, 0.06, 100),           # 6 cents paying in two days, 1,165% a year.
+            episode("2026-09-27T14:00:00+00:00", 0.5, 0.10, 100),         # Pays out in 12 hours, too soon.
+            episode("2026-09-27T15:00:00+00:00", 150, 0.10, 100),         # 10 cents over 150 days, 27% a year, too little.
+            episode("2026-09-27T16:00:00+00:00", 2, 0.04, 100),           # Under 5 cents.
+            episode("2026-09-27T17:00:00+00:00", 2, 0.08, 100, live=1)])  # During a game.
     out = report(tmp_path, monkeypatch, capsys, fill)
-    assert "live game opportunities: 1 episodes in the last 12 hours" in out
-    [row] = table(out, "before game/futures opportunities, by kind, last 12 hours")
-    assert len(row) == 9 and row[:3] == ["nfl", "winner", "2"]         # No columns for the edge at 5c.
-    # The game's 8 cents for 0.2s on 100 contracts, which cost 92$ with fees and lock in 8$.
-    assert table(out, "live game opportunities at 5c+, by kind, last 12 hours") == [["nfl", "winner", "1", "0.2", "92", "8.00", "8.7", "31,739.1", "0.1"]]
-    # The future's 40 contracts at 91 cents less the 3.60$ they lock in, 9.9% on 36.40$, 51.6% a year over 70 days. The future
-    # whose edge never reached 5 cents is left out.
-    assert ("before game/futures opportunities at 5c+: 1 episodes in the last 12 hours could have taken 36$ and locked in 3.60$, "
-            "9.9% on capital, 51.6% a year, held 70.0 days on average") in out
-    assert table(out, "before game/futures opportunities at 5c+, largest, last 12 hours") == [
-        ["the", "bet", "t", "9.0", "3,600.0", "40.0", "36", "3.60", "9.9", "51.6", "70.0"]]
-    # 51.6% a year clears the 50% the rules ask, so the future is within them too.
-    assert ("before game/futures opportunities within the rules: 1 episodes in the last 12 hours could have taken 36$ and locked in "
-            "3.60$, 9.9% on capital, 51.6% a year, held 70.0 days on average") in out
-    assert "Live game opportunities are not traded: a game is traded only before it kicks off." in out
+    assert ("opportunities within the rules (5c+, paying 24h+ out, 50%+ a year): 1 episodes in the last 12 hours could have taken 94$ "
+            "and locked in 6.00$, 6.4% on capital, 1,164.9% a year, held 2.0 days on average") in out
+    assert table(out, "by kind") == [["nfl", "winner", "1", "600.0", "94", "6.00", "6.4", "1,164.9", "2.0"]]
+    assert table(out, "largest") == [["the", "bet", "6.0", "600", "100.0", "94", "6.00", "1,164.9", "2.0"]]
 
 
-def test_before_game_episodes_within_the_rules_pay_a_day_or_more_out_and_enough_a_year(tmp_path, monkeypatch, capsys):
-    def episode(start, days, edge, size):
-        return Opportunity(pair_id=1, trade="t", yes_venue="kalshi", yes_contract="k", no_venue="polymarket_us", no_contract="pm",
-                           start_ts=start, end_ts=start, seconds=600, peak_ts=start, peak_edge=edge, peak_size=size, peak_profit=size * edge,
-                           live=0, days_held=days, return_pct=100 * edge / (1 - edge), annual_pct=100 * edge / (1 - edge) * 365 / days,
-                           min_edge_seconds=600.0, min_edge_size=size, min_edge_profit=size * edge)
-
+def test_a_sport_filter_keeps_only_its_pairs_episodes_and_trades(tmp_path, monkeypatch, capsys):
     def fill(conn):
-        database.insert_opportunities(conn, [
-            episode("2026-09-27T13:00:00+00:00", 2, 0.06, 100),       # 6 cents paying in two days, 1,165% a year.
-            episode("2026-09-27T14:00:00+00:00", 0.5, 0.10, 100),     # Pays out in 12 hours, too soon.
-            episode("2026-09-27T15:00:00+00:00", 150, 0.10, 100)])    # 10 cents over 150 days, 27% a year, too little.
-    out = report(tmp_path, monkeypatch, capsys, fill)
-    assert "before game/futures opportunities at 5c+: 3 episodes" in out
-    assert ("before game/futures opportunities within the rules: 1 episodes in the last 12 hours could have taken 94$ and locked in "
-            "6.00$, 6.4% on capital, 1,164.9% a year, held 2.0 days on average") in out
+        database.insert_opportunities(conn, [episode("2026-09-27T13:00:00+00:00", 2, 0.06, 100),
+                                             episode("2026-09-27T14:00:00+00:00", 2, 0.07, 50, pair_id=2)])
+    out = report(tmp_path, monkeypatch, capsys, fill, sports=("nba",))
+    assert "1 episodes in the last 12 hours" in out and [r[:2] for r in table(out, "by kind")] == [["nba", "champion"]]
+    assert "\nlive trades: 0 in all, 0 in the last 12 hours" in out
 
 
 def test_settled_legs_count_by_when_each_leg_settled(tmp_path, monkeypatch, capsys):
@@ -118,7 +94,7 @@ def test_settled_legs_count_by_when_each_leg_settled(tmp_path, monkeypatch, caps
             s.record("yes", "yes", 10.0, yes_at)
             s.record("no", "no", 0.0, no_at)
             database.insert_settlement(conn, s)
-    out = report(tmp_path, monkeypatch, capsys, fill)
+    out = report(tmp_path, monkeypatch, capsys, fill, modes=("paper",))
     # Only the first trade's no leg, on Kalshi, settled in the window. Its yes leg settled before it, as did the second trade.
     assert table(out, "paper settled legs by venue, last 12 hours") == [["kalshi", "1", "10", "4.7", "0.0", "-4.7"]]
 
@@ -132,32 +108,32 @@ def test_live_money_shows_each_venue_read_now_with_the_kalshi_shards(capsys):
     summary.print_live_money(balances)
     # The shards live trading uses, and any other holding money.
     assert capsys.readouterr().out.splitlines()[1:] == [
-        "live money",
-        "  live balances on the venues, read now: kalshi 92.00$ (shard 0 0.00$, shard 3 92.00$), polymarket_us not read (401 unauthorized)",
-    ]
+        "live money on the venues, read now: kalshi 92.00$ (shard 0 0.00$, shard 3 92.00$), polymarket_us not read (401 unauthorized)"]
 
 
-def test_open_trades_are_listed_soonest_to_settle_first_with_their_returns(tmp_path, monkeypatch, capsys):
+def test_open_trades_are_summed_up_with_when_they_opened_and_resolve(tmp_path, monkeypatch, capsys):
     def fill(conn):
-        # (held a side, yes cost, no cost, locked in, flattening, pays at): one settling in December, one on October 4 that lost
-        # 2 cents flattening, and one flattened to nothing, which holds nothing.
-        for held, yes_cost, no_cost, profit, hedge, pays_at in ((5, 2.5, 2.25, 0.25, 0.0, "2026-12-20T00:00:00+00:00"),
-                                                                (5, 3.0, 1.7, 0.30, -0.02, "2026-10-04T20:45:00+00:00"),
-                                                                (0, 0.0, 0.0, 0.0, -0.05, INSIDE)):
-            database.insert_trade(conn, Trade(mode="live", pair_id=1, trade="t", signal_ts=INSIDE, edge=0.06, quantity=5,
+        # (held a side, yes cost, no cost, locked in, flattening, signal, pays at): one opened half an hour ago settling in
+        # December, one opened two days ago paying on September 27, already past and waiting on a venue, one opened ten
+        # days ago paying October 4 that lost 2 cents flattening, and one flattened to nothing, which holds nothing.
+        for held, yes_cost, no_cost, profit, hedge, signal, pays_at in (
+                (5, 2.5, 2.25, 0.25, 0.0, "2026-09-27T23:30:00+00:00", "2026-12-20T00:00:00+00:00"),
+                (5, 2.0, 2.7, 0.30, 0.0, "2026-09-26T00:00:00+00:00", "2026-09-27T20:00:00+00:00"),
+                (5, 3.0, 1.7, 0.30, -0.02, "2026-09-18T00:00:00+00:00", "2026-10-04T20:45:00+00:00"),
+                (0, 0.0, 0.0, 0.0, -0.05, INSIDE, INSIDE)):
+            database.insert_trade(conn, Trade(mode="live", pair_id=1, trade="t", signal_ts=signal, edge=0.06, quantity=5,
                                               yes_venue="kalshi", yes_contract="k", yes_polarity="yes", yes_limit=0.5,
                                               no_venue="polymarket_us", no_contract="p", no_polarity="yes", no_limit=0.45,
                                               pays_at=pays_at, yes_held=held, no_held=held, yes_cost=yes_cost, no_cost=no_cost,
                                               profit=profit, hedge_pnl=hedge, status="filled"))
     out = report(tmp_path, monkeypatch, capsys, fill)
-    # 0.53$ on 9.45$ is 5.6%. A year's rate weighted by capital: 309% on 4.70$ over 7 days and 23% on 4.75$ over 83, 165% in all.
-    assert ("  2 live trades still open, holding kalshi 5.50$, polymarket_us 3.95$: 9.45$ of capital expected to make 0.53$, "
-            "5.6% on it, 165.4% a year on average, settling from 2026-10-04 to 2026-12-20") in out
-    assert table(out, "live open trades, soonest to settle first") == [
-        ["the", "bet", "5/5", "4.70", "0.28", "6.0", "309.3", "7.0", "2026-10-04", "20:45"],
-        ["the", "bet", "5/5", "4.75", "0.25", "5.3", "23.1", "83.2", "2026-12-20", "00:00"]]
-    # Held 83.2, 7.0, and 0 days from the signal to the payout, 30.1 on average.
-    assert table(out, "live by kind, last 12 hours")[0][:7] == ["nfl", "winner", "3", "6.0", "0.0", "0.48", "30.1"]
+    lines = out.split("\nlive open trades: ")[1].splitlines()
+    assert lines[0] == "3 open, 1 opened in the last hour, 1 in the last day, 2 in the last week"
+    # 0.83$ on 14.15$ is 5.9%. A year's rate weighted by capital: 23.1% on 4.75$ over 83 days, 1,271% on 4.70$ over 1.8 days,
+    # and 129% on 4.70$ over 16.9 days.
+    assert lines[1] == "  capital 14.15$, holding kalshi 7.50$, polymarket_us 6.65$, expected to return 0.83$ in profit, 5.9% on it, 472.7% a year"
+    # The average is weighted by capital: a third of it on each date, which comes to October 28.
+    assert lines[2] == "  resolving first 2026-09-27, next 2026-10-04, on average 2026-10-28, last 2026-12-20"
 
 
 def test_contract_counts_show_to_the_hundredth_without_float_noise():

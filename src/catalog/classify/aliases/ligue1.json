@@ -1,0 +1,20 @@
+{
+  "ANG": {"names": ["Angers", "Angers SCO"], "codes": {"kalshi": ["ANG"], "polymarket_us": ["ang"]}},
+  "ASM": {"names": ["Monaco", "AS Monaco FC"], "codes": {"kalshi": ["ASM"], "polymarket_us": ["asm"]}},
+  "AUX": {"names": ["Auxerre", "AJ Auxerre"], "codes": {"kalshi": ["AUX"], "polymarket_us": ["aja"]}},
+  "EST": {"names": ["Troyes", "ES Troyes AC"], "codes": {"kalshi": ["EST"], "polymarket_us": ["tro"]}},
+  "FCL": {"names": ["Lorient", "FC Lorient"], "codes": {"kalshi": ["FCL"], "polymarket_us": ["lor"]}},
+  "HAC": {"names": ["Le Havre", "Le Havre AC"], "codes": {"kalshi": ["HAC"], "polymarket_us": ["hac"]}},
+  "LIL": {"names": ["Lille", "Lille OSC"], "codes": {"kalshi": ["LIL"], "polymarket_us": ["lil"]}},
+  "MAN": {"names": ["Le Mans", "Le Mans FC"], "codes": {"kalshi": ["MAN"], "polymarket_us": ["lmf"]}},
+  "NIC": {"names": ["Nice", "OGC Nice"], "codes": {"kalshi": ["NIC"], "polymarket_us": ["ogc"]}},
+  "OL": {"names": ["Lyon", "Olympique Lyonnais"], "codes": {"kalshi": ["OL"], "polymarket_us": ["lyo"]}},
+  "OM": {"names": ["Marseille", "Olympique de Marseille"], "codes": {"kalshi": ["OM"], "polymarket_us": ["olm"]}},
+  "PAR": {"names": ["Paris", "Paris FC"], "codes": {"kalshi": ["PAR"], "polymarket_us": ["pfc"]}},
+  "PSG": {"names": ["PSG", "Paris Saint-Germain FC"], "codes": {"kalshi": ["PSG"], "polymarket_us": ["psg"]}},
+  "RCL": {"names": ["Lens", "Racing Club de Lens"], "codes": {"kalshi": ["RCL"], "polymarket_us": ["rcl"]}},
+  "RCS": {"names": ["Strasbourg Alsace", "RC Strasbourg Alsace"], "codes": {"kalshi": ["RCS"], "polymarket_us": ["str"]}},
+  "REN": {"names": ["Stade Rennes", "Stade Rennais FC 1901"], "codes": {"kalshi": ["REN"], "polymarket_us": ["ren"]}},
+  "STB": {"names": ["Stade Brest 29", "Stade Brestois 29"], "codes": {"kalshi": ["STB"], "polymarket_us": ["sbr"]}},
+  "TFC": {"names": ["Toulouse", "Toulouse FC"], "codes": {"kalshi": ["TFC"], "polymarket_us": ["tou"]}}
+}

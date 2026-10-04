@@ -1,74 +1,33 @@
 """
 Turn Kalshi contracts into Bets.
 
-The series ticker says the kind, the event ticker holds the game, and the
-market ticker holds the team. College football's, hockey's, and
-basketball's game series share the NFL's layout, with team codes of two
-to five letters in college football, two or three in hockey, and three in
-basketball. Baseball's event tickers carry the start time too, which
-tells a doubleheader's two games apart. Player props name the player in
-the title, before the colon.
+Only futures are cataloged, bets on a season, a title, an award, a
+season's leader, or an election, never on one game. Each kind has a series
+of its own, or an event of its own within a series, 'KXEPLTOP-27TOP4' the
+top four of the Premier League, which the event's key names once its year
+is taken out. A team future's market ticker ends in the team, 'KXSB-27-KC'.
+An award's, a leader's, or a title holder's names the person in its
+subtitle, 'Aaron Judge'. A team's season total has one event per team,
+'KXNFLWINS-27ARI', and one market per line, and a player's has one event
+per line and one market per player. The venues number seasons
+differently, so a future's season is the one its settlement falls in,
+which both agree on.
 
-Futures, bets on a season rather than a game, each have a series of their
-own. A team future's market ticker ends in the team, an award's names the
-player in its subtitle, and a season win total's event ticker ends in the
-team, with one market per line. The venues number seasons differently, so
-a future's season is the one its settlement falls in, which both agree
-on. This is the only file that knows Kalshi's ticker layout.
+Elections have a series per office and state, 'SENATEGA', one event per
+election year, '-26', and a market per party, D or R, or per candidate.
+A race's season is its election year. In a state whose general election
+can put two of one party on the ballot, California's and Washington's top
+two and Alaska's top four, the venues read a party's win differently, so
+there only the candidates are paired. This is the only file that knows
+Kalshi's ticker layout.
 """
 
 import re
-from catalog.classify.teams import player_key, team_from_code
-from collections import defaultdict
+from catalog.classify.teams import STATES, TOP_TWO_STATES, person, race, team_from_code
 from common.timeutil import season_from_date
-from datetime import datetime
 from db.models import Bet
 
-GAME_DATE = re.compile(r"^(\d{2})([A-Z]{3})(\d{2})(\d{4})?([A-Z]+)$")    # '26SEP20CARATL', or '26SEP291400PHIATL' with the Eastern start time.
-GAME_SERIES = {
-    "KXNFLGAME": "game_winner", "KXNFLSPREAD": "spread", "KXNFLTOTAL": "total",
-    "KXNCAAFGAME": "game_winner", "KXNCAAFSPREAD": "spread", "KXNCAAFTOTAL": "total",
-    "KXMLBGAME": "game_winner", "KXMLBSPREAD": "spread", "KXMLBTOTAL": "total", "KXMLBTEAMTOTAL": "team_total",
-    "KXNHLGAME": "game_winner", "KXNHLSPREAD": "spread", "KXNHLTOTAL": "total", "KXNHLTEAMTOTAL": "team_total",
-    "KXNBAGAME": "game_winner", "KXNBASPREAD": "spread", "KXNBATOTAL": "total", "KXNBATEAMTOTAL": "team_total",
-}
-# Player props on one game. Every one but the first touchdown carries a line, stored as the strict threshold.
-PLAYER_SERIES = {
-    "KXNFLRECYDS": "player_receiving_yards",
-    "KXNFLRSHYDS": "player_rushing_yards",
-    "KXNFLPASSYDS": "player_passing_yards",
-    "KXNFLREC": "player_receptions",
-    "KXNFLPASSTDS": "player_passing_touchdowns",
-    "KXNFLTD": "player_touchdowns",
-    "KXNFLFIRSTTD": "player_first_touchdown",
-    "KXNFLPASSCOMP": "player_passing_completions",
-    "KXNFLPASSATT": "player_passing_attempts",
-    "KXNFLPASSINT": "player_interceptions_thrown",
-    "KXNFLRSHATT": "player_rushing_attempts",
-    "KXNFLRRYDS": "player_scrimmage_yards",
-    "KXNFLLONGREC": "player_longest_reception",
-    "KXMLBHIT": "player_hits",
-    "KXMLBHR": "player_home_runs",
-    "KXMLBKS": "player_strikeouts",
-    "KXMLBTB": "player_total_bases",
-    "KXMLBHRR": "player_hits_runs_rbis",
-    "KXMLBRBI": "player_rbis",
-    "KXMLBSB": "player_stolen_bases",
-    "KXMLBOUTS": "player_outs",
-    "KXMLBHA": "player_hits_allowed",
-    "KXMLBERA": "player_earned_runs_allowed",
-    "KXMLBWA": "player_walks_allowed",
-    "KXNHLGOAL": "player_goals",
-    "KXNHLPTS": "player_points",
-    "KXNBAPTS": "player_points",
-    "KXNBAREB": "player_rebounds",
-    "KXNBAAST": "player_assists",
-    "KXNBA3PT": "player_threes",
-    "KXNBABLK": "player_blocks",
-}
-PLAYER_TITLE = re.compile(r"^(.+?): ")     # 'Bijan Robinson: 100+ receiving yards'.
-
-# FUTURES. Each series is one kind. The market ticker ends in the team, 'KXSB-27-KC'.
+# TEAM FUTURES. The market ticker ends in the team, 'KXSB-27-KC'.
 CONFERENCES = ("AAC", "ACC", "B10", "B12", "CUSA", "MAC", "MWC", "PAC12", "SBELT")     # College conferences, bar the SEC, spelled alike.
 NFL_DIVISIONS = tuple(f"{c}{d}" for c in ("AFC", "NFC") for d in ("EAST", "NORTH", "SOUTH", "WEST"))     # 'KXNFLAFCEAST'.
 NHL_DIVISIONS = ("ATLANTIC", "CENTRAL", "METROPOLITAN", "PACIFIC")     # 'KXNHLATLANTIC'.
@@ -84,27 +43,101 @@ TEAM_FUTURES = {
     "KXNCAAFFINALIST": "reach_final",
     **{f"KXNCAAF{c}QUAL": "reach_conf_title_game" for c in CONFERENCES}, "KXNCAAFSECQ": "reach_conf_title_game",
     "KXNHLPRES": "presidents_trophy",
+    "KXRECORDNFLBEST": "best_record", "KXNFLLASTTOLOSE": "last_undefeated", "KXNFLLASTTOWIN": "last_winless",
+    "KXNCAAFUNDEFEATED": "undefeated",
+    "KXWNBA": "champion", "KXMARMAD": "champion",
+    "KXPREMIERLEAGUE": "champion", "KXEPLRELEGATION": "relegated", "KXEPLLAST": "last_place",
+    "KXLALIGA": "champion", "KXLALIGARELEGATION": "relegated", "KXLALIGALAST": "last_place",
+    "KXSERIEA": "champion", "KXSERIEARELEGATION": "relegated", "KXSERIEALAST": "last_place",
+    "KXBUNDESLIGA": "champion", "KXBUNDESLIGARELEGATION": "relegated", "KXBUNDESLIGALAST": "last_place",
+    "KXLIGUE1": "champion", "KXLIGUE1RELEGATION": "relegated", "KXLIGUE1LAST": "last_place",
+    "KXMLSCUP": "champion", "KXMLSEAST": "conf_champion", "KXMLSWEST": "conf_champion",
+    "KXUCL": "champion", "KXUCLTOP": "league_phase_top", "KXUCLTOP8": "league_phase_top_8", "KXUCLBOTTOM": "league_phase_last",
+    "KXUEL": "champion",
+    "KXF1CONSTRUCTORS": "constructors_champion",
 }
-ROUND_SERIES = "KXNFLROUNDQUAL"     # Playoff round qualifiers, one event per round: 'KXNFLROUNDQUAL-27CONF'.
-ROUNDS = {"CONF": "reach_conf_final", "DIV": "reach_divisional_round"}
+# Team futures whose kind is the event's, by its key: 'KXEPLTOP-27TOP4' is the top four.
+EVENT_TEAM_FUTURES = {
+    "KXNFLROUNDQUAL": {"CONF": "reach_conf_final", "DIV": "reach_divisional_round"},     # Playoff rounds, 'KXNFLROUNDQUAL-27CONF'.
+    "KXNBARECORD": {"BEST": "best_record", "WORST": "worst_record"},
+    "KXEPLTOP": {"TOP2": "top_2", "TOP4": "top_4", "TOP6": "top_6", "TOPHALF": "top_half"},
+    "KXLALIGATOP": {"TOP4": "top_4", "TOP6": "top_6"},
+    "KXSERIEATOP": {"TOP4": "top_4"}, "KXBUNDESLIGATOP": {"TOP4": "top_4"}, "KXLIGUE1TOP": {"TOP4": "top_4"},
+    "KXLIGAMX": {"APER": "apertura_champion", "CLA": "clausura_champion"},
+    "KXUCLROUND": {"RO16": "reach_round_of_16", "QUAR": "reach_quarterfinal", "SEMI": "reach_semifinal", "FINAL": "reach_final"},
+}
+# The conference that wins college football's title, 'KXNCAAFCONF-26-B10'.
+CONFERENCE_SERIES = "KXNCAAFCONF"
+CONFERENCE_CODES = {"B10": "big_ten", "SEC": "sec", "B12": "big_12", "ACC": "acc"}
 SERIES_WINNERS = "KXMLBSERIES"      # One event per playoff series, the round last: 'KXMLBSERIES-26PHIATLWC'.
 SERIES_ROUNDS = {"WC": "wild_card_series"}
 SERIES_EVENT = re.compile(r"^\d{2}([A-Z]+?)(WC|DS|CS|WS)$")
-# Awards, the player named in the market's subtitle, 'Aaron Judge'.
+
+# PERSON FUTURES. The market's subtitle is the person, 'Aaron Judge'.
 AWARD_FUTURES = {
     "KXNFLMVP": "mvp", "KXNFLOPOTY": "offensive_player", "KXNFLDPOTY": "defensive_player", "KXNFLOROTY": "offensive_rookie",
     "KXNFLDROTY": "defensive_rookie", "KXNFLCPOTY": "comeback_player", "KXNFLCOTY": "coach",
     "KXMLBALMVP": "al_mvp", "KXMLBNLMVP": "nl_mvp", "KXMLBALCY": "al_cy_young", "KXMLBNLCY": "nl_cy_young",
     "KXMLBALROTY": "al_rookie", "KXMLBNLROTY": "nl_rookie", "KXMLBWSMVP": "world_series_mvp",
-    "KXNBAMVP": "mvp",
-    "KXNHLHART": "hart", "KXNHLNORRIS": "norris", "KXNHLVEZINA": "vezina", "KXNHLADAMS": "jack_adams",
+    "KXNBAMVP": "mvp", "KXWNBAMVP": "mvp",
+    "KXNHLHART": "hart", "KXNHLNORRIS": "norris", "KXNHLVEZINA": "vezina", "KXNHLADAMS": "jack_adams", "KXNHLCALDER": "calder",
     "KXNHLRICHARD": "goals_leader", "KXNHLROSS": "points_leader",
-    "KXHEISMAN": "heisman",
+    "KXHEISMAN": "heisman", "KXBALLONDOR": "ballon_dor",
 }
-# Season totals, one event per team, 'KXNFLWINS-27ARI', and one market per line, stored as the strict threshold.
+# A season's leaders, whose ties both venues' rules treat as they do an award's.
+LEADER_FUTURES = {
+    "KXLEADERNFLPYDS": "passing_yards_leader", "KXLEADERNFLRYDS": "receiving_yards_leader", "KXLEADERNFLRUSHYDS": "rushing_yards_leader",
+    "KXLEADERNFLPTDS": "passing_touchdowns_leader", "KXLEADERNFLRTDS": "receiving_touchdowns_leader",
+    "KXLEADERNFLRUSHTDS": "rushing_touchdowns_leader", "KXLEADERNFLSACKS": "sacks_leader", "KXLEADERNFLINT": "interceptions_leader",
+    "KXLEADERNFLPINT": "interceptions_thrown_leader",
+}
+# Champions and title holders, who win it outright.
+TITLE_FUTURES = {
+    "KXF1": "drivers_champion", "KXNASCARCUPSERIES": "cup_series_champion", "KXNASCARAUTOPARTSSERIES": "oreilly_series_champion",
+    "KXNASCARTRUCKSERIES": "truck_series_champion", "KXPDCDARTS": "world_champion",
+    "KXATP1RANK": "atp_year_end_no1", "KXWTA1RANK": "wta_year_end_no1",
+    **{f"KXUFC{division.upper()}TITLE": f"{division}_champion" for division in (
+        "flyweight", "bantamweight", "featherweight", "lightweight", "welterweight", "middleweight", "heavyweight")},
+    "KXUFCLHEAVYWEIGHTTITLE": "light_heavyweight_champion",
+}
+COLLEGE_STATS = {"PASSYDS": "passing_yards_leader", "PASSTD": "passing_touchdowns_leader", "RECYDS": "receiving_yards_leader",
+                 "RSHYDS": "rushing_yards_leader", "SACK": "sacks_leader"}
+# Leaders whose kind is the event's, by its key: 'KXEPLLEADER-27GOAL' leads the Premier League in goals.
+EVENT_LEADER_FUTURES = {
+    **{series: {"GOAL": "goals_leader", "AST": "assists_leader"} for series in (
+        "KXEPLLEADER", "KXLALIGALEADER", "KXSERIEALEADER", "KXBUNDESLIGALEADER", "KXLIGUE1LEADER", "KXUCLLEADER")},
+    "KXMLBLEADERPLAYOFF": {"HR": "postseason_home_runs_leader", "RBI": "postseason_rbi_leader", "KS": "postseason_strikeouts_leader",
+                           "RUNS": "postseason_runs_leader", "SB": "postseason_stolen_bases_leader"},
+    # A college conference's, 'KXNCAAFSECLEADER-26PASSYDS'. The country's, KXNCAAFLEADER, counts all of Division I, where
+    # Polymarket US's counts the FBS only, so it is not read.
+    **{f"KXNCAAF{series}LEADER": {stat: f"{conference}_{kind}" for stat, kind in COLLEGE_STATS.items()}
+       for series, conference in (("SEC", "sec"), ("BIGTEN", "big_ten"), ("BIG12", "big_12"), ("ACC", "acc"))},
+}
+
+# SEASON TOTALS. A team's, one event per team, 'KXNFLWINS-27ARI', and one market per line, stored as the strict threshold.
 LINE_FUTURES = {"KXNFLWINS": "season_wins", "KXNCAAFWINS": "season_wins", "KXNBAWINS": "season_wins", "KXNHLSEASONPTS": "season_points"}
 LINE_EVENT = re.compile(r"^\d{2}([A-Z]+)$")
-FUTURE_SERIES = {*TEAM_FUTURES, ROUND_SERIES, SERIES_WINNERS, *AWARD_FUTURES, *LINE_FUTURES}
+# A team's with the team in the market ticker before its line, 'KXEPLTEAMPOINTS-27-ARS70'.
+TEAM_LINE_FUTURES = {"KXEPLTEAMPOINTS": "season_points"}
+# A player's, one event per line, 'KXNFLSEASONPASSYDS-27C3000', and one market per player, named in its subtitle.
+PLAYER_LINE_FUTURES = {
+    "KXNFLSEASONPASSYDS": "season_passing_yards", "KXNFLSEASONPASSTDS": "season_passing_touchdowns",
+    "KXNFLSEASONRECYDS": "season_receiving_yards", "KXNFLSEASONRECTD": "season_receiving_touchdowns",
+    "KXNFLSEASONRSHYDS": "season_rushing_yards", "KXNFLSEASONRSHTD": "season_rushing_touchdowns", "KXNFLSEASONREC": "season_receptions",
+}
+
+# ELECTIONS. The country's control of each house, 'CONTROLH-2026', with a market per party.
+CONTROL_SERIES = {"CONTROLH": "house_control", "CONTROLS": "senate_control"}
+# A race's series, by office and state, with the House district in it where it has one: 'SENATEGA', 'HOUSEAZ1', 'KXHOUSEIN7'.
+RACE_SERIES = {re.compile(r"^SENATE([A-Z]{2})$"): "senate_race", re.compile(r"^GOVPARTY([A-Z]{2})$"): "governor_race",
+               re.compile(r"^KXGOV([A-Z]{2})$"): "governor_race", re.compile(r"^(?:KX)?HOUSE([A-Z]{2})(\d+|AL)$"): "house_race"}
+HOUSE_RACE_SERIES = "KXHOUSERACE"       # Every district in one series, an event each: 'KXHOUSERACE-CA01-26'.
+HOUSE_RACE_EVENT = re.compile(r"^([A-Z]{2})(\d+|AL)-(\d{2})$")
+PARTIES = {"D": "D", "R": "R"}          # A race's market tail for a party's candidate, whoever it is, by the party.
+
+FUTURE_SERIES = {*TEAM_FUTURES, *EVENT_TEAM_FUTURES, CONFERENCE_SERIES, SERIES_WINNERS, *AWARD_FUTURES, *LEADER_FUTURES, *TITLE_FUTURES,
+                 *EVENT_LEADER_FUTURES, *LINE_FUTURES, *TEAM_LINE_FUTURES, *PLAYER_LINE_FUTURES, *CONTROL_SERIES, HOUSE_RACE_SERIES}
+SERIES_PATTERNS = tuple(RACE_SERIES)    # Series read by their shape, there being one per state or district.
 
 
 def team(code, sport):
@@ -116,26 +149,29 @@ def team(code, sport):
 
 def split_codes(pair, sport):
     """
-    Split two glued ticker codes such as 'CARATL' or 'WKUNMSU' into two of
-    the sport's teams. Codes differ in length, so every split is tried, and
-    one that is not the only split into two teams is refused, not guessed.
+    Split two glued ticker codes such as 'PHIATL' into two of the sport's
+    teams. Codes differ in length, so every split is tried, and one that is
+    not the only split into two teams is refused, not guessed.
     """
     splits = [(a, b) for a, b in ((team(pair[:i], sport), team(pair[i:], sport)) for i in range(1, len(pair))) if a and b]
     return splits[0] if len(splits) == 1 else (None, None)
 
 
-def parse_game(tail, sport):
+def event_key(event_tail):
     """
-    Parse a game event tail such as '26SEP20CARATL' or '26SEP291400PHIATL'
-    into (date, away, home), the teams being the sport's.
+    An event's key, its tail with the season's two digits taken out: '27TOP4' is 'TOP4', and 'APER26GOAL' 'APERGOAL'.
     """
-    m = GAME_DATE.match(tail)
-    if not m:
-        return None, None, None
-    yy, mon, dd, _, pair = m.groups()
-    date = datetime.strptime(f"20{yy} {mon} {dd}", "%Y %b %d").strftime("%Y-%m-%d")
-    away, home = split_codes(pair, sport)
-    return date, away, home
+    return re.sub(r"\d{2}", "", event_tail, count=1)
+
+
+def lookup(series):
+    """
+    The table a series is read by and its entry there, or (None, None).
+    """
+    for table in (TEAM_FUTURES, EVENT_TEAM_FUTURES, AWARD_FUTURES, LEADER_FUTURES, TITLE_FUTURES, EVENT_LEADER_FUTURES):
+        if series in table:
+            return table, table[series]
+    return None, None
 
 
 def classify_future(row, series, event_tail, market_tail, sport, base):
@@ -143,21 +179,33 @@ def classify_future(row, series, event_tail, market_tail, sport, base):
     The Bet a futures contract row describes, or None. Its season is the one its settlement falls in.
     """
     future = dict(season=season_from_date(row["close_time"][:10], sport), game_date=None, polarity="yes", **base)
-    if series in AWARD_FUTURES:
-        name = row["outcome"]
-        return Bet(kind=AWARD_FUTURES[series], team_a=None, team_b=None, subject=player_key(name), line=None, **future) if name else None
+    table, entry = lookup(series)
+    kind = entry.get(event_key(event_tail)) if isinstance(entry, dict) else entry
+    if table in (AWARD_FUTURES, LEADER_FUTURES, TITLE_FUTURES, EVENT_LEADER_FUTURES):
+        subject = person(row["outcome"])
+        return Bet(kind=kind, team_a=None, team_b=None, subject=subject, line=None, **future) if kind and subject else None
+    if series in PLAYER_LINE_FUTURES:
+        subject = person(row["outcome"])
+        if not subject or row["line"] is None:
+            return None
+        return Bet(kind=PLAYER_LINE_FUTURES[series], team_a=None, team_b=None, subject=subject, line=row["line"], **future)
     if series in LINE_FUTURES:
         m = LINE_EVENT.match(event_tail)
         subject = team(m.group(1), sport) if m else None
         if not subject or row["line"] is None:
             return None
         return Bet(kind=LINE_FUTURES[series], team_a=None, team_b=None, subject=subject, line=row["line"], **future)
+    if series in TEAM_LINE_FUTURES:
+        subject = team(market_tail.rstrip("0123456789"), sport)
+        if not subject or row["line"] is None:
+            return None
+        return Bet(kind=TEAM_LINE_FUTURES[series], team_a=None, team_b=None, subject=subject, line=row["line"], **future)
+    if series == CONFERENCE_SERIES:
+        subject = CONFERENCE_CODES.get(market_tail)
+        return Bet(kind="champion_conference", team_a=None, team_b=None, subject=subject, line=None, **future) if subject else None
     subject = team(market_tail, sport)
     if not subject:
         return None
-    if series == ROUND_SERIES:
-        kind = ROUNDS.get(event_tail[2:])
-        return Bet(kind=kind, team_a=None, team_b=None, subject=subject, line=None, **future) if kind else None
     if series == SERIES_WINNERS:
         m = SERIES_EVENT.match(event_tail)
         kind = SERIES_ROUNDS.get(m.group(2)) if m else None
@@ -166,7 +214,42 @@ def classify_future(row, series, event_tail, market_tail, sport, base):
             return None
         team_a, team_b = sorted(teams)      # The venues list a series' teams in different orders.
         return Bet(kind=kind, team_a=team_a, team_b=team_b, subject=subject, line=None, **future)
-    return Bet(kind=TEAM_FUTURES[series], team_a=None, team_b=None, subject=subject, line=None, **future)
+    return Bet(kind=kind, team_a=None, team_b=None, subject=subject, line=None, **future) if kind else None
+
+
+def race_side(state, market_tail, row):
+    """
+    Who a race's market is on, a party, 'D' or 'R', or a candidate's name key, or None: in a state whose general election
+    can pit two of one party, see TOP_TWO_STATES, only a candidate.
+    """
+    if market_tail in PARTIES:
+        return PARTIES[market_tail] if state not in TOP_TWO_STATES else None
+    return person(row["outcome"])
+
+
+def classify_election(row, series, event_tail, market_tail, base):
+    """
+    The Bet an election contract row describes, or None. Its season is the election's year.
+    """
+    year = event_tail.rsplit("-", 1)[-1]
+    if not year.isdigit():
+        return None
+    election = dict(season=2000 + int(year[-2:]), game_date=None, team_a=None, team_b=None, line=None, polarity="yes", **base)
+    if series in CONTROL_SERIES:
+        party = PARTIES.get(market_tail)
+        return Bet(kind=CONTROL_SERIES[series], subject=party, **election) if party else None
+    m = HOUSE_RACE_EVENT.match(event_tail) if series == HOUSE_RACE_SERIES else None
+    if m:
+        state, district, kind = m.group(1), m.group(2), "house_race"
+    else:
+        found = next(((pattern.match(series), kind) for pattern, kind in RACE_SERIES.items() if pattern.match(series)), (None, None))
+        if not found[0]:
+            return None
+        state, district, kind = found[0].group(1), (found[0].groups() + (None,))[1], found[1]
+    if state not in STATES:
+        return None
+    side = race_side(state, market_tail, row)
+    return Bet(kind=kind, subject=f"{race(state, district)} {side}", **election) if side else None
 
 
 def classify(row):
@@ -177,61 +260,8 @@ def classify(row):
     event_tail = event[len(series) + 1:]
     market_tail = ticker[len(event) + 1:]
     base = dict(venue=row["venue"], contract_id=row["contract_id"])
-
-    if series in GAME_SERIES:
-        game_date, away, home = parse_game(event_tail, sport)
-        if not game_date or not (away and home):
-            return None
-        kind = GAME_SERIES[series]
-        common = dict(season=season_from_date(game_date, sport), game_date=game_date, team_a=away, team_b=home, **base)
-        if kind == "game_winner":
-            # Stated as the away team winning, with the home contract as the complement.
-            picked = team(market_tail, sport)
-            if picked not in (away, home):
-                return None
-            return Bet(kind=kind, subject=away, line=None, polarity="yes" if picked == away else "no", **common)
-        if kind in ("spread", "team_total"):
-            # The market tail is a team code plus a rounded line, for example 'ATL17' for 16.5: the team wins by more,
-            # or for a team total, 'ATL2' for 1.5, it scores more.
-            subject = team(market_tail.rstrip("0123456789"), sport)
-            if not subject or row["line"] is None:
-                return None
-            return Bet(kind=kind, subject=subject, line=row["line"], polarity="yes", **common)
-        if kind == "total":
-            return Bet(kind=kind, subject=None, line=row["line"], polarity="yes", **common) if row["line"] is not None else None
-
-    if series in PLAYER_SERIES:
-        game_date, away, home = parse_game(event_tail, sport)
-        m = PLAYER_TITLE.match(row["title"] or "")
-        if not game_date or not (away and home) or not m or "D/ST" in m.group(1):
-            return None
-        kind = PLAYER_SERIES[series]
-        line = None if kind == "player_first_touchdown" else row["line"]
-        if kind != "player_first_touchdown" and line is None:
-            return None
-        return Bet(kind=kind, season=season_from_date(game_date, sport), game_date=game_date, team_a=away, team_b=home,
-                   subject=player_key(m.group(1)), line=line, polarity="yes", **base)
-
+    if series in CONTROL_SERIES or series == HOUSE_RACE_SERIES or any(p.match(series) for p in SERIES_PATTERNS):
+        return classify_election(row, series, event_tail, market_tail, base)
     if series in FUTURE_SERIES and row["close_time"]:
         return classify_future(row, series, event_tail, market_tail, sport, base)
     return None
-
-
-def doubleheaders(rows):
-    """
-    The contracts on games the same teams play twice on one date, which a
-    bet cannot tell apart yet, since a game is its date and teams. Kalshi's
-    baseball event tickers give each game's start time, so a date and teams
-    with two start times is a doubleheader.
-    """
-    starts, games = defaultdict(set), {}
-    for row in rows:
-        series = row["series_id"]
-        if series not in GAME_SERIES and series not in PLAYER_SERIES:
-            continue
-        m = GAME_DATE.match(row["event_id"][len(series) + 1:])
-        if m and m.group(4):
-            game = (row["sport"], *m.group(1, 2, 3, 5))
-            starts[game].add(m.group(4))
-            games[row["contract_id"]] = game
-    return {contract_id for contract_id, game in games.items() if len(starts[game]) > 1}

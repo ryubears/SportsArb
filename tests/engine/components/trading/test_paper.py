@@ -289,6 +289,12 @@ def test_a_trade_takes_half_the_book_with_no_cap(tmp_path, quick):
     assert at(ex, PAIR, YES, NO, 0.08, NOW) is True and stored(conn)[0]["quantity"] == 2500       # Half the 5,000 shown.
 
 
+@pytest.mark.full_share
+def test_a_trade_takes_all_the_book_shows_by_default(tmp_path, quick):
+    conn, cash, ex = executor(tmp_path, books(size=5000))
+    assert at(ex, PAIR, YES, NO, 0.08, NOW) is True and stored(conn)[0]["quantity"] == 5000       # All of the 5,000 shown.
+
+
 def test_legs_on_one_venue_share_its_cash(tmp_path, quick):
     other = dict(NO, venue="polymarket_us", contract_id="pm2")         # No through the other side of a second Polymarket US market.
     latest = {("polymarket_us", "pm"): books()[("polymarket_us", "pm")],

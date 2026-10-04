@@ -365,7 +365,7 @@ def load_held(conn, mode):
     """
     Dollars the unsettled trades of one mode hold on each venue, at what
     their legs paid for the contracts they still hold, as {venue: dollars},
-    for the brakes and the summary.
+    for the brakes.
     """
     rows = conn.execute("""
         SELECT venue, SUM(cost) FROM (

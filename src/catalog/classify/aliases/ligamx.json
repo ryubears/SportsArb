@@ -1,0 +1,20 @@
+{
+  "ALA": {"names": ["Atlante", "Atlante FC"], "codes": {"kalshi": ["ALA"], "polymarket_us": ["aft"]}},
+  "AME": {"names": ["America", "CF América"], "codes": {"kalshi": ["AME"], "polymarket_us": ["ame"]}},
+  "ASL": {"names": ["San Luis", "Atlético San Luis"], "codes": {"kalshi": ["ASL"], "polymarket_us": ["asl"]}},
+  "ATL": {"names": ["Atlas", "Atlas FC"], "codes": {"kalshi": ["ATL"], "polymarket_us": ["atl"]}},
+  "CDG": {"names": ["Guadalajara", "CD Guadalajara"], "codes": {"kalshi": ["CDG"], "polymarket_us": ["gua"]}},
+  "CRA": {"names": ["Cruz Azul", "CF Cruz Azul"], "codes": {"kalshi": ["CRA"], "polymarket_us": ["caz"]}},
+  "JUA": {"names": ["Juarez", "FC Juárez"], "codes": {"kalshi": ["JUA"], "polymarket_us": ["ju"]}},
+  "LEO": {"names": ["Leon", "Club León FC"], "codes": {"kalshi": ["LEO"], "polymarket_us": ["leo"]}},
+  "MON": {"names": ["Monterrey", "CF Monterrey"], "codes": {"kalshi": ["MON"], "polymarket_us": ["cmf"]}},
+  "NCX": {"names": ["Necaxa", "Club Necaxa"], "codes": {"kalshi": ["NCX"], "polymarket_us": ["nec"]}},
+  "PAC": {"names": ["Pachuca", "CF Pachuca"], "codes": {"kalshi": ["PAC"], "polymarket_us": ["pac"]}},
+  "PUE": {"names": ["Puebla", "Club Puebla"], "codes": {"kalshi": ["PUE"], "polymarket_us": ["pue"]}},
+  "PUM": {"names": ["Pumas UNAM", "Pumas de la UNAM"], "codes": {"kalshi": ["PUM"], "polymarket_us": ["pum"]}},
+  "QUE": {"names": ["Queretaro", "Querétaro FC"], "codes": {"kalshi": ["QUE"], "polymarket_us": ["que"]}},
+  "SLA": {"names": ["Santos Laguna", "Club Santos Laguna"], "codes": {"kalshi": ["SLA"], "polymarket_us": ["san"]}},
+  "TIG": {"names": ["Tigres", "Tigres de la UANL"], "codes": {"kalshi": ["TIG"], "polymarket_us": ["tig"]}},
+  "TIJ": {"names": ["Tijuana de Caliente", "Club Tijuana"], "codes": {"kalshi": ["TIJ"], "polymarket_us": ["tij"]}},
+  "TOL": {"names": ["Toluca", "Deportivo Toluca FC"], "codes": {"kalshi": ["TOL"], "polymarket_us": ["tol"]}}
+}

@@ -111,7 +111,7 @@ def test_a_trading_session_logs_its_settings_when_it_starts(tmp_path, monkeypatc
         await s.close()
     asyncio.run(scenario())
     first = capsys.readouterr().out.splitlines()[0]
-    assert first[9:].startswith("settings: min edge 0.05$, paying 24h or more out and 50% a year, no game once kicked off, fill share 0.5, "
+    assert first[9:].startswith("settings: min edge 0.05$, paying 24h or more out and 50% a year, no game once kicked off, fill share 1.0, "
                                 "rejects 3%")
 
 
@@ -132,7 +132,7 @@ def test_a_session_trading_both_modes_keeps_a_desk_for_each_and_offers_live_the_
         return s
     s = asyncio.run(scenario())
     assert [d.mode for d in s.desks] == ["live", "paper"]
-    assert s.scanner.on_signals == [s.desks[0].executor.signal, s.desks[1].executor.signal]
+    assert s.scanner.on_signals == [s.desks[0].signal, s.desks[1].signal]
     assert s.desks[0].cash.amounts == {"kalshi": 800.0, "polymarket_us": 600.0}
     assert s.desks[1].cash.amounts == {"kalshi": 10000.0, "polymarket_us": 10000.0}         # Paper money is its own.
     out = [line[9:] for line in capsys.readouterr().out.splitlines()]                       # Past the timestamp.
@@ -141,3 +141,25 @@ def test_a_session_trading_both_modes_keeps_a_desk_for_each_and_offers_live_the_
     assert "live balances read: kalshi 800$, polymarket_us 600$" in out
     heads = [line.split(":")[0] for line in out]
     assert {"live", "live settled", "paper", "paper settled"} <= set(heads) and not any(head.endswith("capital") for head in heads)
+
+
+def test_a_paper_only_sport_is_offered_to_the_paper_desk_alone(tmp_path, monkeypatch, capsys, fake_stream):
+    monkeypatch.setattr(money_live, "READERS", {"kalshi": lambda: (800.0, {}), "polymarket_us": lambda: (600.0, {})})
+    monkeypatch.setattr(trading_live, "POSITIONS", {"kalshi": lambda: {}, "polymarket_us": lambda: {}})
+    monkeypatch.setattr(notify, "EMAIL_FILE", tmp_path / "email.json")
+    for venue in streams.STREAMS:
+        monkeypatch.setitem(streams.STREAMS, venue, fake_stream)
+
+    async def scenario():
+        s = run.Session(database.connect(tmp_path / "test.sqlite"), ("nfl", "epl"), executors=run.EXECUTE["both"], paper_sports=("epl",))
+        s.start()
+        offered = []
+        for desk in s.desks:
+            desk.executor.signal = lambda pair, *args, mode=desk.mode: offered.append((mode, pair["sport"])) or True
+        results = [desk.signal({"sport": sport}, None, None, 0.1, 5, {}, "now") for sport in ("nfl", "epl") for desk in s.desks]
+        await s.close()
+        return s, offered, results
+    s, offered, results = asyncio.run(scenario())
+    assert [(d.mode, d.sports) for d in s.desks] == [("live", ("nfl",)), ("paper", None)]
+    assert offered == [("live", "nfl"), ("paper", "nfl"), ("paper", "epl")] and results == [True, True, False, True]
+    assert "paper only, not traded live: epl" in capsys.readouterr().out
