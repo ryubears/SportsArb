@@ -112,19 +112,27 @@ def fake_api(monkeypatch, answers):
     return calls
 
 
-def test_a_games_markets_are_left_out_by_either_game_id_and_a_future_has_no_start_time(monkeypatch):
+def test_a_game_a_race_and_a_window_start_when_their_event_does_and_a_future_has_no_start_time(monkeypatch):
     def event(slug, **ids):
         return {"slug": slug, "startTime": "2026-09-29T21:00:00Z", "markets": [{"slug": f"aec-{slug}", "id": 1}], **ids}
     events = [event("nfl-pit-cle-2026-10-01", gameId=19503, sportradarGameId="a"),
               event("nhl-fla-car-2026-09-29", sportradarGameId="198c21f5"),       # NHL preseason games carry only Sportradar's.
               event("nhl-champ-2027-06-18-w"),                                    # A future.
-              event("nhl-hart-2027-06-09-w", sportradarGameId="type_hart_trophy")]     # An award, with an id like a game's.
-    events[-1]["markets"][0] |= {"sportsMarketType": "futures", "question": "NHL Hart Memorial Trophy Winner", "title": "Connor McDavid",
-                                 "endDate": "2027-06-24T04:00:00Z"}
-    events[-1]["endDate"] = "2027-06-09T23:59:00Z"
+              event("nhl-hart-2027-06-09-w", sportradarGameId="type_hart_trophy"),    # An award, with an id like a game's.
+              event("f1-sasgp-2026-10-11-w", gameId=51),                          # A race, its winners typed as futures.
+              event("btc-updown-15m-2026-10-04-0530z")]                           # A Bitcoin window, with no sports id.
+    events[3]["markets"][0] |= {"sportsMarketType": "futures", "question": "NHL Hart Memorial Trophy Winner", "title": "Connor McDavid",
+                                "endDate": "2027-06-24T04:00:00Z"}
+    events[3]["endDate"] = "2027-06-09T23:59:00Z"
+    events[4]["markets"][0] |= {"sportsMarketType": "futures", "title": "Max Verstappen"}
+    events[4] |= {"startTime": "2026-10-11T12:00:00Z", "endDate": "2026-10-11T23:59:00Z"}
+    events[5]["markets"][0] |= {"assetPriceTerms": {"windowStart": "2026-10-04T05:30:00Z", "windowEnd": "2026-10-04T05:45:00Z"}}
     monkeypatch.setattr(polymarket_us, "fetch_events", lambda tag: events)
     found = {c.event_id: c for c in polymarket_us.contracts("nhl", ["nhl"])}
-    assert {event: c.start_time for event, c in found.items()} == {"nhl-champ-2027-06-18-w": None, "nhl-hart-2027-06-09-w": None}
+    assert {event: c.start_time for event, c in found.items()} == {
+        "nfl-pit-cle-2026-10-01": "2026-09-29T21:00:00+00:00", "nhl-fla-car-2026-09-29": "2026-09-29T21:00:00+00:00",
+        "nhl-champ-2027-06-18-w": None, "nhl-hart-2027-06-09-w": None, "f1-sasgp-2026-10-11-w": "2026-10-11T12:00:00+00:00",
+        "btc-updown-15m-2026-10-04-0530z": "2026-10-04T05:30:00+00:00"}
     assert found["nhl-hart-2027-06-09-w"].title == "Connor McDavid"         # A future's title is its player, not the event's question.
     assert found["nhl-hart-2027-06-09-w"].close_time == "2027-06-09T23:59:00+00:00"   # The award, not the market's two weeks after.
 

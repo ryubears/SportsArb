@@ -22,6 +22,10 @@ IDENTITY = ("kind", "season", "game_date", "team_a", "team_b", "subject", "line"
 
 # Flag a pair when its members stop trading more than this many days apart.
 CLOSE_GAP_LIMIT_DAYS = 60
+# Sports whose venues may date one match a day apart: Kalshi and Polymarket US date a tennis match in Asia by different
+# clocks, 'Lu vs Li' October 3 on one and October 2 on the other. The same two sides on dates this close are one match.
+NEAR_DATE_SPORTS = {"tennis", "darts", "ufc"}
+NEAR_DATE_DAYS = 1
 
 
 def identity(bet):
@@ -74,11 +78,34 @@ def make_pair(rows, sport):
                 members=members, flags=flags(rows, sport))
 
 
+def near_dates(bets):
+    """
+    The bets with each match's dates made one: the same two sides' dates no more than NEAR_DATE_DAYS apart become the
+    earliest of them.
+    """
+    dates = defaultdict(set)
+    for bet in bets:
+        if bet["game_date"] and bet["team_a"]:
+            dates[(bet["team_a"], bet["team_b"])].add(bet["game_date"])
+    canonical = {}
+    for sides, found in dates.items():
+        first = None
+        for date in sorted(found):
+            if first is None or days_between(first, date) > NEAR_DATE_DAYS:
+                first = date
+            canonical[(sides, date)] = first
+    return [dict(bet, game_date=canonical[((bet["team_a"], bet["team_b"]), bet["game_date"])])
+            if bet["game_date"] and bet["team_a"] else bet for bet in bets]
+
+
 def match(bets, sport):
     """
     Pair up one sport's bet rows by identity. Returns the pairs both venues
     list, and the bets that were left out because only one venue lists them.
+    A match between two people dated a day apart is one match, see near_dates().
     """
+    if sport in NEAR_DATE_SPORTS:
+        bets = near_dates(bets)
     by_identity = defaultdict(list)
     for bet in bets:
         by_identity[identity(bet)].append(bet)

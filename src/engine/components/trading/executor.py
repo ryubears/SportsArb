@@ -103,6 +103,7 @@ class Executor:
     """
 
     mode = None     # 'paper' or 'live', set by each subclass. It starts every log line.
+    in_play = False     # Whether a game is traded once it has started, and whenever it pays: paper's, which trades games.
     step = 1        # The least part of a contract an order trades: whole contracts on paper, a hundredth live, see orders.STEP.
 
     def __init__(self, conn, cash, books, log=print, clock=now_iso, is_maintenance=is_maintenance):
@@ -378,14 +379,14 @@ class Executor:
         task.add_done_callback(on_failure(self.log, f"{self.mode} trade task"))
         return task
 
-    @staticmethod
-    def pays_enough(edge, now, pays_at):
+    def pays_enough(self, edge, now, pays_at):
         """
         Whether an edge is worth the capital it ties up until the bet pays at
-        pays_at: config.MIN_PAYOUT_HOURS or more away, and returning
-        config.MIN_ANNUAL_PCT a year or more until then.
+        pays_at: config.MIN_PAYOUT_HOURS or more away, unless this executor
+        trades in play, and returning config.MIN_ANNUAL_PCT a year or more
+        until then.
         """
-        if not pays_at or hours_between(now, pays_at) < config.MIN_PAYOUT_HOURS:
+        if not pays_at or (not self.in_play and hours_between(now, pays_at) < config.MIN_PAYOUT_HOURS):
             return False
         return annual_pct(edge, game.days_until(now, pays_at)) >= config.MIN_ANNUAL_PCT
 
@@ -450,7 +451,7 @@ class Executor:
         """
         if edge < config.MIN_EDGE:
             return False
-        if game.started(pair.get("game_date"), (yes, no), now):
+        if not self.in_play and game.started(pair.get("game_date"), (yes, no), now):
             return False
         pays_at = game.pays_at((yes, no), pair["sport"])
         if not self.pays_enough(edge, now, pays_at):

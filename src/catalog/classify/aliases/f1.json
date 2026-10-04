@@ -1,6 +1,13 @@
 {
-  "FER": {"names": ["Ferrari"], "codes": {"kalshi": ["FER"], "polymarket_us": ["fer"]}},
-  "MCL": {"names": ["McLaren"], "codes": {"kalshi": ["MCL"], "polymarket_us": ["mcla"]}},
-  "MER": {"names": ["Mercedes AMG Motorsport"], "codes": {"kalshi": ["MER"], "polymarket_us": ["merce"]}},
-  "RED": {"names": ["Red Bull Racing"], "codes": {"kalshi": ["RED"], "polymarket_us": ["rbr"]}}
+  "ALP": {"names": ["Alpine", "Alpine F1 Team"], "codes": {"kalshi": ["ALP"], "polymarket_us": ["alpine"]}},
+  "AST": {"names": ["Aston Martin", "Aston Martin F1 Team"], "codes": {"kalshi": ["AST"], "polymarket_us": ["astonm"]}},
+  "AUD": {"names": ["Audi", "Audi F1 Team"], "codes": {"kalshi": ["AUD"], "polymarket_us": ["audi"]}},
+  "CAD": {"names": ["Cadillac"], "codes": {"kalshi": ["CAD"], "polymarket_us": ["cadill"]}},
+  "FER": {"names": ["Ferrari"], "codes": {"kalshi": ["FER"], "polymarket_us": ["fer", "ferrar"]}},
+  "HAA": {"names": ["Haas F1 Team", "Haas"], "codes": {"kalshi": ["HAA"], "polymarket_us": ["haasf1"]}},
+  "MCL": {"names": ["McLaren"], "codes": {"kalshi": ["MCL"], "polymarket_us": ["mcla", "mclare"]}},
+  "MER": {"names": ["Mercedes AMG Motorsport", "Mercedes"], "codes": {"kalshi": ["MER"], "polymarket_us": ["merce", "merced"]}},
+  "RAC": {"names": ["Racing Bulls"], "codes": {"kalshi": ["RAC"], "polymarket_us": ["racing"]}},
+  "RED": {"names": ["Red Bull Racing"], "codes": {"kalshi": ["RED"], "polymarket_us": ["rbr", "redbul"]}},
+  "WIL": {"names": ["Williams"], "codes": {"kalshi": ["WIL"], "polymarket_us": ["willia"]}}
 }

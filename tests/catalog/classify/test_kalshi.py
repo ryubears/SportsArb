@@ -71,7 +71,7 @@ def test_season_totals_name_the_team_from_the_event_and_keep_the_strict_line():
 
 
 def test_skips_games_unknown_series_and_missing_lines_and_settlement_times():
-    assert kalshi.classify(row("KXNFLGAME", "KXNFLGAME-26SEP20CARATL", "KXNFLGAME-26SEP20CARATL-ATL")) is None
+    assert kalshi.classify(row("KXNFLGAME", "KXNFLGAME-26SEP20CARXYZ", "KXNFLGAME-26SEP20CARXYZ-XYZ")) is None    # No such team.
     assert kalshi.classify(row("KXNFLRECYDS", "KXNFLRECYDS-26SEP20", "KXNFLRECYDS-26SEP20-X")) is None
     assert future("KXNFLWINS", "KXNFLWINS-27BUF", "KXNFLWINS-27BUF-10", "2027-01-18T05:00:00+00:00") is None
     assert kalshi.classify(row("KXSB", "KXSB-27", "KXSB-27-KC")) is None       # No close time, so no season.

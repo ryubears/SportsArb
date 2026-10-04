@@ -3,8 +3,10 @@ Print a short summary of the database: the pairs, the opportunities the
 executors' rules trade, and the trades.
 
 Opportunities are only those within the rules: an edge of config.MIN_EDGE
-or more at the peak, paying config.MIN_PAYOUT_HOURS or more out and
-config.MIN_ANNUAL_PCT a year or more. Each shows what it could have taken
+or more at the peak, returning config.MIN_ANNUAL_PCT a year or more, and
+for a future, which live trades, paying config.MIN_PAYOUT_HOURS or more out
+and found before any game, while a game's, which paper trades, may be
+found in play and pay at any time. Each shows what it could have taken
 at full size through its longest stretch at that edge, and what that
 locks in, overall, by sport and kind, and the largest. Trades are shown
 for each mode, paper then live, or one with --mode, by outcome and by kind
@@ -166,8 +168,9 @@ def returns(capital, profit, days):
 
 def print_opportunities(conn, since, hours, sports):
     """
-    The episodes within the rules in the window: at config.MIN_EDGE or more, paying config.MIN_PAYOUT_HOURS or more out
-    and config.MIN_ANNUAL_PCT a year or more, both at the peak. Capital is what buying every contract fillable at that
+    The episodes within the rules in the window: at config.MIN_EDGE or more and config.MIN_ANNUAL_PCT a year or more,
+    both at the peak, and on a future, as live trades, paying config.MIN_PAYOUT_HOURS or more out and found before any
+    game started, while one on a game, a match, a race, or a window, as paper trades, may be found in play. Capital is what buying every contract fillable at that
     edge through its longest stretch at it would have cost with fees, and profit what it locks in. The annual rates weight
     each episode by its capital, over the days until it pays.
     """
@@ -177,9 +180,10 @@ def print_opportunities(conn, since, hours, sports):
         SELECT p.sport, p.kind, p.label, trade, 100 * peak_edge, min_edge_seconds, min_edge_size, min_edge_size - min_edge_profit,
                min_edge_profit, days_held
         FROM opportunities o JOIN pairs p ON p.id = o.pair_id
-        WHERE start_ts >= ? AND live = 0 AND peak_edge >= ? AND min_edge_seconds IS NOT NULL AND days_held * 24 >= ? AND annual_pct >= ?{where}
-        ORDER BY min_edge_profit DESC""", (since, config.MIN_EDGE, config.MIN_PAYOUT_HOURS, config.MIN_ANNUAL_PCT) + params)
-    rules = f"{cents}+, paying {config.MIN_PAYOUT_HOURS}h+ out, {config.MIN_ANNUAL_PCT}%+ a year"
+        WHERE start_ts >= ? AND peak_edge >= ? AND min_edge_seconds IS NOT NULL AND annual_pct >= ?
+          AND (p.game_date IS NOT NULL OR (live = 0 AND days_held * 24 >= ?)){where}
+        ORDER BY min_edge_profit DESC""", (since, config.MIN_EDGE, config.MIN_ANNUAL_PCT, config.MIN_PAYOUT_HOURS) + params)
+    rules = f"{cents}+, {config.MIN_ANNUAL_PCT}%+ a year, futures paying {config.MIN_PAYOUT_HOURS}h+ out, games in play too"
     print(f"\nopportunities within the rules ({rules}), last {hours} hours")
     if not rows:
         print("  none")

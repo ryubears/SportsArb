@@ -98,3 +98,25 @@ def person(name):
     """
     key = player_key(name or "")
     return key if key and key not in NOT_PEOPLE else None
+
+
+def side_key(name):
+    """
+    The key of one side of a match between two people, a player, a fighter, or a driver: the person's key with its words
+    in order, since the venues put a name's parts in different orders, Kalshi's 'Wang Cong' being Polymarket US's
+    'Cong Wang'. None when the name is no one's.
+    """
+    key = person(name)
+    return " ".join(sorted(key.split())) if key else None
+
+
+def match_sides(title):
+    """
+    The keys of the two people a match's title names, 'Valentin Vacherot vs. Arthur Fils', in the title's order, or None
+    unless it names two people by their full names, as some of Kalshi's titles do only by the last.
+    """
+    parts = re.split(r"\s+vs\.?\s+", title or "")
+    if len(parts) != 2 or any(len(p.split()) < 2 for p in parts):
+        return None
+    keys = tuple(side_key(p) for p in parts)
+    return keys if all(keys) and keys[0] != keys[1] else None

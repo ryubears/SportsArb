@@ -1,8 +1,16 @@
 """
 Turn Kalshi contracts into Bets.
 
-Only futures are cataloged, bets on a season, a title, an award, a
-season's leader, or an election, never on one game. Each kind has a series
+Games, matches, races, and Bitcoin's 15 minute windows are bets on one
+event, which paper trades: the series says the kind, the event ticker the
+date and the two sides, and the market ticker or subtitle whom the market
+is on, see the tables below for each sport's layout. A game of teams keeps
+them away then home, as the venues list them, and a soccer match or a
+match between two people keeps its sides in order of their keys, so a
+market names whom it is on by its subject.
+
+Futures are bets on a season, a title, an award, a season's leader, a
+price by a deadline, or an election, which live trades. Each kind has a series
 of its own, or an event of its own within a series, 'KXEPLTOP-27TOP4' the
 top four of the Premier League, which the event's key names once its year
 is taken out. A team future's market ticker ends in the team, 'KXSB-27-KC'.
@@ -23,9 +31,94 @@ Kalshi's ticker layout.
 """
 
 import re
-from catalog.classify.teams import STATES, TOP_TWO_STATES, person, race, team_from_code
-from common.timeutil import season_from_date
+from catalog.classify.teams import STATES, TOP_TWO_STATES, match_sides, person, player_key, race, side_key, team_from_code
+from collections import defaultdict
+from common.timeutil import season_from_date, shift
+from datetime import datetime
 from db.models import Bet
+
+# GAMES of teams. The series says the kind, the event ticker the date and the teams, away then home, 'KXNFLGAME-26SEP20CARATL',
+# with baseball's Eastern start time, 'KXMLBGAME-26SEP291400PHIATL', and the market ticker the team or the line.
+GAME_DATE = re.compile(r"^(\d{2})([A-Z]{3})(\d{2})(\d{4})?([A-Z]+)$")
+GAME_SERIES = {
+    "KXNFLGAME": "game_winner", "KXNFLSPREAD": "spread", "KXNFLTOTAL": "total",
+    "KXNCAAFGAME": "game_winner", "KXNCAAFSPREAD": "spread", "KXNCAAFTOTAL": "total",
+    "KXMLBGAME": "game_winner", "KXMLBSPREAD": "spread", "KXMLBTOTAL": "total", "KXMLBTEAMTOTAL": "team_total",
+    "KXNHLGAME": "game_winner", "KXNHLSPREAD": "spread", "KXNHLTOTAL": "total", "KXNHLTEAMTOTAL": "team_total",
+    "KXNBAGAME": "game_winner", "KXNBASPREAD": "spread", "KXNBATOTAL": "total", "KXNBATEAMTOTAL": "team_total",
+    "KXWNBAGAME": "game_winner", "KXWNBASPREAD": "spread", "KXWNBATOTAL": "total", "KXWNBATEAMTOTAL": "team_total",
+    "KXNCAAMBGAME": "game_winner", "KXNCAAMBSPREAD": "spread", "KXNCAAMBTOTAL": "total",
+}
+# Player props on one game, the player named in the title before the colon, 'Bijan Robinson: 100+ receiving yards'. Every one
+# but the first touchdown carries a line, stored as the strict threshold.
+PLAYER_SERIES = {
+    "KXNFLRECYDS": "player_receiving_yards", "KXNFLRSHYDS": "player_rushing_yards", "KXNFLPASSYDS": "player_passing_yards",
+    "KXNFLREC": "player_receptions", "KXNFLPASSTDS": "player_passing_touchdowns", "KXNFLTD": "player_touchdowns",
+    "KXNFLFIRSTTD": "player_first_touchdown", "KXNFLPASSCOMP": "player_passing_completions", "KXNFLPASSATT": "player_passing_attempts",
+    "KXNFLPASSINT": "player_interceptions_thrown", "KXNFLRSHATT": "player_rushing_attempts", "KXNFLRRYDS": "player_scrimmage_yards",
+    "KXNFLLONGREC": "player_longest_reception",
+    "KXMLBHIT": "player_hits", "KXMLBHR": "player_home_runs", "KXMLBKS": "player_strikeouts", "KXMLBTB": "player_total_bases",
+    "KXMLBHRR": "player_hits_runs_rbis", "KXMLBRBI": "player_rbis", "KXMLBSB": "player_stolen_bases", "KXMLBOUTS": "player_outs",
+    "KXMLBHA": "player_hits_allowed", "KXMLBERA": "player_earned_runs_allowed", "KXMLBWA": "player_walks_allowed",
+    "KXNHLGOAL": "player_goals", "KXNHLPTS": "player_points",
+    "KXNBAPTS": "player_points", "KXNBAREB": "player_rebounds", "KXNBAAST": "player_assists", "KXNBA3PT": "player_threes",
+    "KXNBABLK": "player_blocks",
+    "KXWNBAPTS": "player_points", "KXWNBAREB": "player_rebounds", "KXWNBAAST": "player_assists", "KXWNBA3PT": "player_threes",
+}
+PLAYER_TITLE = re.compile(r"^(.+?): ")
+
+# SOCCER MATCHES, each league's series named alike, 'KXEPLGAME' and 'KXEPL1HTOTAL', the event ticker the date and the clubs,
+# home then away, 'KXEPLGAME-26OCT10ARSLEE'. A result's market is a club or 'TIE', a spread's a club and its rounded margin,
+# 'ARS2', a score's each club's goals, 'FUL0MUN1', and a total's or the corners' its line. Every one counts 90 minutes and
+# stoppage time, a half's 45 and its stoppage, but the corners count any extra time too.
+SOCCER_LEAGUES = {"epl": "EPL", "laliga": "LALIGA", "seriea": "SERIEA", "bundesliga": "BUNDESLIGA", "ligue1": "LIGUE1",
+                  "ligamx": "LIGAMX", "mls": "MLS", "ucl": "UCL", "uel": "UEL"}
+SOCCER_KINDS = {
+    "GAME": "result", "1H": "first_half_result", "2H": "second_half_result",
+    "SPREAD": "spread", "1HSPREAD": "first_half_spread", "2HSPREAD": "second_half_spread",
+    "TOTAL": "total", "1HTOTAL": "first_half_total", "2HTOTAL": "second_half_total",
+    "BTTS": "btts", "1HBTTS": "first_half_btts", "2HBTTS": "second_half_btts",
+    "SCORE": "exact_score", "1HSCORE": "first_half_exact_score", "CORNERS": "total_corners",
+}
+SOCCER_SERIES = {f"KX{league}{suffix}": kind for league in SOCCER_LEAGUES.values() for suffix, kind in SOCCER_KINDS.items()}
+SCORE_TAIL = re.compile(r"^([A-Z]+?)(\d+)([A-Z]+?)(\d+)$")
+
+# MATCHES between two people, in tennis, darts, and the UFC. The event ticker holds the date and both short names,
+# 'KXATPMATCH-26OCT03VACFIL', darts' with the Eastern start time, and a set's market its number, 'KXATPSETWINNER-26OCT03VACFIL-1'.
+# The market's subtitle names whom it is on: 'Arthur Fils', 'Arthur Fils -6.5 games', 'Arthur Fils wins 2-0', or 'Natalia
+# Silva to win in Round 1'. The event title names both by their full names, 'Valentin Vacherot vs Arthur Fils: Total Games',
+# bar a match winner's, 'Vacherot vs Fils', whose two markets do instead.
+MATCH_SERIES = {
+    "KXATPMATCH": "match_winner", "KXWTAMATCH": "match_winner", "KXATPCHALLENGERMATCH": "match_winner",
+    "KXWTACHALLENGERMATCH": "match_winner",
+    "KXATPGSPREAD": "games_spread", "KXATPGAMESPREAD": "games_spread", "KXWTAGSPREAD": "games_spread",
+    "KXATPGTOTAL": "total_games", "KXATPGAMETOTAL": "total_games", "KXWTAGTOTAL": "total_games",
+    "KXATPSSPREAD": "sets_spread", "KXATPTOTALSETS": "total_sets",
+    "KXATPSETWINNER": "set_winner", "KXWTASETWINNER": "set_winner",
+    "KXATPEXACTMATCH": "exact_score", "KXWTAEXACTMATCH": "exact_score",
+    "KXUFCFIGHT": "match_winner", "KXUFCDISTANCE": "go_the_distance", "KXUFCVICROUND": "round_of_victory",
+    "KXDARTSMATCH": "match_winner",
+}
+MATCH_EVENT = re.compile(r"^(\d{2})([A-Z]{3})(\d{2})(\d{4})?([A-Z]+)(?:-(\d))?$")
+SPREAD_SIDE = re.compile(r"^(.+?) -\d+(?:\.\d+)? (?:games|sets)$")      # 'Arthur Fils -6.5 games'.
+SCORE_SIDE = re.compile(r"^(.+) wins (\d)-(\d)$")                       # 'Valentin Vacherot wins 2-0'.
+ROUND_SIDE = re.compile(r"^(.+) to win in Round (\d)$")                 # 'Natalia Silva to win in Round 1'.
+
+# RACES, one event a race, 'KXF1RACE-BAH26', a market per driver, named in its subtitle, or per constructor, by its code.
+# The date is the one the rules give the race, 'originally scheduled for October 4, 2026'.
+RACING_SERIES = {"KXF1RACE": "race_winner", "KXF1TOPCONSTRUCTOR": "race_constructor", "KXNASCARRACE": "race_winner"}
+SCHEDULED = re.compile(r"scheduled for ([A-Z][a-z]+\.? \d{1,2}, \d{4})")
+
+# CRYPTO, Bitcoin only, the one coin Polymarket US lists. A 15 minute window's event ticker gives its Eastern end,
+# 'KXBTC15M-26OCT040145', and the window is the 15 minutes before its close. A price future pays on the CF Bitcoin Real-Time
+# Index going above, or below, its strike before a deadline its rules give, 'before Sep 1, 2026 at 12:00 AM ET' being the
+# end of August 31, or on where it ends the year, in a band of $5,000.
+UPDOWN_SERIES = {"KXBTC15M": ("updown_15m", "BTC", 15)}
+HIT_SERIES = {"KXBTCMAXY": "hit_before", "KXBTCMAX150": "hit_before", "KXBTCMAX100": "hit_before", "KXBTC2026200": "hit_before",
+              "KXBTC2026250": "hit_before", "KXBTCMINY": "dip_before"}
+RANGE_SERIES = {"KXBTCY": "year_end_range"}
+DEADLINE = re.compile(r"(?:by|before) ([A-Z][a-z]+\.? \d{1,2},? \d{4})(?:,? at (\d{1,2}):(\d{2}) ?([AaPp][Mm]))?")
+CRYPTO_SERIES = {*UPDOWN_SERIES, *HIT_SERIES, *RANGE_SERIES}
 
 # TEAM FUTURES. The market ticker ends in the team, 'KXSB-27-KC'.
 CONFERENCES = ("AAC", "ACC", "B10", "B12", "CUSA", "MAC", "MWC", "PAC12", "SBELT")     # College conferences, bar the SEC, spelled alike.
@@ -252,9 +345,254 @@ def classify_election(row, series, event_tail, market_tail, base):
     return Bet(kind=kind, subject=f"{race(state, district)} {side}", **election) if side else None
 
 
-def classify(row):
+def ticker_date(yy, mon, dd):
     """
-    The Bet a Kalshi contract row describes, or None when it is not one we trade.
+    The date a ticker's '26', 'SEP', '20' spell, as YYYY-MM-DD.
+    """
+    return datetime.strptime(f"20{yy} {mon} {dd}", "%Y %b %d").strftime("%Y-%m-%d")
+
+
+def written_date(text):
+    """
+    A date written out, 'October 4, 2026', 'Oct 4, 2026', or 'Sept. 4 2026', as YYYY-MM-DD, or None.
+    """
+    plain = re.sub(r"^Sept", "Sep", text.replace(".", "").replace(",", ""))
+    for form in ("%B %d %Y", "%b %d %Y"):
+        try:
+            return datetime.strptime(plain, form).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return None
+
+
+def parse_game(tail, sport):
+    """
+    Parse a game event tail such as '26SEP20CARATL' or '26SEP291400PHIATL' into (date, first team, second team), the
+    teams being the sport's.
+    """
+    m = GAME_DATE.match(tail)
+    if not m:
+        return None, None, None
+    yy, mon, dd, _, pair = m.groups()
+    first, second = split_codes(pair, sport)
+    return ticker_date(yy, mon, dd), first, second
+
+
+def classify_game(row, series, event_tail, market_tail, sport, base):
+    """
+    The Bet a team game's contract describes, or None. A winner's is stated as the away team winning, the home team's
+    contract being its complement, and a spread's or a team total's market is the team and its rounded line, 'ATL17'
+    for more than 16.5, or a total's the line alone.
+    """
+    game_date, away, home = parse_game(event_tail, sport)
+    if not game_date or not (away and home):
+        return None
+    kind = GAME_SERIES[series]
+    common = dict(season=season_from_date(game_date, sport), game_date=game_date, team_a=away, team_b=home, **base)
+    if kind == "game_winner":
+        picked = team(market_tail, sport)
+        if picked not in (away, home):
+            return None
+        return Bet(kind=kind, subject=away, line=None, polarity="yes" if picked == away else "no", **common)
+    if kind in ("spread", "team_total"):
+        subject = team(market_tail.rstrip("0123456789"), sport)
+        if subject not in (away, home) or row["line"] is None:
+            return None
+        return Bet(kind=kind, subject=subject, line=row["line"], polarity="yes", **common)
+    return Bet(kind=kind, subject=None, line=row["line"], polarity="yes", **common) if row["line"] is not None else None
+
+
+def classify_player(row, series, event_tail, sport, base):
+    """
+    The Bet a player prop on one game describes, or None.
+    """
+    game_date, away, home = parse_game(event_tail, sport)
+    m = PLAYER_TITLE.match(row["title"] or "")
+    if not game_date or not (away and home) or not m or "D/ST" in m.group(1):
+        return None
+    kind = PLAYER_SERIES[series]
+    line = None if kind == "player_first_touchdown" else row["line"]
+    if kind != "player_first_touchdown" and line is None:
+        return None
+    return Bet(kind=kind, season=season_from_date(game_date, sport), game_date=game_date, team_a=away, team_b=home,
+               subject=player_key(m.group(1)), line=line, polarity="yes", **base)
+
+
+def classify_soccer(row, series, event_tail, market_tail, sport, base):
+    """
+    The Bet a soccer match's contract describes, or None. The clubs are kept in order of their codes, since the bet
+    names whom each market is on.
+    """
+    game_date, first, second = parse_game(event_tail, sport)
+    if not game_date or not (first and second):
+        return None
+    kind = SOCCER_SERIES[series]
+    common = dict(season=season_from_date(game_date, sport), game_date=game_date, team_a=min(first, second), team_b=max(first, second),
+                  polarity="yes", **base)
+    if kind.endswith("result"):
+        subject = "tie" if market_tail == "TIE" else team(market_tail, sport)
+        return Bet(kind=kind, subject=subject, line=None, **common) if subject in (first, second, "tie") else None
+    if kind.endswith("spread"):
+        subject = team(market_tail.rstrip("0123456789"), sport)
+        return Bet(kind=kind, subject=subject, line=row["line"], **common) if subject in (first, second) and row["line"] is not None else None
+    if kind.endswith("btts"):
+        return Bet(kind=kind, subject=None, line=None, **common)
+    if kind.endswith("exact_score"):
+        m = SCORE_TAIL.match(market_tail)
+        goals = {team(m.group(1), sport): m.group(2), team(m.group(3), sport): m.group(4)} if m else {}
+        if set(goals) != {first, second}:
+            return None
+        return Bet(kind=kind, subject=" ".join(f"{club}{goals[club]}" for club in sorted(goals)), line=None, **common)
+    return Bet(kind=kind, subject=None, line=row["line"], **common) if row["line"] is not None else None
+
+
+def match_people(row, outcomes):
+    """
+    The keys of the two people a match's contract is between: from the event title when it gives their full names,
+    'Natalia Silva vs. Cong Wang: Round of Victory' or '332: Silva vs Cong', else from the event's markets' subtitles.
+    """
+    title = re.sub(r"^\d+:\s*", "", row["event_title"] or "").split(": ", 1)[0]
+    sides = match_sides(title)
+    if sides:
+        return sides
+    names = {side_key(name) for name in outcomes.get(row["event_id"], ())} - {None}
+    return tuple(names) if len(names) == 2 else None
+
+
+def classify_match(row, series, event_tail, base, outcomes):
+    """
+    The Bet a match between two people describes, or None. The two are kept in order of their keys, and a winner's
+    market is stated as the first of them winning, the other's being its complement.
+    """
+    m = MATCH_EVENT.match(event_tail)
+    sides = match_people(row, outcomes) if m else None
+    if not sides:
+        return None
+    game_date = ticker_date(*m.group(1, 2, 3))
+    first, second = sorted(sides)
+    kind = MATCH_SERIES[series]
+    common = dict(season=int(game_date[:4]), game_date=game_date, team_a=first, team_b=second, **base)
+    outcome = row["outcome"] or ""
+    if kind in ("match_winner", "set_winner"):
+        picked = side_key(outcome)
+        if picked not in sides or (kind == "set_winner" and not m.group(6)):
+            return None
+        kind = f"set_{m.group(6)}_winner" if kind == "set_winner" else kind
+        return Bet(kind=kind, subject=first, line=None, polarity="yes" if picked == first else "no", **common)
+    if kind in ("games_spread", "sets_spread"):
+        found = SPREAD_SIDE.match(outcome)
+        picked = side_key(found.group(1)) if found else None
+        return Bet(kind=kind, subject=picked, line=row["line"], polarity="yes", **common) if picked in sides and row["line"] is not None else None
+    if kind == "exact_score":
+        found = SCORE_SIDE.match(outcome)
+        picked = side_key(found.group(1)) if found else None
+        return Bet(kind=kind, subject=f"{picked} {found.group(2)}-{found.group(3)}", line=None, polarity="yes", **common) if picked in sides else None
+    if kind == "round_of_victory":
+        found = ROUND_SIDE.match(outcome)
+        picked = side_key(found.group(1)) if found else None
+        return Bet(kind=kind, subject=picked, line=float(found.group(2)), polarity="yes", **common) if picked in sides else None
+    if kind == "go_the_distance":
+        return Bet(kind=kind, subject=None, line=None, polarity="yes", **common)
+    return Bet(kind=kind, subject=None, line=row["line"], polarity="yes", **common) if row["line"] is not None else None
+
+
+def classify_race(row, series, market_tail, sport, base):
+    """
+    The Bet on a race's winner, or its top constructor, describes, or None. A race is its date.
+    """
+    found = SCHEDULED.search(row["rules"] or "")
+    race_date = written_date(found.group(1)) if found else None
+    kind = RACING_SERIES[series]
+    subject = team(market_tail, sport) if kind == "race_constructor" else side_key(row["outcome"])
+    if not race_date or not subject:
+        return None
+    return Bet(kind=kind, season=int(race_date[:4]), game_date=race_date, team_a=None, team_b=None, subject=subject, line=None,
+               polarity="yes", **base)
+
+
+def deadline(rules):
+    """
+    The last day a price future counts, from its rules: 'before Sep 1, 2026 at 12:00 AM ET' is August 31, and 'by Dec 31,
+    2026 at 11:59 PM ET' December 31. None when the rules give none.
+    """
+    found = DEADLINE.search(rules or "")
+    day = written_date(found.group(1)) if found else None
+    if not day:
+        return None
+    hour, minute, half = found.group(2, 3, 4)
+    midnight = hour is not None and int(hour) == 12 and int(minute) == 0 and half.lower() == "am"
+    return shift(f"{day}T00:00:00+00:00", days=-1)[:10] if midnight else day
+
+
+def classify_crypto(row, series, base):
+    """
+    The Bet a Bitcoin contract describes, or None: a window's direction, the window being the 15 minutes before its
+    close, a price going above or below its strike by a deadline, or the band it ends the year in.
+    """
+    if series in UPDOWN_SERIES:
+        kind, coin, minutes = UPDOWN_SERIES[series]
+        if not row["close_time"]:
+            return None
+        start = shift(row["close_time"], hours=-minutes / 60)
+        return Bet(kind=kind, season=int(start[:4]), game_date=f"{start[:10]} {start[11:16]}", team_a=None, team_b=None, subject=coin,
+                   line=None, polarity="yes", **base)
+    if series in HIT_SERIES:
+        last = deadline(row["rules"])
+        if not last or row["line"] is None:
+            return None
+        return Bet(kind=HIT_SERIES[series], season=int(last[:4]), game_date=None, team_a=None, team_b=None, subject=last,
+                   line=row["line"], polarity="yes", **base)
+    band = row["outcome"] or ""
+    numbers = [float(n.replace(",", "")) for n in re.findall(r"\d[\d,]*(?:\.\d+)?", band)]
+    if "or below" in band and len(numbers) == 1:
+        subject = f"below {numbers[0] + 0.01:.0f}"
+    elif "or above" in band and len(numbers) == 1:
+        subject = f"from {numbers[0]:.0f}"
+    elif " to " in band and len(numbers) == 2:
+        subject = f"{numbers[0]:.0f} to {numbers[1] + 0.01:.0f}"
+    else:
+        return None
+    year = int(row["close_time"][:4]) - 1 if row["close_time"] and row["close_time"][5:10] == "01-01" else None
+    return Bet(kind=RANGE_SERIES[series], season=year, game_date=None, team_a=None, team_b=None, subject=subject, line=None,
+               polarity="yes", **base) if year else None
+
+
+def doubleheaders(rows):
+    """
+    The contracts on games the same teams play twice on one date, which a
+    bet cannot tell apart yet, since a game is its date and teams. Kalshi's
+    baseball event tickers give each game's start time, so a date and teams
+    with two start times is a doubleheader.
+    """
+    starts, games = defaultdict(set), {}
+    for row in rows:
+        series = row["series_id"]
+        if series not in GAME_SERIES and series not in PLAYER_SERIES:
+            continue
+        m = GAME_DATE.match(row["event_id"][len(series) + 1:])
+        if m and m.group(4):
+            game = (row["sport"], *m.group(1, 2, 3, 5))
+            starts[game].add(m.group(4))
+            games[row["contract_id"]] = game
+    return {contract_id for contract_id, game in games.items() if len(starts[game]) > 1}
+
+
+def event_outcomes(rows):
+    """
+    Each event's markets' subtitles, {event ticker: [subtitle, ...]}, which name the people a match is between when its
+    title gives only their last names.
+    """
+    found = defaultdict(list)
+    for row in rows:
+        if row["series_id"] in MATCH_SERIES:
+            found[row["event_id"]].append(row["outcome"])
+    return found
+
+
+def classify(row, outcomes=None):
+    """
+    The Bet a Kalshi contract row describes, or None when it is not one we trade. outcomes is event_outcomes() of the
+    venue's rows, which matches between two people need.
     """
     series, event, ticker, sport = row["series_id"], row["event_id"], row["contract_id"], row["sport"]
     event_tail = event[len(series) + 1:]
@@ -262,6 +600,18 @@ def classify(row):
     base = dict(venue=row["venue"], contract_id=row["contract_id"])
     if series in CONTROL_SERIES or series == HOUSE_RACE_SERIES or any(p.match(series) for p in SERIES_PATTERNS):
         return classify_election(row, series, event_tail, market_tail, base)
+    if series in GAME_SERIES:
+        return classify_game(row, series, event_tail, market_tail, sport, base)
+    if series in PLAYER_SERIES:
+        return classify_player(row, series, event_tail, sport, base)
+    if series in SOCCER_SERIES:
+        return classify_soccer(row, series, event_tail, market_tail, sport, base)
+    if series in MATCH_SERIES:
+        return classify_match(row, series, event_tail, base, outcomes or {})
+    if series in RACING_SERIES:
+        return classify_race(row, series, market_tail, sport, base)
+    if series in CRYPTO_SERIES:
+        return classify_crypto(row, series, base)
     if series in FUTURE_SERIES and row["close_time"]:
         return classify_future(row, series, event_tail, market_tail, sport, base)
     return None

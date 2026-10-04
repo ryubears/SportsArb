@@ -1,5 +1,6 @@
 """
-Fetch the open futures markets of each sport, and of elections, from both venues into SQLite.
+Fetch the open markets of each sport, of elections, and of Bitcoin from both venues into SQLite: the games, matches,
+races, and 15 minute windows paper trades, and the futures live trades.
 
 Run with:
     python3 -m catalog.fetch --sport nfl
@@ -9,20 +10,22 @@ Run with:
 import argparse
 import time
 from api import kalshi, polymarket_us
-from catalog.classify.kalshi import (CONFERENCES, CONTROL_SERIES, HOUSE_RACE_SERIES, NFL_DIVISIONS, NHL_DIVISIONS, SERIES_PATTERNS,
-                                    TITLE_FUTURES)
+from catalog.classify.kalshi import (CONFERENCES, CONTROL_SERIES, CRYPTO_SERIES, GAME_SERIES, HOUSE_RACE_SERIES, MATCH_SERIES,
+                                    NFL_DIVISIONS, NHL_DIVISIONS, PLAYER_SERIES, RACING_SERIES, SERIES_PATTERNS, SOCCER_SERIES, TITLE_FUTURES)
+from catalog.classify.kalshi import SOCCER_LEAGUES as SOCCER_CODES
 from common.timeutil import now_iso
 from common.venues import VENUES
 from db import database
 
 FETCHERS = {"kalshi": kalshi.contracts, "polymarket_us": polymarket_us.contracts}     # Each venue client's catalog call.
 
-# How each of our sport keys maps onto the venues' own categories, as the arguments of each venue's fetcher. Only futures
-# are cataloged. Kalshi lists thousands of series, so only the ones the Kalshi classifier reads are fetched, by ticker, or
-# for elections, which have a series per state, by the shapes it reads. Polymarket US is fetched by tag, and its games left out.
-# Adding a sport means adding it here, to polymarket_us.EVENT_PREFIX, an alias file in classify/aliases/, empty when its
-# futures name only people, and its Kalshi series to the Kalshi classifier. tests/catalog/test_sports.py fails until the
-# tables agree.
+# How each of our sport keys maps onto the venues' own categories, as the arguments of each venue's fetcher. Kalshi lists
+# thousands of series, so only the ones the Kalshi classifier reads are fetched, by ticker, or for elections, which have
+# a series per state, by the shapes it reads. Each sport's futures are listed here, and its games' series added from the
+# classifier's tables by their prefix, GAME_PREFIXES. Polymarket US is fetched by tag.
+# Adding a sport means adding it here, to polymarket_us.EVENT_PREFIX, config.GAME_HOURS, an alias file in
+# classify/aliases/, empty when it names only people, and its Kalshi series to the Kalshi classifier.
+# tests/catalog/test_sports.py fails until the tables agree.
 SOCCER_LEAGUES = {"epl": ("EPL", "PREMIERLEAGUE", "epl"), "laliga": ("LALIGA", "LALIGA", "lal"), "seriea": ("SERIEA", "SERIEA", "sea"),
                   "bundesliga": ("BUNDESLIGA", "BUNDESLIGA", "bun"), "ligue1": ("LIGUE1", "LIGUE1", "lg1")}
 SPORTS = {
@@ -86,7 +89,16 @@ SPORTS = {
         "kalshi": {"tickers": [*CONTROL_SERIES, HOUSE_RACE_SERIES], "patterns": SERIES_PATTERNS},
         "polymarket_us": {"tags": ["politics"]},
     },
+    "crypto": {"kalshi": {"tickers": []}, "polymarket_us": {"tags": ["crypto", "up-or-down"]}},   # Bitcoin's futures, then its windows.
 }
+# Each sport's Kalshi series on one game, match, race, or window, by the prefix of their tickers.
+GAME_PREFIXES = {"nfl": ("KXNFL",), "ncaaf": ("KXNCAAF",), "mlb": ("KXMLB",), "nhl": ("KXNHL",), "nba": ("KXNBA",), "wnba": ("KXWNBA",),
+                 "ncaab": ("KXNCAAMB",), **{sport: (f"KX{code}",) for sport, code in SOCCER_CODES.items()},
+                 "tennis": ("KXATP", "KXWTA"), "ufc": ("KXUFC",), "darts": ("KXDARTS",), "f1": ("KXF1",), "nascar": ("KXNASCAR",),
+                 "crypto": ("KXBTC",)}
+EVENT_SERIES = {*GAME_SERIES, *PLAYER_SERIES, *SOCCER_SERIES, *MATCH_SERIES, *RACING_SERIES, *CRYPTO_SERIES}
+for _sport, _prefixes in GAME_PREFIXES.items():
+    SPORTS[_sport]["kalshi"]["tickers"] = [*SPORTS[_sport]["kalshi"]["tickers"], *sorted(s for s in EVENT_SERIES if s.startswith(_prefixes))]
 
 
 def fetch_contracts(venue, sport):

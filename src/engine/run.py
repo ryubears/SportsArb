@@ -16,12 +16,14 @@ venues, trading/ makes the trades, and money/ keeps the cash.
   before the Kalshi key's location attestation lapses.
 - A Desk for each mode the run trades in, with its own money, executor,
   and settler, and its trades stored with its mode, so paper and live
-  never mix. Both can run at once, the live desk trading the sports given
-  to --sport and the paper desk only those given to --paper-sport: on the
-  same signal live's real orders take the contracts paper's simulated ones
-  look for, so from 2026-10-04, when live began asking for all it saw,
-  paper twins of live trades failed 10 times in 13. The paper desk still
-  flattens and settles the trades it holds on every sport.
+  never mix. They trade apart: the paper desk the bets on one event, a
+  game, a match, a race, or a Bitcoin window, before it and while it is
+  played, whenever it pays, and the live desk the futures, which pay
+  MIN_PAYOUT_HOURS or more out, bar the sports given to --not-live. On the
+  same signal live's real orders took the contracts paper's simulated ones
+  looked for: from 2026-10-04, when live began asking for all it saw,
+  paper twins of live trades failed 10 times in 13. Each desk still
+  flattens and settles every trade it holds.
   - Paper: trading/paper.py fills against the same books with the paper
     money of money/paper.py.
   - Live: trading/live.py sends real orders with the money the venues
@@ -35,24 +37,25 @@ the running feeds and the closed ones removed, without reconnecting.
 
 One run trades every sport given to --sport, comma separated, or every
 sport the catalog knows with --sport all, since the money is one pool: a
-second process would spend the same dollars. Only futures are cataloged,
-so a run trades seasons, titles, awards, leaders, and elections. A sport
-given to --paper-sport is followed and traded on paper only, the live desk
-leaving its signals alone, to see how it does before real money goes on
-it. --paper-sport all takes every sport not given to --sport. With a live
-desk the paper desk trades nothing else.
+second process would spend the same dollars. The catalog holds both the
+bets on one event and the futures. A sport given to --not-live has its
+futures followed but not traded live, crypto by default, to see how they
+do before real money goes on them; --not-live none trades every sport's.
+Bitcoin's 15 minute windows open and close all day, so with crypto followed
+its catalog is also refreshed just after each window opens.
 
 Run with:
     python3 -m engine.run --sport nfl
     python3 -m engine.run --sport nfl,ncaaf,mlb,nhl,nba
     python3 -m engine.run --sport all --execute live
-    python3 -m engine.run --sport nfl,ncaaf,mlb,nhl,nba --paper-sport all --execute both
+    python3 -m engine.run --sport all --execute both
+    python3 -m engine.run --sport all --execute both --not-live crypto,politics
     python3 -m engine.run --sport nfl --seconds 120 --catalog-minutes 0
     python3 -m engine.run --sport nfl --skip-refresh
     python3 -m engine.run --sport nfl --no-scan
     python3 -m engine.run --sport nfl --no-trade
     python3 -m engine.run --sport nfl --execute live
-    python3 -m engine.run --sport nfl --paper-sport epl --execute both
+    python3 -m engine.run --sport nfl --execute both --not-live none
     python3 -m engine.run --sport nfl --set min_edge=0.03 --set min_annual_pct=50
 
 For a long run on a laptop, stop the Mac from sleeping while it runs:
@@ -83,6 +86,8 @@ from engine.components.trading.paper import PaperExecutor
 from engine.helper import config
 
 CATALOG_MINUTES = 60    # How often the catalog is refreshed and subscriptions updated. Zero disables it.
+WINDOW_SECONDS = 15 * 60        # How often a Bitcoin window opens, on the quarter hour.
+WINDOW_REFRESH_SECONDS = 20     # How long after a window opens its catalog is refreshed, once both venues list it.
 EXECUTE = {"paper": ("paper",), "live": ("live",), "both": ("live", "paper")}     # What --execute trades in. Live first, so its orders go out first.
 
 
@@ -97,7 +102,7 @@ class RunOptions:
     refresh_at_start: bool = True                   # Refresh the catalog before streaming, when refreshes are on.
     scan: bool = True                               # Price the books and store episodes.
     executors: tuple = ("paper",)                   # The modes that trade the scanner's signals, 'paper' and 'live', when scanning.
-    paper_sports: tuple = ()                        # Sports, among the ones followed, that only the paper desk trades.
+    not_live: tuple = ("crypto",)                   # Sports whose futures the live desk leaves alone.
 
 
 def code_version():
@@ -125,8 +130,8 @@ def trading_settings():
     """
     c = config
     latency = ", ".join(f"{venue} {median}ms" for venue, (median, _) in c.PAPER_LATENCY_MS.items())
-    return (f"settings: min edge {c.MIN_EDGE:.2f}$, paying {c.MIN_PAYOUT_HOURS}h or more out and {c.MIN_ANNUAL_PCT}% a year, "
-            f"no game once kicked off, fill share {c.FILL_SHARE}, "
+    return (f"settings: min edge {c.MIN_EDGE:.2f}$ and {c.MIN_ANNUAL_PCT}% a year, live paying {c.MIN_PAYOUT_HOURS}h or more out "
+            f"and no game once kicked off, paper in play too, fill share {c.FILL_SHARE}, "
             f"rejects {c.PAPER_REJECT_PROBABILITY:.0%}, latency {latency}, expected game "
             f"{', '.join(f'{sport} {hours}h' for sport, hours in c.GAME_HOURS.items())} + settle {c.SETTLE_HOURS}h, "
             f"start balance {c.PAPER_START_BALANCE:,.0f}$; {book_waits()}")
@@ -147,13 +152,15 @@ class Desk:
     """
     One mode of trading, paper or live: its executor, the money it trades,
     and the settler that pays its trades out. books is a function returning
-    the recorder's newest books. sports are the sports it trades, or None
-    for every sport the run follows.
+    the recorder's newest books. markets are the bets it trades, 'events',
+    those on one game, match, race, or window, or 'futures', or None for
+    both, and held_out the sports it leaves alone.
     """
 
-    def __init__(self, mode, conn, books, notifier, sports=None):
+    def __init__(self, mode, conn, books, notifier, markets=None, held_out=()):
         self.mode = mode
-        self.sports = sports
+        self.markets = markets
+        self.held_out = tuple(held_out)
         if mode == "paper":
             self.cash = PaperBalances(conn)
             self.executor = PaperExecutor(conn, self.cash, books, log)
@@ -164,13 +171,20 @@ class Desk:
             raise ValueError(f"unknown mode {mode!r}")
         self.settler = settle.Settler(conn, self.cash, log, executor=self.executor)
 
+    def trades(self, pair):
+        """
+        Whether this desk trades a pair: one on an event, which has a game date, or a future, which has none, as its
+        markets say, of a sport it does not hold out.
+        """
+        if pair["sport"] in self.held_out:
+            return False
+        return self.markets is None or (pair.get("game_date") is not None) == (self.markets == "events")
+
     def signal(self, pair, *args):
         """
-        Offer the executor a scanner signal on a pair of a sport this desk trades. Returns whether it traded.
+        Offer the executor a scanner signal on a pair this desk trades. Returns whether it traded.
         """
-        if self.sports is not None and pair["sport"] not in self.sports:
-            return False
-        return self.executor.signal(pair, *args)
+        return self.executor.signal(pair, *args) if self.trades(pair) else False
 
     def tick(self, now, clock):
         """
@@ -194,23 +208,20 @@ class Session:
     The recorder and everything that runs on its books, wired together:
     the venue connections, the scanner, and a Desk for each mode it trades
     in. Without a scanner only the books are recorded, and without a desk
-    the scanner only stores what it sees. The sports in paper_sports are
-    traded by the paper desk only, and with a live desk the paper desk
-    trades nothing else.
+    the scanner only stores what it sees. The paper desk trades the bets on
+    one event and the live desk the futures, bar the sports in not_live.
     """
 
-    def __init__(self, conn, sports, with_scanner=True, executors=("paper",), paper_sports=()):
+    def __init__(self, conn, sports, with_scanner=True, executors=("paper",), not_live=("crypto",)):
         self.conn = conn
         self.sports = sports
-        self.paper_sports = tuple(s for s in sports if s in paper_sports)
+        self.not_live = tuple(s for s in sports if s in not_live)
         self.notifier = notify.Notifier(conn, log)
         self.attestation = notify.AttestationWatch(conn, self.notifier, log)
-        # The executors trade against the recorder's books, which exist once the recorder does, below. With a live desk
-        # the paper desk trades only the paper-only sports, since on a sport both trade live's real orders take what
-        # paper's look for.
-        self.live_sports = tuple(s for s in sports if s not in self.paper_sports)
-        desk_sports = {"live": self.live_sports, "paper": self.paper_sports if "live" in executors else None}
-        self.desks = [Desk(mode, conn, lambda: self.recorder.books, self.notifier, sports=desk_sports[mode])
+        # The executors trade against the recorder's books, which exist once the recorder does, below. The desks trade
+        # apart, since on one signal live's real orders take what paper's look for.
+        rules = {"paper": dict(markets="events"), "live": dict(markets="futures", held_out=self.not_live)}
+        self.desks = [Desk(mode, conn, lambda: self.recorder.books, self.notifier, **rules[mode])
                       for mode in executors] if with_scanner else []
         self.scanner = scan.Scanner(conn, sports, log, [d.signal for d in self.desks], books=lambda: self.recorder.books) if with_scanner else None
         for desk in self.desks:
@@ -227,12 +238,13 @@ class Session:
             log(trading_settings())
         if any(d.mode == "live" for d in self.desks):
             log(live_settings())
-            log(f"live trades {', '.join(self.live_sports) or 'nothing new'}")
-            if any(d.mode == "paper" for d in self.desks):
-                log(f"paper trades only {', '.join(self.paper_sports)}" if self.paper_sports
-                    else "paper trades nothing new without --paper-sport, and flattens and settles what it holds")
+            live = [s for s in self.sports if s not in self.not_live]
+            log(f"live trades the futures of {', '.join(live) or 'no sport'}"
+                + (f", not of {', '.join(self.not_live)}" if self.not_live else ""))
             if not notify.EMAIL_FILE.exists():
                 log(f"no email settings in {notify.EMAIL_FILE}, alerts are only logged and stored")
+        if any(d.mode == "paper" for d in self.desks):
+            log("paper trades the games, matches, races, and windows of every sport, in play too")
         targets = load_targets(self.conn, self.sports)
         log("recording " + ", ".join(f"{len(ids)} {venue}" for venue, ids in targets.items()) + " contracts")
         if not any(targets.values()):
@@ -349,12 +361,22 @@ async def refresh_in_child(sports, refresh=refresh_catalog):
         await asyncio.to_thread(child.join)
 
 
+def window_due(now, last):
+    """
+    Whether Bitcoin's catalog is due a refresh at now, in seconds since 1970: a window has opened since the refresh at
+    last, and WINDOW_REFRESH_SECONDS have passed for both venues to list it.
+    """
+    opened = (now - WINDOW_REFRESH_SECONDS) // WINDOW_SECONDS * WINDOW_SECONDS
+    return last < opened + WINDOW_REFRESH_SECONDS <= now
+
+
 async def run(conn, options):
     """
     Refresh the catalog, start a Session, tick it every config.TICK_SECONDS,
     and keep the catalog fresh on a timer, as the RunOptions say, each
-    refresh in a child process. A refresh that fails is logged and tried
-    again at the next interval, so a bad fetch never stops the recording.
+    refresh in a child process, Bitcoin's also just after each 15 minute
+    window opens. A refresh that fails is logged and tried again at the next
+    interval, so a bad fetch never stops the recording.
     """
     sports, seconds, catalog_seconds = options.sports, options.seconds, options.catalog_seconds
     log(f"starting {', '.join(sports)}, code {code_version()}")
@@ -364,23 +386,26 @@ async def run(conn, options):
             log(await refresh_in_child(sports))
         except Exception as e:
             log(with_traceback(f"catalog refresh failed ({e!r}), starting with the stored catalog", e))
-    session = Session(conn, sports, options.scan, options.executors, options.paper_sports)
+    session = Session(conn, sports, options.scan, options.executors, options.not_live)
     session.start()
-    started = last_catalog = time.time()
-    refresh = None      # The background catalog refresh while one is running.
+    started = last_catalog = last_window = time.time()
+    refresh = None      # The background catalog refresh while one is running, of every sport or of Bitcoin's windows.
+    windows = catalog_seconds and "crypto" in sports
     try:
         while not seconds or time.time() - started < seconds:
             await asyncio.sleep(config.TICK_SECONDS)
             session.tick()
             if catalog_seconds and refresh is None and time.time() - last_catalog >= catalog_seconds:
-                refresh = asyncio.create_task(refresh_in_child(sports))
+                refresh, last_catalog = asyncio.create_task(refresh_in_child(sports)), time.time()
+            elif windows and refresh is None and window_due(time.time(), last_window):
+                refresh, last_window = asyncio.create_task(refresh_in_child(("crypto",))), time.time()
             if refresh is not None and refresh.done():
                 if refresh.exception():
                     log(with_traceback(f"catalog refresh failed ({refresh.exception()!r}), keeping current subscriptions", refresh.exception()))
                 else:
                     log(f"catalog refreshed, {refresh.result()}")
                     session.refreshed()
-                refresh, last_catalog = None, time.time()
+                refresh = None
     finally:
         if refresh is not None:
             refresh.cancel()
@@ -398,30 +423,27 @@ if __name__ == "__main__":
     ap.add_argument("--skip-refresh", action="store_true",
                     help="start streaming at once from the stored catalog instead of refreshing first")
     ap.add_argument("--no-scan", action="store_true", help="stream the books only, without the scanner, to check the connections")
-    ap.add_argument("--paper-sport", default="",
-                    help="sports to follow and trade on paper only, comma separated, or all for every sport not given to --sport")
+    ap.add_argument("--not-live", default="crypto",
+                    help="sports whose futures live leaves alone, comma separated, crypto by default, or none")
     ap.add_argument("--no-trade", action="store_true", help="scan without trading")
     ap.add_argument("--execute", choices=sorted(EXECUTE), default="paper",
-                    help="trade on paper, with real money on the venues, or both at once, paper then trading only the --paper-sport sports")
+                    help="trade on paper, the bets on one event, with real money on the venues, the futures, or both")
     ap.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
                     help="override a setting from engine/helper/config.py for this run, for example --set min_edge=0.03, repeatable")
     args = ap.parse_args()
     sports = tuple(fetch.SPORTS) if args.sport.strip() == "all" else tuple(s.strip() for s in args.sport.split(",") if s.strip())
     if not sports or any(s not in fetch.SPORTS for s in sports):
         ap.error(f"--sport takes sports from {', '.join(sorted(fetch.SPORTS))}, or all, not {args.sport!r}")
-    paper_sports = (tuple(s for s in fetch.SPORTS if s not in sports) if args.paper_sport.strip() == "all"
-                    else tuple(s.strip() for s in args.paper_sport.split(",") if s.strip()))
-    if any(s not in fetch.SPORTS for s in paper_sports):
-        ap.error(f"--paper-sport takes sports from {', '.join(sorted(fetch.SPORTS))}, or all, not {args.paper_sport!r}")
-    if paper_sports and "paper" not in EXECUTE[args.execute]:
-        ap.error("--paper-sport needs a paper desk: --execute paper or both")
+    not_live = () if args.not_live.strip() == "none" else tuple(s.strip() for s in args.not_live.split(",") if s.strip())
+    if any(s not in fetch.SPORTS for s in not_live):
+        ap.error(f"--not-live takes sports from {', '.join(sorted(fetch.SPORTS))}, or none, not {args.not_live!r}")
     try:
         config.override(args.set)
     except ValueError as e:
         ap.error(str(e))
-    options = RunOptions(sports=tuple(dict.fromkeys(sports + paper_sports)), seconds=args.seconds,
+    options = RunOptions(sports=sports, seconds=args.seconds,
                          catalog_seconds=args.catalog_minutes * 60, refresh_at_start=not args.skip_refresh, scan=not args.no_scan,
-                         executors=() if args.no_trade else EXECUTE[args.execute], paper_sports=paper_sports)
+                         executors=() if args.no_trade else EXECUTE[args.execute], not_live=not_live)
     sys.stdout.reconfigure(line_buffering=True)     # Print immediately even when output goes to a file.
     with database.connect() as conn:
         try:

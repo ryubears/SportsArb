@@ -40,6 +40,7 @@ class PaperExecutor(Executor):
     """
 
     mode = "paper"
+    in_play = True      # Paper trades games, matches, races, and Bitcoin's windows, before and while they are played.
 
     def __init__(self, conn, cash, books, log=print, rng=None, clock=now_iso, is_maintenance=is_maintenance):
         super().__init__(conn, cash, books, log, clock, is_maintenance)

@@ -8,11 +8,14 @@ import pytest
 from catalog import fetch, notes
 from catalog.classify import kalshi, polymarket_us, teams
 from common import timeutil
+from engine.helper import config
 
 
 @pytest.mark.parametrize("name, table", [
     ("teams.ALIASES, the files in classify/aliases/", teams.ALIASES),
     ("polymarket_us.EVENT_PREFIX", polymarket_us.EVENT_PREFIX),
+    ("config.GAME_HOURS", config.GAME_HOURS),
+    ("fetch.GAME_PREFIXES, with politics, which has no game", {**fetch.GAME_PREFIXES, "politics": ()}),
 ])
 def test_table_covers_every_sport(name, table):
     assert set(table) == set(fetch.SPORTS), name
@@ -27,7 +30,9 @@ def test_sports_named_apart_are_ones_the_catalog_fetches(name, sports):
 
 def test_the_kalshi_series_fetched_are_the_ones_the_kalshi_classifier_reads():
     fetched = [ticker for venues in fetch.SPORTS.values() for ticker in venues["kalshi"]["tickers"]]
-    assert sorted(fetched) == sorted(kalshi.FUTURE_SERIES)
+    events = {*kalshi.GAME_SERIES, *kalshi.PLAYER_SERIES, *kalshi.SOCCER_SERIES, *kalshi.MATCH_SERIES, *kalshi.RACING_SERIES,
+              *kalshi.CRYPTO_SERIES}
+    assert sorted(fetched) == sorted({*kalshi.FUTURE_SERIES, *events})
     patterns = [p for venues in fetch.SPORTS.values() for p in venues["kalshi"].get("patterns", ())]
     assert sorted(p.pattern for p in patterns) == sorted(p.pattern for p in kalshi.SERIES_PATTERNS)
 

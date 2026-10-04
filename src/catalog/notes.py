@@ -7,6 +7,78 @@ match.py adds a pair's notes to its flags, see for_pair(). A note is a
 warning to read, not a bar: a pair trades whatever its notes say.
 """
 
+# GAMES, by sport and kind, from both venues' rules text. Football, baseball, hockey, and basketball as of 2026-09.
+FOOTBALL_POSTPONED = ("If the game does not start within 48 hours, Kalshi settles at a fair price. Polymarket US waits up to two weeks "
+                      "for a rescheduled game.")
+FOOTBALL_NOTES = {"game_winner": "Ties pay half on both venues. If the game does not start within 48 hours, Kalshi settles at a fair "
+                                 "price while Polymarket US waits up to two weeks for a rescheduled game.",
+                  "spread": FOOTBALL_POSTPONED, "total": FOOTBALL_POSTPONED}
+BASEBALL_POSTPONED = ("Extra innings count on both venues. If the game is postponed, Kalshi waits two days for it and then settles at a "
+                      "fair price, while Polymarket US waits up to two weeks for it.")
+BASEBALL_NOTES = {kind: BASEBALL_POSTPONED for kind in ("game_winner", "spread", "total", "team_total")}
+HOCKEY_POSTPONED = "If the game does not start within two days, both venues settle at a fair price, each its own."
+HOCKEY_GOALS = f"Overtime counts on both venues, and a shootout as one goal for its winner. {HOCKEY_POSTPONED}"
+HOCKEY_NOTES = {"game_winner": f"Overtime and the shootout count on both venues. {HOCKEY_POSTPONED}",
+                "spread": HOCKEY_GOALS, "total": HOCKEY_GOALS, "team_total": HOCKEY_GOALS}
+BASKETBALL_POSTPONED = ("Overtime counts on both venues. If the game does not start within 48 hours, Kalshi settles at a fair price, "
+                        "while Polymarket US waits up to two weeks for it and then settles at its last price.")
+BASKETBALL_NOTES = {kind: BASKETBALL_POSTPONED for kind in ("game_winner", "spread", "total", "team_total")}
+# Soccer, as of 2026-10: both count 90 minutes and stoppage time, a half its 45 and its stoppage, never extra time or penalties.
+SOCCER_POSTPONED = ("Both venues count 90 minutes and stoppage time. If the match moves more than 48 hours, Kalshi settles at a fair "
+                    "price, while Polymarket US waits up to two weeks for it and then settles at its last price.")
+SOCCER_NOTES = {
+    **{f"{period}{kind}": SOCCER_POSTPONED for period in ("", "first_half_", "second_half_")
+       for kind in ("result", "spread", "total", "btts", "exact_score")},
+    "total_corners": "Kalshi counts the corners of any extra time too. " + SOCCER_POSTPONED,
+}
+MATCH_NOTES = {
+    "tennis": {**{kind: "Both venues settle at a fair price, each its own, if the match never starts, and wait up to two weeks for "
+                        "one postponed. A player who retires loses on Polymarket US, which Kalshi's rules leave unsaid."
+                  for kind in ("match_winner", "set_1_winner", "set_2_winner", "set_3_winner", "set_4_winner", "set_5_winner")},
+               **{kind: "If a player retires, both venues settle what play already decided and a fair price, each its own, "
+                        "for the rest." for kind in ("games_spread", "sets_spread", "total_games", "total_sets", "exact_score")}},
+    "ufc": {kind: "Both venues pay 50 cents on a draw or a no contest, wait up to two weeks for a postponed fight, and settle a "
+                  "cancelled one at a fair price, each its own. A technical decision wins in no round on either."
+            for kind in ("match_winner", "go_the_distance", "round_of_victory")},
+    "darts": {"match_winner": "A match not played, or a walkover, settles at a fair price on Kalshi and at 50 cents on Polymarket "
+                              "US, which also pays 50 cents if the match moves more than two days."},
+}
+RACE_NOTE = ("A driver who retires or is not classified loses on both venues. Kalshi pays on the FIA's final classification and "
+             "settles at a fair price if the race does not start within 48 hours; Polymarket US waits up to two weeks for it.")
+# Bitcoin, as of 2026-10: both settle on CF Benchmarks' Bitcoin Real-Time Index, but read it apart.
+CRYPTO_NOTES = {
+    "updown_15m": "Both venues compare the simple averages of the index's last 60 seconds before the window's end and its start, "
+                  "rounded to the cent, Up on equal.",
+    "hit_before": "Kalshi pays on the index itself crossing the price, Polymarket US on a 60 second trimmed mean of it, without the "
+                  "top and bottom fifth, crossing it, so a brief spike can settle them apart.",
+    "dip_before": "Kalshi pays on the index itself crossing the price, Polymarket US on a 60 second trimmed mean of it, without the "
+                  "top and bottom fifth, crossing it, so a brief spike can settle them apart.",
+    "year_end_range": "Kalshi reads the simple average of the index's last 60 seconds of 2026, Polymarket US a trimmed mean of "
+                      "them, without the top and bottom fifth.",
+}
+KIND_NOTES = {"nfl": FOOTBALL_NOTES, "ncaaf": FOOTBALL_NOTES, "mlb": BASEBALL_NOTES, "nhl": HOCKEY_NOTES, "nba": BASKETBALL_NOTES,
+              "wnba": BASKETBALL_NOTES, "ncaab": BASKETBALL_NOTES,
+              **{league: SOCCER_NOTES for league in ("epl", "laliga", "seriea", "bundesliga", "ligue1", "ligamx", "mls", "ucl", "uel")},
+              **MATCH_NOTES, "f1": {"race_winner": RACE_NOTE, "race_constructor": RACE_NOTE}, "nascar": {"race_winner": RACE_NOTE},
+              "crypto": CRYPTO_NOTES}
+FOOTBALL_PLAYER_NOTE = ("Both venues settle to the pre-game fair price if the player never takes a snap and count overtime. Polymarket US "
+                        "ignores stat corrections made after the game.")
+BASKETBALL_PLAYER_NOTE = ("Both venues count overtime, and Polymarket US ignores stat corrections made after the game. A player who is "
+                          "active but never takes the court settles at a fair price on both venues, each its own, and Polymarket US "
+                          "settles an inactive player the same way, which Kalshi's rules leave unsaid.")
+PLAYER_NOTES = {
+    "nfl": FOOTBALL_PLAYER_NOTE,
+    "ncaaf": FOOTBALL_PLAYER_NOTE,
+    "mlb": "Both venues settle to a fair price, each its own, if the player is not in the starting lineup, or for a pitching prop is not "
+           "the starting pitcher, and count extra innings. Kalshi also settles at a fair price for a starter who never comes to the plate "
+           "or faces a batter, and does not count a pinch hitter's at bats.",
+    "nhl": "Overtime counts and shootout goals do not, on Polymarket US by its rules and on Kalshi by the official stats it goes by. "
+           "A player who dresses but never plays settles at a fair price on both venues, each its own, and Polymarket US settles a "
+           "scratched player the same way, which Kalshi's rules leave unsaid.",
+    "nba": BASKETBALL_PLAYER_NOTE,
+    "wnba": BASKETBALL_PLAYER_NOTE,
+}
+
 # Awards, in every sport. Both venues follow the official award, and season win totals count the regular season only on both.
 AWARD_NOTE = ("Polymarket US pays $1 divided among players who share the award. Kalshi's rules say the same for some awards and "
               "nothing for others.")
@@ -43,6 +115,14 @@ FUTURE_NOTES = {
 
 def for_pair(sport, kind):
     """
-    The notes a pair of the sport and kind carries, its kind's, or none for a kind the venues settle alike.
+    The notes a pair of the sport and kind carries: its kind's in the sport, its sport's player note for a player prop,
+    and a future's, or none for a kind the venues settle alike.
     """
-    return [FUTURE_NOTES[kind]] if kind in FUTURE_NOTES else []
+    found = []
+    if kind in KIND_NOTES.get(sport, {}):
+        found.append(KIND_NOTES[sport][kind])
+    if kind.startswith("player_") and sport in PLAYER_NOTES:
+        found.append(PLAYER_NOTES[sport])
+    if kind in FUTURE_NOTES:
+        found.append(FUTURE_NOTES[kind])
+    return found

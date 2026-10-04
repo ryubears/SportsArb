@@ -252,6 +252,7 @@ FUTURE_YES, FUTURE_NO = (dict(m, start_time=None, close_time=SEASON_END) for m i
 def test_signal_is_refused_for_thin_edges_poor_returns_payouts_within_a_day_and_games_under_way(tmp_path, quick):
     latest = books()
     conn, cash, ex = executor(tmp_path, latest)
+    ex.in_play = False                  # As live trades, futures only, see test_paper_trades_games_in_play_whenever_they_pay.
     assert ex.signal(PAIR, YES, NO, 0.015, 100, FEES, NOW) is False
     assert ex.signal(FUTURE, FUTURE_YES, FUTURE_NO, 0.08, 100, FEES, NOW) is False     # 8.7% until February is 22% a year, under 30.
     assert ex.signal(PAIR, YES, NO, 0.50, 100, FEES, "2026-09-21T21:00:00+00:00") is False        # Pays out in under 24 hours.
@@ -260,6 +261,15 @@ def test_signal_is_refused_for_thin_edges_poor_returns_payouts_within_a_day_and_
     unknown = [dict(m, start_time=None, close_time="2026-10-06T21:00:00+00:00") for m in (YES, NO)]
     assert ex.signal(PAIR, *unknown, 0.50, 100, FEES, NOW) is False
     assert ex.tasks == set() and stored(conn) == []
+
+
+def test_paper_trades_games_in_play_whenever_they_pay(tmp_path, quick):
+    # Paper trades the bets on one event, a game here, before and while it is played, however soon it pays.
+    _, _, ex = executor(tmp_path / "soon", books())
+    assert ex.signal(PAIR, YES, NO, 0.015, 100, FEES, NOW) is False                    # A thin edge is still refused.
+    assert at(ex, PAIR, YES, NO, 0.50, "2026-09-21T21:00:00+00:00") is True           # Pays out in under 24 hours.
+    _, _, ex = executor(tmp_path / "under way", books())
+    assert at(ex, PAIR, YES, NO, 0.50, "2026-09-22T17:30:00+00:00") is True           # Under way.
 
 
 def at(ex, pair, yes, no, edge, now, fees=FEES):

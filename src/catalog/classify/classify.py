@@ -17,6 +17,8 @@ from collections import Counter
 from db import database
 
 CLASSIFIERS = {"kalshi": kalshi.classify, "polymarket_us": polymarket_us.classify}
+DOUBLEHEADERS = {"kalshi": kalshi.doubleheaders, "polymarket_us": polymarket_us.doubleheaders}   # Each venue's contracts on doubleheaders.
+OUTCOMES = {"kalshi": kalshi.event_outcomes}    # What a venue's classifier needs to know of each event's other markets.
 # How the report groups each venue's unclassified contracts, by the field that best says what kind of market it is.
 REPORT_GROUPS = {"kalshi": lambda row: row["series_id"],
                  "polymarket_us": lambda row: row["market_type"] or row["event_title"]}
@@ -25,12 +27,17 @@ REPORT_GROUPS = {"kalshi": lambda row: row["series_id"],
 def classify_all(rows):
     """
     Classify every contract row. Returns the bets and the rows nobody
-    understood.
+    understood. A doubleheader's contracts are left out, since a bet names
+    a game by its date and teams, which its two games share.
     """
+    by_venue = {venue: [row for row in rows if row["venue"] == venue] for venue in CLASSIFIERS}
+    skipped = {(venue, contract_id) for venue, find in DOUBLEHEADERS.items() for contract_id in find(by_venue[venue])}
+    outcomes = {venue: find(by_venue[venue]) for venue, find in OUTCOMES.items()}
     bets, unclassified = [], []
     for row in rows:
         classifier = CLASSIFIERS.get(row["venue"])
-        bet = classifier(row) if classifier else None
+        skip = (row["venue"], row["contract_id"]) in skipped
+        bet = classifier(row, outcomes.get(row["venue"])) if classifier and not skip else None
         if bet:
             bets.append(bet)
         else:

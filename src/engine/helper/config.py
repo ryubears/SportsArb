@@ -72,7 +72,13 @@ GAME_HOURS = {              # How long a game is expected to last, kickoff to fi
     "mlb": 3.25,            # 475 hockey games a median of 2.75, three in four by 2.88, and 418 basketball games a median of 2.53,
     "nhl": 3.0,             # three in four by 2.71, and all three get more for playoff games, which run longer: three in four of 79
     "nba": 3.0,             # hockey playoff games ended by 3.17, of 96 basketball ones by 2.87. A game's bets are taken to pay
-}                           # SETTLE_HOURS after it.
+                            # SETTLE_HOURS after it. The rest are allowances, not yet measured: a basketball game's, a soccer
+    "wnba": 2.75, "ncaab": 2.75,     # match's 90 minutes with half time and stoppage time, a tennis match's best of three or five
+    **{league: 2.0 for league in ("epl", "laliga", "seriea", "bundesliga", "ligue1", "ligamx", "mls", "ucl", "uel")},   # sets, a
+    "tennis": 3.0, "ufc": 1.0, "darts": 1.5,     # UFC fight's walk out and five rounds with the card running late, a race's,
+    "f1": 2.0, "nascar": 4.0, "crypto": 0.25,   # and a Bitcoin window's 15 minutes. Politics has no game, but every sport
+    "politics": 0.0,                            # needs a length.
+}
 SETTLE_HOURS = 0.5          # Final whistle to the venues settling. A game's money is back SETTLE_HOURS after it ends.
 RECORD_HOURS = 5            # Kickoff to when a game's contracts stop being recorded, whatever their close time says. The kickoff
                             # is Polymarket US's, since Kalshi gives none, and holds for both venues' contracts.

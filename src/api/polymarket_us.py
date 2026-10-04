@@ -24,11 +24,12 @@ from api.bookstream import BookStream
 from api.http import RequestFailed, get_json, send_json
 from common.jsonutil import float_or_none, float_or_zero
 from common.paths import DATA_DIR
-from common.timeutil import epoch, iso
+from common.timeutil import days_between, epoch, iso
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from db.models import Contract
 
 GATEWAY = "https://gateway.polymarket.us/v1"    # Public catalog of events and markets.
+RACE_DAYS = 2           # The longest a race's event runs, start to end, so that a longer one with a sports data id is a season's award.
 API = "https://api.polymarket.us/v1"            # Signed requests for books and trading.
 API_PATH = "/v1"                                # API's path, which a signed request's signature covers.
 WS_URL = "wss://api.polymarket.us/v1/ws/markets"
@@ -101,11 +102,32 @@ def is_game(event):
     return bool(event.get("gameId") or event.get("sportradarGameId"))
 
 
+def is_race(event):
+    """
+    Whether a game event's markets, typed as futures, are on one race, 'f1-gabgpim-2026-10-04-w', which starts at the
+    event's start time. An award's event, also with a sports data id, runs for months.
+    """
+    start, end = iso(event.get("startTime")), iso(event.get("endDate"))
+    return bool(is_game(event) and start and end and days_between(start, end) <= RACE_DAYS)
+
+
+def start_time(event, m, future):
+    """
+    When a market's event starts, the kickoff of a game or the start of a race, or of a Bitcoin window, or None for a
+    future, whose event may carry a sports data id like a game's.
+    """
+    window = (m.get("assetPriceTerms") or {}).get("windowStart")
+    if window:
+        return iso(window)
+    if is_game(event) and (not future or is_race(event)):
+        return iso(event.get("startTime"))
+    return None
+
+
 def contracts(sport, tags):
     """
-    One Contract per open market on events carrying one of the tag slugs,
-    bar a game's, which are not cataloged. The contract is the market's
-    long side, which is Yes or Over.
+    One Contract per open market on events carrying one of the tag slugs.
+    The contract is the market's long side, which is Yes, Over, or the first side named.
     """
     result, seen_events = [], set()
     for event in (e for tag in tags for e in fetch_events(tag)):
@@ -114,7 +136,7 @@ def contracts(sport, tags):
         seen_events.add(event["slug"])
         for m in event.get("markets", []):
             future = m.get("sportsMarketType") == "futures"
-            if m.get("closed") or (is_game(event) and not future):     # Games are not cataloged, only futures.
+            if m.get("closed"):
                 continue
             long_side = next((s for s in m.get("marketSides", []) if s.get("long")), {})
             result.append(Contract(
@@ -131,7 +153,7 @@ def contracts(sport, tags):
                 market_type=m.get("sportsMarketType"),
                 line=float_or_none(m.get("line")),
                 rules=m.get("description"),
-                start_time=None,        # A future has no kickoff: an award's event carries a sports data id like a game's.
+                start_time=start_time(event, m, future),
                 # A future's market stays open two weeks past its event in case the event moves. The event's end is when it
                 # is expected to settle, which the payout time and how long it is recorded go by.
                 close_time=iso((event.get("endDate") if future else None) or m.get("endDate")),

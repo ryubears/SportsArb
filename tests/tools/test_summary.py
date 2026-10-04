@@ -67,11 +67,22 @@ def test_only_episodes_within_the_rules_are_shown(tmp_path, monkeypatch, capsys)
             episode("2026-09-27T16:00:00+00:00", 2, 0.04, 100),           # Under 5 cents.
             episode("2026-09-27T17:00:00+00:00", 2, 0.08, 100, live=1)])  # During a game.
     out = report(tmp_path, monkeypatch, capsys, fill)
-    assert ("\nopportunities within the rules (5c+, paying 24h+ out, 50%+ a year), last 12 hours\n"
+    assert ("\nopportunities within the rules (5c+, 50%+ a year, futures paying 24h+ out, games in play too), last 12 hours\n"
             "  1 episodes could have taken 94$ and locked in 6.00$\n"
             "  6.4% on capital, 1,164.9% a year, held 2.0 days on average\n") in out
     assert table(out, "by kind") == [["nfl", "winner", "1", "600.0", "94", "6.00", "6.4", "1,164.9", "2.0"]]
     assert table(out, "largest") == [["the", "bet", "6.0", "600", "100.0", "94", "6.00", "1,164.9", "2.0"]]
+
+
+def test_a_games_episodes_count_in_play_and_whenever_they_pay_as_paper_trades_them(tmp_path, monkeypatch, capsys):
+    def fill(conn):
+        conn.execute("INSERT INTO pairs (id, sport, label, kind, game_date, venues, contracts, flags, matched_at) "
+                     "VALUES (3, 'nfl', 'a game', 'spread', '2026-09-27', 'kalshi,polymarket_us', 2, '[]', ?)", (BEFORE,))
+        database.insert_opportunities(conn, [
+            episode("2026-09-27T13:00:00+00:00", 0.1, 0.06, 100, live=1, pair_id=3),     # In play, paying in hours.
+            episode("2026-09-27T14:00:00+00:00", 0.5, 0.10, 100, live=1, pair_id=1)])    # A future's in play is still out.
+    out = report(tmp_path, monkeypatch, capsys, fill)
+    assert [r[:2] for r in table(out, "by kind")] == [["nfl", "spread"]]
 
 
 def test_a_sport_filter_keeps_only_its_pairs_episodes_and_trades(tmp_path, monkeypatch, capsys):
