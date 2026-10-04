@@ -369,19 +369,21 @@ whose label starts with the sport, for example `nfl champion 2027 KC`,
 `politics senate_race 2026 GA D`. A pair only exists when both venues list
 the bet, and it carries every contract that expresses it. In tennis, darts,
 and the UFC the venues may date one match a day apart, Kalshi and
-Polymarket US reading a match in Asia by different clocks, so the same two
-people on dates a day apart are one match. Kinds with settlement rules that
-differ between venues carry a note from **notes.py**: how each venue treats
-a postponed game, overtime, a retired tennis player, a fight's draw, a
-darts walkover, a driver who does not finish, and Bitcoin's index,
-Polymarket US reading a trimmed mean of its last minute where Kalshi reads
-the index itself; Polymarket US divides the dollar among players or teams
-that tie for an award, a lead, or a record, where Kalshi's rules do not
-always say; Kalshi reads a UFC title holder and a tennis ranking at noon
-Eastern on December 31 and Polymarket US at 11:59 PM; and Kalshi pays a
-race on the party of whoever is sworn in, in January, and control of a
-house on February 1, Polymarket US on the election. A note is a warning to
-read, not a bar.
+Polymarket US reading a match in Asia by different clocks. A date only one
+venue lists for two people then joins the one a day off that only the other
+lists. Two people can also meet on days in a row, as in a darts round
+robin, so a date both venues list, and two dates one lists, stay matches of
+their own. Kinds with settlement rules that differ between venues carry a
+note from **notes.py**: how each venue treats a postponed game, overtime, a
+retired tennis player, a fight's draw, a darts walkover, a driver who does
+not finish, and Bitcoin's index, Polymarket US reading a trimmed mean of
+its last minute where Kalshi reads the index itself; Polymarket US divides
+the dollar among players or teams that tie for an award, a lead, or a
+record, where Kalshi's rules do not always say; Kalshi reads a UFC title
+holder and a tennis ranking at noon Eastern on December 31 and Polymarket
+US at 11:59 PM; and Kalshi pays a race on the party of whoever is sworn in,
+in January, and control of a house on February 1, Polymarket US on the
+election. A note is a warning to read, not a bar.
 
 **pipeline.py** runs fetch, classify, and match in one call. The live
 process runs it every hour in a child process, so new games and futures

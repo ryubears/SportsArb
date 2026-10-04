@@ -64,7 +64,6 @@ def test_far_apart_close_times_are_flagged():
     pairs, _ = match.match([bet("polymarket_us", "us", close_time="2027-03-31T23:55:00+00:00"),
                              bet("kalshi", "k", close_time="2029-02-13T23:30:00+00:00")], "nfl")
     assert any(f.startswith("close times") for f in pairs[0].flags)
-    assert any(f.startswith("close times") for f in pairs[0].flags)
 
 
 def test_winner_pair_holds_both_kalshi_contracts_and_the_away_market():
@@ -94,3 +93,38 @@ def test_leader_and_race_pairs_carry_their_notes_and_a_kind_settled_alike_none()
     assert by_kind["senate_race"].flags == [notes.ELECTION_NOTE]
     assert by_kind["season_receiving_yards"].flags == []
     assert by_kind["senate_race"].label == "nfl senate_race 2027 GA D"
+
+
+def meeting(venue, day, first="alex spellman", second="danny trueman"):
+    """
+    A match winner bet row of two people meeting on a day of October 2026, its contract named for the venue and day.
+    """
+    return bet(venue, f"{venue[0]}{day}", kind="match_winner", subject=first, game_date=f"2026-10-{day:02d}", team_a=first, team_b=second)
+
+
+def dates_and_members(pairs):
+    return sorted((p.game_date, sorted(m.contract_id for m in p.members)) for p in pairs)
+
+
+def test_a_day_each_venue_alone_lists_a_day_apart_is_one_match_on_the_earlier():
+    # Kalshi and Polymarket US dating two matches in Asia by different clocks, a week apart.
+    pairs, unmatched = match.match([meeting("kalshi", 3), meeting("polymarket_us", 2), meeting("kalshi", 10), meeting("polymarket_us", 9)],
+                                   "tennis")
+    assert dates_and_members(pairs) == [("2026-10-02", ["k3", "p2"]), ("2026-10-09", ["k10", "p9"])] and unmatched == []
+
+
+def test_two_people_meeting_on_days_in_a_row_are_two_matches():
+    # A darts round robin, the two meeting October 5 and 6, both venues listing both.
+    pairs, unmatched = match.match([meeting(venue, day) for venue in ("kalshi", "polymarket_us") for day in (5, 6)], "darts")
+    assert dates_and_members(pairs) == [("2026-10-05", ["k5", "p5"]), ("2026-10-06", ["k6", "p6"])] and unmatched == []
+
+
+def test_a_day_one_venue_alone_lists_stays_apart_from_the_match_both_list():
+    pairs, unmatched = match.match([meeting("kalshi", 5), meeting("kalshi", 6), meeting("polymarket_us", 5)], "darts")
+    assert dates_and_members(pairs) == [("2026-10-05", ["k5", "p5"])] and [r["contract_id"] for r in unmatched] == ["k6"]
+
+
+def test_a_day_with_a_near_day_either_side_on_the_other_venue_is_left_alone():
+    # Which of Polymarket US's two matches Kalshi's is cannot be told from the dates.
+    pairs, unmatched = match.match([meeting("kalshi", 3), meeting("polymarket_us", 2), meeting("polymarket_us", 4)], "tennis")
+    assert pairs == [] and len(unmatched) == 3
