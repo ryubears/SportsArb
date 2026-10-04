@@ -4,7 +4,6 @@ Tests for numbered migrations: each step runs once per database, and never on a 
 
 import sqlite3
 from db import database, migrations
-from db.models import Trade
 
 
 def version(conn):
@@ -112,16 +111,20 @@ def test_the_database_layer_does_not_import_the_live_code():
 
 def test_the_in_play_tests_trades_with_a_leg_on_each_venue_sent_both_orders_at_once_before_it_said(tmp_path):
     path = tmp_path / "t.sqlite"
-    conn = database.connect(path)
-    conn.execute("ALTER TABLE twins DROP COLUMN sequence")
-    for yes_venue, no_venue in (("polymarket_us", "kalshi"), ("kalshi", "kalshi")):
-        trade_id = database.insert_trade(conn, Trade(mode="live", pair_id=1, trade="t", signal_ts="s", edge=0.03, quantity=5, pays_at="p",
-                                                     yes_venue=yes_venue, yes_contract="y", yes_polarity="yes", yes_limit=0.45,
-                                                     no_venue=no_venue, no_contract="n", no_polarity="yes", no_limit=0.5))
-        conn.execute("INSERT INTO twins (live_trade_id) VALUES (?)", (trade_id,))
-    conn.execute("PRAGMA user_version = 9")
-    conn.commit()
-    conn.close()
+    old = sqlite3.connect(path)
+    old.execute("CREATE TABLE trades (id INTEGER PRIMARY KEY, mode TEXT, signal_ts TEXT, quantity INTEGER, yes_venue TEXT, no_venue TEXT)")
+    # The twins table as it first was, its last column's comment and all, which SQLite keeps in the table's definition.
+    old.execute("""CREATE TABLE twins (
+    live_trade_id   INTEGER PRIMARY KEY,    -- The live trade, see trades.
+    paper_trade_id  INTEGER                 -- Its paper twin, or null when the paper money could not pay for one.
+)""")
+    old.executemany("INSERT INTO trades VALUES (?, 'live', 's', 5, ?, ?)", [(1, "polymarket_us", "kalshi"), (2, "kalshi", "kalshi")])
+    old.executemany("INSERT INTO twins VALUES (?, NULL)", [(1,), (2,)])
+    old.execute("PRAGMA user_version = 9")
+    old.commit()
+    old.close()
     conn = database.connect(path)
     assert [tuple(r) for r in conn.execute("SELECT live_trade_id, sequence FROM twins ORDER BY live_trade_id")] == [(1, "together"), (2, None)]
+    database.insert_twin(conn, 3, "polymarket_first")
+    assert database.last_twin_sequence(conn) == "polymarket_first"
     assert version(conn) == len(migrations.STEPS)
