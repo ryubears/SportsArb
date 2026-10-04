@@ -67,9 +67,10 @@ def test_only_episodes_within_the_rules_are_shown(tmp_path, monkeypatch, capsys)
             episode("2026-09-27T15:00:00+00:00", 150, 0.10, 100),         # 10 cents over 150 days, 27% a year, too little.
             episode("2026-09-27T16:00:00+00:00", 2, 0.015, 100),          # Under 2 cents.
             episode("2026-09-27T16:30:00+00:00", 2, 0.03, 100, lasted=0.004),      # 3 cents paying in two days, 278% a year.
+            episode("2026-09-27T16:45:00+00:00", 2, 0.06, 0.6, lasted=900),         # Under a whole contract at 2 cents, however long.
             episode("2026-09-27T17:00:00+00:00", 2, 0.08, 100, live=1)])  # During a game.
     out = report(tmp_path, monkeypatch, capsys, fill)
-    assert ("\nlive opportunities (2c+, 50%+ a year, futures paying 24h+ out), last 12 hours\n"
+    assert ("\nlive opportunities (2c+ on 1+ contracts, 50%+ a year, futures paying 24h+ out), last 12 hours\n"
             "  2 episodes could have taken 191$ and locked in 9.00$\n"
             "  4.7% on capital, 859.9% a year, held 2.0 days on average\n"
             "  at 2c or more for 600.000s at the median, 600.000s at the 90th percentile, 600.000s at the longest\n") in out
@@ -89,11 +90,11 @@ def test_paper_opportunities_are_the_games_paying_within_a_day_in_play_too(tmp_p
             episode("2026-09-27T14:00:00+00:00", 2, 0.10, 100, pair_id=3),                          # Paying in two days.
             episode("2026-09-27T15:00:00+00:00", 0.5, 0.10, 100, live=1, pair_id=1)])    # A future is live's.
     out = report(tmp_path, monkeypatch, capsys, fill, modes=summary.MODES["all"])
-    assert "\npaper opportunities (2c+, 50%+ a year, games, matches, races, and windows paying within 24h, in play too), last 12 hours\n" in out
+    assert "\npaper opportunities (2c+ on 1+ contracts, 50%+ a year, games, matches, races, and windows paying within 24h, in play too), last 12 hours\n" in out
     assert "  at 2c or more for 1.500s at the median, 1.500s at the 90th percentile, 1.500s at the longest\n" in out
     assert table(out, "paper opportunities by kind") == [["nfl", "spread", "2", "1.500s", "1.500s", "188", "12.00", "6.4", "12,943.3", "0.5"]]
     assert [r[3] for r in table(out, "paper largest opportunities")] == ["0.250s", "1.500s"]
-    assert "\nlive opportunities (2c+, 50%+ a year, futures paying 24h+ out), last 12 hours\n  none\n" in out    # The future paid too soon.
+    assert "\nlive opportunities (2c+ on 1+ contracts, 50%+ a year, futures paying 24h+ out), last 12 hours\n  none\n" in out    # The future paid too soon.
     assert out.index("\npaper opportunities") < out.index("\nlive opportunities")
 
 

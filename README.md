@@ -699,13 +699,17 @@ its own.
 and the pairs of each sport in one line, and feed drops. For paper and
 then live, or one of them with `--mode paper` or `--mode live`, it shows
 the opportunities within that desk's rules, an edge of `MIN_EDGE` or more
-and `MIN_ANNUAL_PCT` a year or more, for paper on a game, match, race, or
-window paying within `PAPER_MAX_PAYOUT_HOURS`, in play too, and for live
-on a future paying `MIN_PAYOUT_HOURS` or more out: what they could have
-taken and locked in at full size, how long the edge stayed at `MIN_EDGE`
-or more, in seconds to the thousandth, at the median, the 90th percentile,
-and the longest, the same by sport and kind, and the largest five. Episodes
-before 2026-10-04 16:03 UTC kept that stretch at five cents. It then shows
+and `MIN_ANNUAL_PCT` a year or more, a whole contract or more fillable at
+that edge through its longest stretch, for paper on a game, match, race,
+or window paying within `PAPER_MAX_PAYOUT_HOURS`, in play too, and for
+live on a future paying `MIN_PAYOUT_HOURS` or more out: what they could
+have taken and locked in at full size, how long the edge stayed at
+`MIN_EDGE` or more, in seconds to the thousandth, at the median, the 90th
+percentile, and the longest, the same by sport and kind, and the largest
+five. An edge on less than a contract, a sliver of a Polymarket US level
+that can last minutes, is left out, since a trade opens a whole contract
+or more and so could never take it. Episodes before 2026-10-04 16:03 UTC
+kept that stretch at five cents. It then shows
 the trades by outcome, filled, partial, then failed, and by sport and kind
 in the window, the legs settled in it by venue, and
 the open trades: in a few lines, how many, how many of them opened in the

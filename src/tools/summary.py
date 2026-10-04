@@ -4,20 +4,21 @@ executors' rules trade, and the trades.
 
 Opportunities are shown for each mode, paper then live, or one with
 --mode, only those within its rules: an edge of config.MIN_EDGE or more at
-the peak, returning config.MIN_ANNUAL_PCT a year or more, and for paper a
-game, match, race, or window paying within config.PAPER_MAX_PAYOUT_HOURS,
-found in play too, for live a future paying config.MIN_PAYOUT_HOURS or more
-out, found before any game. Each shows what it could have taken at full
-size through its longest stretch at that edge, and what that locks in,
-overall, by sport and kind, and the largest, and how long the edge stayed
-at that, in seconds to the thousandth. Trades are shown for each mode the
-same way, by outcome and by kind for the window, the legs settled in it,
-and the open trades: in a few lines, how many, how many of them opened in
-the last hour, day, and week and the capital those hold, the capital they
-all hold and the profit they are expected to return, its rate a year, and
-when they resolve, then each one opened in the window. --sport narrows
-everything to some sports. Reads only, so it is safe to run while the
-live process is writing.
+the peak, returning config.MIN_ANNUAL_PCT a year or more, a whole contract
+or more fillable at that edge through its longest stretch, since a trade
+opens no fewer, and for paper a game, match, race, or window paying within
+config.PAPER_MAX_PAYOUT_HOURS, found in play too, for live a future paying
+config.MIN_PAYOUT_HOURS or more out, found before any game. Each shows
+what it could have taken at full size through its longest stretch at that
+edge, and what that locks in, overall, by sport and kind, and the largest,
+and how long the edge stayed at that, in seconds to the thousandth. Trades
+are shown for each mode the same way, by outcome and by kind for the
+window, the legs settled in it, and the open trades: in a few lines, how
+many, how many of them opened in the last hour, day, and week and the
+capital those hold, the capital they all hold and the profit they are
+expected to return, its rate a year, and when they resolve, then each one
+opened in the window. --sport narrows everything to some sports. Reads
+only, so it is safe to run while the live process is writing.
 
 The script sets its own import path, so it runs from any folder. The live
 money is not in the database but on the venues, so it is read from each
@@ -47,6 +48,7 @@ from engine.helper import config
 MODES = {"live": ("live",), "paper": ("paper",), "all": ("paper", "live")}     # What --mode shows, in order.
 OPENED_HOURS = {"hour": 1, "day": 24, "week": 24 * 7}     # The windows the open trades are counted as opened in.
 WIDTH = 100         # The longest line a list of items wraps at.
+MIN_CONTRACTS = 1   # The fewest contracts a trade opens, see Executor.quantity_for(), so the least an episode worth showing kept.
 # The order trade and order statuses are shown in, best first: a trade is filled, partial, or failed, and an order
 # filled, partial, or one of the ways it took nothing. One not listed comes last.
 STATUSES = ("filled", "partial", "failed", "unfilled", "unfunded", "rejected", "error", "sent")
@@ -199,9 +201,10 @@ def print_mode_opportunities(conn, since, hours, sports, mode):
         SELECT p.sport, p.kind, p.label, trade, 100 * peak_edge, min_edge_seconds, min_edge_size, min_edge_size - min_edge_profit,
                min_edge_profit, days_held
         FROM opportunities o JOIN pairs p ON p.id = o.pair_id
-        WHERE start_ts >= ? AND peak_edge >= ? AND min_edge_seconds IS NOT NULL AND annual_pct >= ? AND {rule}{where}
-        ORDER BY min_edge_profit DESC""", (since, config.MIN_EDGE, config.MIN_ANNUAL_PCT) + rule_params + params)
-    print(f"\n{mode} opportunities ({cents}+, {config.MIN_ANNUAL_PCT}%+ a year, {bets}), last {hours} hours")
+        WHERE start_ts >= ? AND peak_edge >= ? AND min_edge_seconds IS NOT NULL AND min_edge_size >= ? AND annual_pct >= ?
+          AND {rule}{where}
+        ORDER BY min_edge_profit DESC""", (since, config.MIN_EDGE, MIN_CONTRACTS, config.MIN_ANNUAL_PCT) + rule_params + params)
+    print(f"\n{mode} opportunities ({cents}+ on {MIN_CONTRACTS}+ contracts, {config.MIN_ANNUAL_PCT}%+ a year, {bets}), last {hours} hours")
     if not rows:
         print("  none")
         return
@@ -241,7 +244,9 @@ def print_mode_opportunities(conn, since, hours, sports, mode):
 def print_opportunities(conn, since, hours, sports, modes=("paper", "live")):
     """
     The episodes within each mode's rules in the window, paper then live: at config.MIN_EDGE or more and
-    config.MIN_ANNUAL_PCT a year or more, both at the peak, on the bets the mode trades, see opportunity_rules().
+    config.MIN_ANNUAL_PCT a year or more, both at the peak, with MIN_CONTRACTS or more fillable at that edge through
+    its longest stretch, on the bets the mode trades, see opportunity_rules(). An edge on less, a sliver of a level,
+    is one no trade could take, however long it lasted.
     Capital is what buying every contract fillable at that edge through its longest stretch at it would have cost with
     fees, and profit what it locks in. The annual rates weight each episode by its capital, over the days until it pays.
     How long the edge stayed at config.MIN_EDGE or more is the longest unbroken stretch of each episode, in seconds to
