@@ -8,7 +8,10 @@ venues, trading/ makes the trades, and money/ keeps the cash.
   connections and books run in a child process, which passes every
   changed book on.
 - The recorder, from market/record.py, holds the newest book of every
-  paired contract in memory. Books are not stored.
+  paired contract in memory. Books are not stored. While a paper order is
+  in flight, every book of its contract also goes on a tape, from
+  market/tape.py, so the order can meet the venue's book as it was when a
+  live order would have arrived.
 - The scanner, from market/scan.py, prices each pair a changed book
   belongs to, stores every episode of positive edge in the opportunities
   table, and offers each episode to the desks.
@@ -18,7 +21,8 @@ venues, trading/ makes the trades, and money/ keeps the cash.
   and settler, and its trades stored with its mode, so paper and live
   never mix. They trade apart: the paper desk the bets on one event, a
   game, a match, a race, or a Bitcoin window, before it and while it is
-  played, whenever it pays, and the live desk the futures, which pay
+  played, that pay within PAPER_MAX_PAYOUT_HOURS, and the live desk the
+  futures, which pay
   MIN_PAYOUT_HOURS or more out, bar the sports given to --not-live. On the
   same signal live's real orders took the contracts paper's simulated ones
   looked for: from 2026-10-04, when live began asking for all it saw,
@@ -77,6 +81,7 @@ from db import database
 from engine.components.market import scan
 from engine.components.market.record import Recorder, load_targets
 from engine.components.market.streams import Streams
+from engine.components.market.tape import Tapes
 from engine.components.money import settle
 from engine.components.money.live import LiveBalances
 from engine.components.money.paper import PaperBalances
@@ -129,10 +134,12 @@ def trading_settings():
     The settings that decide what the paper trader does, in one line, so each run's log says what it ran with.
     """
     c = config
-    latency = ", ".join(f"{venue} {median}ms" for venue, (median, _) in c.PAPER_LATENCY_MS.items())
+    trips = ", ".join(f"{venue} {times['open'][0]}ms there ({times['flatten'][0]} to flatten) and {times['back'][0]} back"
+                      for venue, times in c.PAPER_ORDER_MS.items())
     return (f"settings: min edge {c.MIN_EDGE:.2f}$ and {c.MIN_ANNUAL_PCT}% a year, live paying {c.MIN_PAYOUT_HOURS}h or more out "
-            f"and no game once kicked off, paper in play too, fill share {c.FILL_SHARE}, "
-            f"rejects {c.PAPER_REJECT_PROBABILITY:.0%}, latency {latency}, expected game "
+            f"and no game once kicked off, paper paying within {c.PAPER_MAX_PAYOUT_HOURS}h and in play too, fill share {c.FILL_SHARE}, "
+            f"rejects {c.PAPER_REJECT_PROBABILITY:.0%}, paper orders take {trips}, filling at the venue's book then, waiting up to "
+            f"{', '.join(f'{venue} {s}s' for venue, s in c.PAPER_FEED_SECONDS.items())} for it to reach us, expected game "
             f"{', '.join(f'{sport} {hours}h' for sport, hours in c.GAME_HOURS.items())} + settle {c.SETTLE_HOURS}h, "
             f"start balance {c.PAPER_START_BALANCE:,.0f}$; {book_waits()}")
 
@@ -154,16 +161,17 @@ class Desk:
     and the settler that pays its trades out. books is a function returning
     the recorder's newest books. markets are the bets it trades, 'events',
     those on one game, match, race, or window, or 'futures', or None for
-    both, and held_out the sports it leaves alone.
+    both, and held_out the sports it leaves alone. tapes are the recorder's
+    tapes, which paper orders meet the venues' books on, see market/tape.py.
     """
 
-    def __init__(self, mode, conn, books, notifier, markets=None, held_out=()):
+    def __init__(self, mode, conn, books, notifier, markets=None, held_out=(), tapes=None):
         self.mode = mode
         self.markets = markets
         self.held_out = tuple(held_out)
         if mode == "paper":
             self.cash = PaperBalances(conn)
-            self.executor = PaperExecutor(conn, self.cash, books, log)
+            self.executor = PaperExecutor(conn, self.cash, books, log, tapes=tapes)
         elif mode == "live":
             self.cash = LiveBalances(log)
             self.executor = LiveExecutor(conn, self.cash, books, log, notifier=notifier)
@@ -220,13 +228,14 @@ class Session:
         self.attestation = notify.AttestationWatch(conn, self.notifier, log)
         # The executors trade against the recorder's books, which exist once the recorder does, below. The desks trade
         # apart, since on one signal live's real orders take what paper's look for.
-        rules = {"paper": dict(markets="events"), "live": dict(markets="futures", held_out=self.not_live)}
+        self.tapes = Tapes()
+        rules = {"paper": dict(markets="events", tapes=self.tapes), "live": dict(markets="futures", held_out=self.not_live)}
         self.desks = [Desk(mode, conn, lambda: self.recorder.books, self.notifier, **rules[mode])
                       for mode in executors] if with_scanner else []
         self.scanner = scan.Scanner(conn, sports, log, [d.signal for d in self.desks], books=lambda: self.recorder.books) if with_scanner else None
         for desk in self.desks:
             desk.executor.recheck = self.scanner.recheck
-        self.recorder = Recorder(conn, self.scanner)
+        self.recorder = Recorder(conn, self.scanner, self.tapes)
         self.streams = Streams(self.recorder)
         self.last_status = self.last_summary = time.time()
 
@@ -244,7 +253,8 @@ class Session:
             if not notify.EMAIL_FILE.exists():
                 log(f"no email settings in {notify.EMAIL_FILE}, alerts are only logged and stored")
         if any(d.mode == "paper" for d in self.desks):
-            log("paper trades the games, matches, races, and windows of every sport, in play too")
+            log(f"paper trades the games, matches, races, and windows of every sport that pay within {config.PAPER_MAX_PAYOUT_HOURS}h, "
+                f"in play too")
         targets = load_targets(self.conn, self.sports)
         log("recording " + ", ".join(f"{len(ids)} {venue}" for venue, ids in targets.items()) + " contracts")
         if not any(targets.values()):

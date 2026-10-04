@@ -5,21 +5,26 @@ Tests for the paper executor, with fixed latency and no randomness unless a test
 import asyncio
 import dataclasses
 import random
+import types
 import pytest
 from common.timeutil import epoch
+from common.venues import VENUES
 from db import database
 from db.models import Book
 from engine.components.market import scan
+from engine.components.market.tape import Tapes
 from engine.components.money import settle
 from engine.components.money.paper import PaperBalances
-from engine.components.trading.paper import PaperExecutor
+from engine.components.trading.executor import Executor
+from engine.components.trading.paper import PaperExecutor, at_seconds
 from engine.helper import config
 from trade_setup import CLOSE, FEES, KICKOFF, NO, NO_K_FEES, NO_PM_FEES, NOW, PAIR, PAYS_AT, YES, books, stored
 
 
 @pytest.fixture
 def quick(monkeypatch):
-    monkeypatch.setattr(config, "PAPER_LATENCY_MS", {"kalshi": (1, 0), "polymarket_us": (1, 0)})
+    monkeypatch.setattr(config, "PAPER_ORDER_MS", {venue: {"open": (1, 1), "flatten": (1, 1), "back": (1, 1)} for venue in VENUES})
+    monkeypatch.setattr(config, "PAPER_MAX_PAYOUT_HOURS", 24 * 7)     # The pair pays two days after NOW.
     monkeypatch.setattr(config, "PAPER_REJECT_PROBABILITY", 0)
 
 
@@ -63,12 +68,14 @@ def test_unchanged_books_fill_both_legs_and_lock_in_the_edge(tmp_path, quick):
 
 def test_an_order_sweeps_the_levels_that_keep_the_edge_floor_and_skips_a_one_lot_top(tmp_path, quick):
     latest = books()
-    latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [[0.44, 100]], [[0.45, 1], [0.46, 100], [0.50, 100]])
+    latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [[0.44, 100]], [[0.45, 1], [0.46, 100], [0.52, 100]])
+    latest[("kalshi", "k")] = Book("kalshi", "k", NOW, [[0.53, 300]], [[0.54, 300]])
     conn, cash, ex = executor(tmp_path, latest)
     assert run(ex) == [True]
     t = stored(conn)[0]
     # The 1-lot at 0.45 fills nothing for us. The 100 at 0.46 still leave 7 cents against 0.47, so the limit reaches it.
-    # The 0.50 level would leave 3 cents and is left out. Half of the 100 contracts inside the limit is the quantity.
+    # The 0.52 level would leave 1 cent, under the 2 cent floor, and is left out though Kalshi has more. Half of the
+    # 100 contracts inside the limit is the quantity.
     assert (t["yes_limit"], t["no_limit"], t["quantity"]) == (0.46, 0.47, 50)
     assert (t["status"], t["yes_filled"], t["no_filled"], t["matched"]) == ("filled", 50, 50, 50)
     assert t["yes_cost"] == pytest.approx(50 * 0.46) and t["profit"] == pytest.approx(50 * (1 - 0.46 - 0.47))
@@ -249,10 +256,18 @@ SEASON_END = "2027-02-14T00:00:00+00:00"            # When the future's contract
 FUTURE_YES, FUTURE_NO = (dict(m, start_time=None, close_time=SEASON_END) for m in (YES, NO))
 
 
+def as_live(ex):
+    """
+    Judge signals on a paper executor by live's rules, no game once kicked off and nothing paying within a day.
+    """
+    ex.in_play = False
+    ex.pays_in_time = types.MethodType(Executor.pays_in_time, ex)
+
+
 def test_signal_is_refused_for_thin_edges_poor_returns_payouts_within_a_day_and_games_under_way(tmp_path, quick):
     latest = books()
     conn, cash, ex = executor(tmp_path, latest)
-    ex.in_play = False                  # As live trades, futures only, see test_paper_trades_games_in_play_whenever_they_pay.
+    as_live(ex)                         # See test_paper_trades_bets_paying_within_a_day_in_play_too_and_nothing_further_out.
     assert ex.signal(PAIR, YES, NO, 0.015, 100, FEES, NOW) is False
     assert ex.signal(FUTURE, FUTURE_YES, FUTURE_NO, 0.08, 100, FEES, NOW) is False     # 8.7% until February is 22% a year, under 30.
     assert ex.signal(PAIR, YES, NO, 0.50, 100, FEES, "2026-09-21T21:00:00+00:00") is False        # Pays out in under 24 hours.
@@ -263,10 +278,13 @@ def test_signal_is_refused_for_thin_edges_poor_returns_payouts_within_a_day_and_
     assert ex.tasks == set() and stored(conn) == []
 
 
-def test_paper_trades_games_in_play_whenever_they_pay(tmp_path, quick):
-    # Paper trades the bets on one event, a game here, before and while it is played, however soon it pays.
+def test_paper_trades_bets_paying_within_a_day_in_play_too_and_nothing_further_out(tmp_path, quick, monkeypatch):
+    # Paper trades the bets on one event, a game here, before and while it is played, once it pays within 24 hours.
+    monkeypatch.setattr(config, "PAPER_MAX_PAYOUT_HOURS", 24)
     _, _, ex = executor(tmp_path / "soon", books())
-    assert ex.signal(PAIR, YES, NO, 0.015, 100, FEES, NOW) is False                    # A thin edge is still refused.
+    assert ex.signal(PAIR, YES, NO, 0.50, 100, FEES, NOW) is False                     # Pays out two days on.
+    assert ex.signal(FUTURE, FUTURE_YES, FUTURE_NO, 0.50, 100, FEES, NOW) is False     # Pays out in February.
+    assert ex.signal(PAIR, YES, NO, 0.015, 100, FEES, "2026-09-21T21:00:00+00:00") is False     # A thin edge is still refused.
     assert at(ex, PAIR, YES, NO, 0.50, "2026-09-21T21:00:00+00:00") is True           # Pays out in under 24 hours.
     _, _, ex = executor(tmp_path / "under way", books())
     assert at(ex, PAIR, YES, NO, 0.50, "2026-09-22T17:30:00+00:00") is True           # Under way.
@@ -285,6 +303,7 @@ def at(ex, pair, yes, no, edge, now, fees=FEES):
 
 def test_edges_before_kickoff_and_on_futures_that_pay_enough_are_traded(tmp_path, quick):
     conn, cash, ex = executor(tmp_path, books())
+    as_live(ex)
     assert at(ex, PAIR, YES, NO, 0.08, "2026-09-21T20:00:00+00:00") is True      # The day before, paying 24.75 hours on.
     ex.books = lambda: books(pm_bid=0.34, pm_ask=0.35, k_bid=0.55, k_ask=0.56)   # 20 cents: 25% until February, 62% a year.
     assert at(ex, FUTURE, FUTURE_YES, FUTURE_NO, 0.20, NOW) is True
@@ -349,11 +368,14 @@ def test_a_trade_is_stored_as_sent_before_it_fills(tmp_path, quick):
     assert asyncio.run(scenario()) == "sent"
 
 
-def test_latency_is_drawn_around_the_measured_median(tmp_path):
+def test_trips_are_drawn_around_the_live_orders_median_and_90th_percentile(tmp_path):
     conn, cash, ex = executor(tmp_path, {})
     ex.rng = random.Random(7)
-    draws = [ex.latency("kalshi") for _ in range(200)]
-    assert 40 < sorted(draws)[100] < 90 and min(draws) > 10 and max(draws) < 400
+    trips = [ex.trip("polymarket_us", "open") for _ in range(2000)]
+    there, back = (sorted(1000 * trip[i] for trip in trips) for i in (0, 1))
+    assert 55 < there[1000] < 63 and 122 < there[1800] < 150         # 59 ms at the median, 136 at the 90th percentile.
+    assert 28 < back[1000] < 34 and 74 < back[1800] < 92             # 31 and 83.
+    assert [round(1000 * t, 1) for t in ex.trip("kalshi", "flatten")] == [pytest.approx(12, abs=4), pytest.approx(8, abs=1)]
 
 
 def test_scanner_signals_once_per_episode(tmp_path):
@@ -490,3 +512,73 @@ def test_no_trade_opens_and_no_sale_goes_out_on_a_venue_that_is_not_trading(tmp_
     asyncio.run(ex.retry(NOW))
     assert stored(conn)[0]["yes_held"] == 0 and ex.exposed == {}
 
+
+
+# TIMED AS LIVE ORDERS ARE, against the books the recorder tapes
+
+T = epoch(NOW)
+
+
+@pytest.fixture
+def timed(monkeypatch):
+    """
+    Trips of fixed length, in ms: Kalshi 12 there and 8 back, Polymarket US 60 there, 24 for a sale, and 30 back.
+    """
+    monkeypatch.setattr(config, "PAPER_ORDER_MS", {"kalshi": {"open": (12, 12), "flatten": (12, 12), "back": (8, 8)},
+                                                   "polymarket_us": {"open": (60, 60), "flatten": (24, 24), "back": (30, 30)}})
+    monkeypatch.setattr(config, "PAPER_FEED_SECONDS", {"kalshi": 0.05, "polymarket_us": 0.05})
+    monkeypatch.setattr(config, "PAPER_REJECT_PROBABILITY", 0)
+    monkeypatch.setattr(config, "PAPER_MAX_PAYOUT_HOURS", 24 * 7)     # The pair pays two days after NOW.
+
+
+def stamped(venue, bid, ask, made, received):
+    """
+    A book of the pair's contract on a venue, made at made by the venue's clock and reaching us at received by ours, both seconds after NOW.
+    """
+    contract = "pm" if venue == "polymarket_us" else "k"
+    return Book(venue, contract, at_seconds(T + received), [[bid, 100]], [[ask, 100]], T + made)
+
+
+def taped(tmp_path, changes):
+    """
+    Signal the pair at NOW against books(), then, once the trade's tapes are open, let each of changes reach us as the
+    recorder would, all at once, and wait for the trade. Returns the database and the trade.
+    """
+    latest, tapes = books(), Tapes()
+    conn = database.connect(tmp_path / "t.sqlite")
+    ex = PaperExecutor(conn, PaperBalances(conn), lambda: latest, lambda m: None, random.Random(1), clock=lambda: NOW, tapes=tapes)
+
+    async def scenario():
+        assert ex.signal(PAIR, YES, NO, 0.08, 100, FEES, NOW)
+        await asyncio.sleep(0)                  # The trade starts, and tapes its books from here.
+        assert set(tapes.open) == {("polymarket_us", "pm"), ("kalshi", "k")}
+        for book in changes:
+            latest[(book.venue, book.contract_id)] = book
+            tapes.add((book.venue, book.contract_id), book)
+        await asyncio.gather(*ex.tasks)
+        assert tapes.open == {}                 # Done with, once the trade is.
+    asyncio.run(scenario())
+    return conn, stored(conn)[0]
+
+
+def test_an_order_meets_the_venues_book_as_it_was_when_the_order_arrived(tmp_path, timed):
+    # Polymarket US took its 0.45 ask away 30 ms after the signal, by its clock, and the change reached us at 110 ms.
+    # Our yes order got there at 60 ms, after the change, so it buys nothing, though our newest book when it got there
+    # was still the old one. Kalshi's next change came after our no order got there at 12 ms, so that fills.
+    conn, t = taped(tmp_path, [stamped("kalshi", 0.53, 0.54, 0.020, 0.032),
+                               stamped("polymarket_us", 0.49, 0.50, 0.030, 0.110),
+                               stamped("polymarket_us", 0.49, 0.50, 0.090, 0.170)])
+    assert (t["status"], t["yes_filled"], t["no_filled"]) == ("failed", 0, 50)
+    # Each answer came after a trip there and back, the later at 90 ms. The no leg was sold back then on the Kalshi book
+    # we had seen by 90 ms, and the sale reached Kalshi at 102 ms and answered at 110.
+    assert (t["yes_latency_ms"], t["no_latency_ms"], t["yes_fill_ts"], t["no_fill_ts"]) == (90, 20, at_seconds(T + 0.09), at_seconds(T + 0.02))
+    assert (t["no_held"], t["hedge"]) == (0, "sold back 50 of 50 on kalshi")
+    assert [r["ts"] for r in stored(conn, "ledger")][-1] == at_seconds(T + 0.11)
+
+
+def test_a_change_the_venue_made_after_the_order_arrived_does_not_stop_it(tmp_path, timed):
+    # The same change made at 70 ms, after our yes order got there at 60, though it reached us before that order's
+    # fill was worked out.
+    conn, t = taped(tmp_path, [stamped("kalshi", 0.53, 0.54, 0.020, 0.032),
+                               stamped("polymarket_us", 0.49, 0.50, 0.070, 0.150)])
+    assert (t["status"], t["yes_filled"], t["no_filled"], t["yes_cost"]) == ("filled", 50, 50, pytest.approx(50 * 0.45))

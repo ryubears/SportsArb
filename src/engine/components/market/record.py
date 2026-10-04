@@ -11,7 +11,8 @@ again, so the scanner can tell a quiet book from one that went unseen. A
 venue's other connections carry on, and so do their books.
 
 With a scanner from scan.py, every change at the top of a book is priced
-as it lands, from the same in memory books.
+as it lands, from the same in memory books. With Tapes from tape.py, every
+book of a contract a paper order is in flight on is also kept on its tape.
 
 Both venues say when they made each change: Kalshi on every delta,
 Polymarket US on every book after the first of each connection. The status
@@ -61,9 +62,10 @@ class Recorder:
     scanner, every change at the top of a book is priced as it lands.
     """
 
-    def __init__(self, conn, scanner=None):
+    def __init__(self, conn, scanner=None, tapes=None):
         self.conn = conn
         self.scanner = scanner
+        self.tapes = tapes      # Tapes of the contracts paper orders are in flight on, or None.
         self.books = {}         # (venue, contract_id) maps to the contract's newest Book.
         self.updates = {venue: 0 for venue in VENUES}
         self.last_update = {venue: None for venue in VENUES}       # Wall clock seconds of the newest update per venue.
@@ -88,6 +90,8 @@ class Recorder:
         key = (venue, contract_id)
         before = self.books.get(key)
         book = self.books[key] = Book(venue, contract_id, ts or now_iso(), bids[:config.BOOK_LEVELS], asks[:config.BOOK_LEVELS], sent)
+        if self.tapes:
+            self.tapes.add(key, book)
         if self.scanner and (before is None or top(before) != top(book)):
             self.scanner.on_book(venue, contract_id, self.books, book.ts)
 
@@ -96,7 +100,8 @@ class Recorder:
         Drop the books of contracts that are no longer recorded, or not seen for a while.
         """
         for contract_id in contract_ids:
-            self.books.pop((venue, contract_id), None)
+            if self.books.pop((venue, contract_id), None) and self.tapes:
+                self.tapes.add((venue, contract_id), None)
 
     def on_gap(self, venue, start_ts, end_ts, contract_ids):
         """

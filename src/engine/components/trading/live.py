@@ -210,8 +210,8 @@ class LiveExecutor(Executor):
     async def fill(self, trade, leg):
         return await self.send(trade, leg, "open", "buy", leg.quantity, leg.limit)
 
-    async def sell_back(self, trade, leg, quantity, floor):
-        return await self.send(trade, leg, "flatten", "sell", quantity, floor)
+    async def sell_back(self, trade, leg, quantity, floor, when=None):
+        return await self.send(trade, leg, "flatten", "sell", quantity, floor)      # Sent now: live flattens as its answers come.
 
     # RESULTS, which the brakes check whenever a trade may have been decided.
 

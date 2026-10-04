@@ -1,13 +1,31 @@
 """
-Paper trade the scanner's signals against the live books.
+Paper trade the scanner's signals against the live books, timed as live orders are.
 
-The paper executor pretends to send each order. It arrives at its venue
-after a random latency drawn from what we measured, and fills against the
-book as it is at that moment, from the same in memory books the scanner
-reads. A level still there fills, a level that shrank fills partly, and a
-level that is gone does not fill. Only a share of the visible size is
-assumed to be ours, since other takers see the same thing, and a small
-share of orders is rejected outright.
+The paper executor pretends to send each order the way a live one goes.
+An order takes a trip to its venue and a trip back, each drawn around
+what the live orders took, see config.PAPER_ORDER_MS. The trip there ends
+at the venue's own time on the order, the clock both venues stamp their
+books with, and the order fills against the book the venue had then: the
+newest it made by then on the contract's tape, which the recorder keeps
+while the trade is in flight, see market/tape.py. Our copy of a book runs
+behind the venue's, Kalshi's by some 12 ms and Polymarket US's by some 85,
+so the order waits for a book the venue made later still, which shows
+that every change up to then has reached us, or config.PAPER_FEED_SECONDS
+when none comes. A level still there fills, a level that shrank fills
+partly, and a level that is gone does not fill. The answer comes back
+after the trip back, and a trade whose legs filled unevenly is flattened
+on the books we had seen by then, as live trading would, with a sale that
+meets the venue's book when it would arrive. Without tapes, as in tests,
+an order fills against our newest book when it would arrive.
+
+Until 2026-10-05 an order filled against our newest book a drawn 50 or
+60 ms after the signal. For Polymarket US that was the venue's book of
+some 20 ms before the signal, while a live order met the one of some 60
+ms after, so paper missed the changes in between, when edges go.
+
+It asks for config.FILL_SHARE of what the books show, all of it by
+default, and config.PAPER_REJECT_PROBABILITY of its orders are turned away
+outright, none by default, as no live order was for no reason paper sees.
 
 A real order takes the contracts it fills, but a paper one leaves the
 venue's book as it was, so an edge that stays, or comes back, would be
@@ -15,45 +33,78 @@ filled again from the same contracts. So the paper executor remembers what
 its orders took from each level and sees every book without it, when it
 sizes, fills, and flattens. What it took from a level counts until the
 level shrinks below that or goes, as other takers or cancels would have
-taken ours too. It learns that when it next looks at the book, so a level
-gone and back between two looks still has ours taken off, never more.
+taken ours too. It learns that when it next looks at the newest book, so
+a level gone and back between two looks still has ours taken off, never
+more.
 
-Everything else, the sizing, the flattening, and storing each trade, is
-the shared Executor's, and the money is the PaperBalances from
-money/paper.py.
+Paper trades the games, matches, races, and windows that pay within
+config.PAPER_MAX_PAYOUT_HOURS, in play too. Everything else, the sizing,
+the flattening, and storing each trade, is the shared Executor's, and the
+money is the PaperBalances from money/paper.py.
 """
 
 import asyncio
 import dataclasses
 import math
 import random
-from common.timeutil import now_iso
+from contextlib import ExitStack, contextmanager
+from datetime import datetime, timezone
+from statistics import NormalDist
+from common.timeutil import epoch, now_iso
 from common.venues import is_maintenance
 from engine.components.trading.executor import Executor, Fill
 from engine.helper import config
-from engine.helper.pricing import book_level, ladder, sell_ladder, sweep, takes
+from engine.helper.pricing import book_level, fresh, ladder, sell_ladder, sweep, takes
+
+Z90 = NormalDist().inv_cdf(0.9)     # Standard deviations from the median to the 90th percentile of a normal draw.
+
+
+def at_seconds(seconds):
+    """
+    Seconds since 1970 as ISO 8601 UTC, as now_iso() gives the time.
+    """
+    return datetime.fromtimestamp(seconds, timezone.utc).isoformat(timespec="microseconds")
 
 
 class PaperExecutor(Executor):
     """
-    Fills orders against the recorder's books after a simulated latency.
+    Fills orders against the recorder's books as the venue had them when a live order would have arrived.
+    tapes are the recorder's, see market/tape.py, or None to fill against the newest books.
     """
 
     mode = "paper"
     in_play = True      # Paper trades games, matches, races, and Bitcoin's windows, before and while they are played.
 
-    def __init__(self, conn, cash, books, log=print, rng=None, clock=now_iso, is_maintenance=is_maintenance):
+    def __init__(self, conn, cash, books, log=print, rng=None, clock=now_iso, is_maintenance=is_maintenance, tapes=None):
         super().__init__(conn, cash, books, log, clock, is_maintenance)
         self.rng = rng or random.Random()
+        self.tapes = tapes
         self.taken = {}             # (venue, contract_id) maps to {(book side, price): contracts our orders took from that level}.
 
-    def book(self, key):
+    def pays_in_time(self, hours):
         """
-        The newest book for a contract less what our orders took from it. A
-        level smaller than what we took, or gone, has lost ours with the rest,
-        so what we took is kept down to it, and forgotten once it is gone.
+        Paper trades a bet paying out within config.PAPER_MAX_PAYOUT_HOURS.
         """
-        book = super().book(key)
+        return hours <= config.PAPER_MAX_PAYOUT_HOURS
+
+    # BOOKS
+
+    def book(self, key, when=None):
+        """
+        A contract's newest book, or with when the newest that had reached us
+        by then, from its tape when one is kept, less what our orders took.
+        """
+        tape = self.tapes.get(key) if self.tapes and when else None
+        if tape:
+            return self.less_ours(key, tape.seen(epoch(when)))
+        return self.less_ours(key, super().book(key), newest=True)
+
+    def less_ours(self, key, book, newest=False):
+        """
+        A book less what our orders took from it. A level in the newest book
+        smaller than what we took, or gone, has lost ours with the rest, so
+        what we took is kept down to it, and forgotten once it is gone.
+        """
         ours = self.taken.get(key)
         if book is None or not ours:
             return book
@@ -68,11 +119,46 @@ class PaperExecutor(Executor):
                     still[level] = mine
                 if size > mine:
                     sides[side].append([price, size - mine])
-        if still:
-            self.taken[key] = still
-        else:
-            del self.taken[key]
+        if newest:
+            if still:
+                self.taken[key] = still
+            else:
+                del self.taken[key]
         return dataclasses.replace(book, **sides)
+
+    @contextmanager
+    def taping(self, keys):
+        """
+        Keep a tape of each contract's books while the with block runs, when there are tapes to keep.
+        """
+        with ExitStack() as stack:
+            for key in keys if self.tapes else ():
+                stack.enter_context(self.tapes.follow(key, self.books().get(key)))
+            yield
+
+    async def until(self, moment):
+        """
+        Wait until moment, our clock in seconds.
+        """
+        await asyncio.sleep(max(0.0, moment - epoch(self.clock())))
+
+    async def at_venue(self, key, venue, arrived, aging):
+        """
+        The book an order arriving at arrived, the venue's clock in seconds,
+        meets, less what our orders took, or None when there is none fresh
+        enough to trade, once every book the venue made by then has reached
+        us or config.PAPER_FEED_SECONDS have passed.
+        """
+        tape = self.tapes.get(key) if self.tapes else None
+        if tape:
+            await tape.wait(arrived, arrived + config.PAPER_FEED_SECONDS[venue] - epoch(self.clock()))
+            book = self.less_ours(key, tape.at(arrived))
+        else:
+            await self.until(arrived)
+            book = self.book(key)
+        return book if fresh(book, self.clock(), aging) else None
+
+    # ORDERS
 
     def take(self, leg, levels, quantity, limit=None, selling=False):
         """
@@ -87,38 +173,62 @@ class PaperExecutor(Executor):
             ours[level] = ours.get(level, 0) + contracts
         return sweep(levels, quantity, leg.venue, leg.fee_info, config.FILL_SHARE, limit=limit, selling=selling)
 
-    def latency(self, venue):
-        median, sigma = config.PAPER_LATENCY_MS[venue]
-        return int(self.rng.lognormvariate(math.log(median), sigma))
+    def draw(self, median, p90):
+        """
+        Milliseconds drawn from a lognormal with this median and 90th percentile.
+        """
+        sigma = math.log(p90 / median) / Z90 if p90 > median else 0.0
+        return self.rng.lognormvariate(math.log(median), sigma)
 
-    async def arrive(self, venue):
+    def trip(self, venue, purpose):
         """
-        Wait for an order to reach its venue. Returns the latency in milliseconds and the time it arrived.
+        Seconds an order to open or flatten, its purpose, takes to reach its
+        venue, by the venue's clock, and for its answer to come back.
         """
-        ms = self.latency(venue)
-        await asyncio.sleep(ms / 1000)
-        return ms, self.clock()
+        times = config.PAPER_ORDER_MS[venue]
+        return self.draw(*times[purpose]) / 1000, self.draw(*times["back"]) / 1000
+
+    async def order(self, trade, leg, purpose, quantity, limit=None, when=None):
+        """
+        Send an order for a leg, to open a trade by buying quantity at no more
+        than limit, or to flatten it by selling quantity at whatever the book
+        offers, at when, by our clock, or now. Returns its Fill once its
+        answer would have come back.
+        """
+        sent = epoch(when) if when else epoch(self.clock())
+        there, back = self.trip(leg.venue, purpose)
+        answered = sent + there + back
+        ms, ts = round(1000 * (there + back)), at_seconds(answered)
+        if self.rng.random() < config.PAPER_REJECT_PROBABILITY:
+            await self.until(answered)
+            return Fill(ms=ms, ts=ts, note="rejected")
+        with self.taping([leg.key]):
+            book = await self.at_venue(leg.key, leg.venue, sent + there, self.aging(trade))
+        filled, dollars, selling = 0, 0.0, purpose == "flatten"
+        if book is not None:
+            levels = sell_ladder(book, leg.polarity, leg.side) if selling else ladder(book, leg.polarity, leg.side)
+            filled, dollars = self.take(leg, levels, quantity, limit, selling)
+        await self.until(answered)
+        return Fill(filled, dollars, ms, ts, "no book" if book is None and not selling else "")
 
     async def fill(self, trade, leg):
         """
-        Send one leg's buy order and fill it against the book as it is when the order arrives.
+        Send one leg's buy order and fill it against the book the venue had when it would arrive.
         """
-        ms, ts = await self.arrive(leg.venue)
-        if self.rng.random() < config.PAPER_REJECT_PROBABILITY:
-            return Fill(ms=ms, ts=ts, note="rejected")
-        book = self.fresh_book(leg.key, self.aging(trade))
-        if book is None:
-            return Fill(ms=ms, ts=ts, note="no book")
-        filled, dollars = self.take(leg, ladder(book, leg.polarity, leg.side), leg.quantity, leg.limit)
-        return Fill(filled, dollars, ms, ts)
+        return await self.order(trade, leg, "open", leg.quantity, leg.limit)
 
-    async def sell_back(self, trade, leg, quantity, floor):
+    async def sell_back(self, trade, leg, quantity, floor, when=None):
         """
-        Sell back contracts held through a leg at whatever the book offers when the order arrives, whatever the floor.
+        Sell back contracts held through a leg at whatever the venue's book offers when the order would arrive, whatever the floor.
         """
-        ms, ts = await self.arrive(leg.venue)
-        book = self.fresh_book(leg.key, self.aging(trade))
-        if book is None:
-            return Fill(ms=ms, ts=ts)
-        filled, dollars = self.take(leg, sell_ladder(book, leg.polarity, leg.side), quantity, selling=True)
-        return Fill(filled, dollars, ms, ts)
+        return await self.order(trade, leg, "flatten", quantity, when=when)
+
+    async def run_trade(self, trade, legs):
+        """
+        Fill and flatten a trade as the shared executor does, with its
+        contracts' books on tape from now until it is done, so its orders can
+        meet the venues' books when they would arrive and its flatten the
+        books we had seen when the answers would have come.
+        """
+        with self.taping([leg.key for leg in legs]):
+            await super().run_trade(trade, legs)

@@ -103,8 +103,8 @@ def test_an_episode_keeps_its_longest_stretch_at_the_minimum_edge_and_what_staye
     at = "2026-09-19T12:00:%02d+00:00"
     episodes = replay(conn, [Book("polymarket_us", "pm", at % 0, [[0.39, 100]], [[0.40, 100]]),     # Yes costs 0.40 throughout.
                              Book("kalshi", "k", at % 1, [[0.53, 100]], [[0.99, 1]]),       # No costs 0.47: 13 cents on 100.
-                             Book("kalshi", "k", at % 2, [[0.53, 40], [0.43, 60]], [[0.99, 1]]),    # 13 cents on only 40.
-                             Book("kalshi", "k", at % 4, [[0.43, 100]], [[0.99, 1]]),       # 3 cents: the stretch ends after 3s.
+                             Book("kalshi", "k", at % 2, [[0.53, 40], [0.41, 60]], [[0.99, 1]]),    # 13 cents on only 40.
+                             Book("kalshi", "k", at % 4, [[0.41, 100]], [[0.99, 1]]),       # 1 cent: the stretch ends after 3s.
                              Book("kalshi", "k", at % 5, [[0.50, 100]], [[0.99, 1]]),       # 10 cents again, for 1s.
                              Book("kalshi", "k", at % 6, [[0.40, 100]], [[0.99, 1]])])      # No edge: the episode ends.
     assert [(o.start_ts, o.end_ts) for o in episodes] == [(at % 1, at % 6)]
@@ -116,7 +116,7 @@ def test_a_moment_at_the_minimum_edge_keeps_its_size(tmp_path):
     at = "2026-09-19T12:00:%02d+00:00"
     replay(conn, [Book("polymarket_us", "pm", at % 0, [[0.39, 100]], [[0.40, 100]]),
                   Book("kalshi", "k", at % 1, [[0.53, 100]], [[0.99, 1]]),       # 13 cents on 100, for a moment.
-                  Book("kalshi", "k", at % 1, [[0.43, 100]], [[0.99, 1]]),       # Then 3 cents, in the same moment.
+                  Book("kalshi", "k", at % 1, [[0.41, 100]], [[0.99, 1]]),       # Then 1 cent, in the same moment.
                   Book("kalshi", "k", at % 3, [[0.40, 100]], [[0.99, 1]])])
     assert stretches(conn) == [(0.0, 100.0, pytest.approx(13.0))]
 
@@ -124,7 +124,7 @@ def test_a_moment_at_the_minimum_edge_keeps_its_size(tmp_path):
 def test_an_episode_never_at_the_minimum_edge_has_no_stretch(tmp_path):
     conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket_us", "pm")])
     replay(conn, [Book("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]]),
-                  Book("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 100]], [[0.54, 100]]),     # 4 cents.
+                  Book("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.50, 100]], [[0.51, 100]]),     # 1 cent.
                   Book("kalshi", "k", "2026-09-19T12:01:01+00:00", [[0.49, 100]], [[0.50, 100]])])
     assert stretches(conn) == [(0.0, 0.0, 0.0)]
 
@@ -227,7 +227,7 @@ def test_episode_opens_peaks_and_closes_from_book_changes(tmp_path):
     o = stored(conn)[0]
     assert (o.start_ts, o.end_ts, o.peak_ts, round(o.peak_edge, 2), o.peak_size, o.live) == (TL % (0, 2), TL % (0, 5), TL % (0, 3), 0.12, 100, 1)
     assert logs == [f"episode {LABEL}: yes: PMUS buy, no: K buy other side, 12.0c x 100 = 12.00$, lasted 3.0s, "
-                    "5c or more for 3.0s with 100 contracts throughout"]
+                    "2c or more for 3.0s with 100 contracts throughout"]
     assert s.summary().startswith("scanner: spread 1 episodes, 1 beat target, best 12.00$ for 3s; 0 open")
     assert s.summary() == "scanner: no episodes; 0 open"
 

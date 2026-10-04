@@ -5,10 +5,10 @@ Whatever differs between venues is kept in a table keyed by venue, next to
 the code that uses it: fees.FEES and fees.RATES, fetch.FETCHERS and fetch.SPORTS,
 classify.CLASSIFIERS and classify.REPORT_GROUPS, streams.STREAMS,
 settle.RESULTS and settle.RESULTS_BY_EVENT, the READERS of money/live.py,
-the PLACE and POSITIONS of trading/live.py, config.PAPER_LATENCY_MS, and
-MAINTENANCE here. Adding a venue means adding it here and to each of
-those tables, and tests/common/test_venues.py fails until every table has
-it.
+the PLACE and POSITIONS of trading/live.py, config.PAPER_ORDER_MS and
+config.PAPER_FEED_SECONDS, and MAINTENANCE here. Adding a venue means
+adding it here and to each of those tables, and tests/common/test_venues.py
+fails until every table has it.
 """
 
 from common.timeutil import epoch, in_weekly_window

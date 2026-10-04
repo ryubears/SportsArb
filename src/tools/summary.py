@@ -2,20 +2,22 @@
 Print a short summary of the database: the pairs, the opportunities the
 executors' rules trade, and the trades.
 
-Opportunities are only those within the rules: an edge of config.MIN_EDGE
-or more at the peak, returning config.MIN_ANNUAL_PCT a year or more, and
-for a future, which live trades, paying config.MIN_PAYOUT_HOURS or more out
-and found before any game, while a game's, which paper trades, may be
-found in play and pay at any time. Each shows what it could have taken
-at full size through its longest stretch at that edge, and what that
-locks in, overall, by sport and kind, and the largest. Trades are shown
-for each mode, paper then live, or one with --mode, by outcome and by kind
-for the window, the legs settled in it, and the open trades: in a few lines,
-how many, how many of them opened in the last hour, day, and week and the
-capital those hold, the capital they all hold and the profit they are
-expected to return, its rate a year, and when they resolve, then each one
-opened in the window. --sport narrows everything to some sports. Reads
-only, so it is safe to run while the live process is writing.
+Opportunities are shown for each mode, paper then live, or one with
+--mode, only those within its rules: an edge of config.MIN_EDGE or more at
+the peak, returning config.MIN_ANNUAL_PCT a year or more, and for paper a
+game, match, race, or window paying within config.PAPER_MAX_PAYOUT_HOURS,
+found in play too, for live a future paying config.MIN_PAYOUT_HOURS or more
+out, found before any game. Each shows what it could have taken at full
+size through its longest stretch at that edge, and what that locks in,
+overall, by sport and kind, and the largest, and how long the edge stayed
+at that, in seconds to the thousandth. Trades are shown for each mode the
+same way, by outcome and by kind for the window, the legs settled in it,
+and the open trades: in a few lines, how many, how many of them opened in
+the last hour, day, and week and the capital those hold, the capital they
+all hold and the profit they are expected to return, its rate a year, and
+when they resolve, then each one opened in the window. --sport narrows
+everything to some sports. Reads only, so it is safe to run while the
+live process is writing.
 
 The script sets its own import path, so it runs from any folder. The live
 money is not in the database but on the venues, so it is read from each
@@ -38,6 +40,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))     # src, so the script runs from any folder.
+from common.stats import quantile
 from common.timeutil import days_between
 from db.database import DB_PATH, read_only
 from engine.helper import config
@@ -166,25 +169,53 @@ def returns(capital, profit, days):
     return ret, (ret * 365 / days if ret is not None and days else None)
 
 
-def print_opportunities(conn, since, hours, sports):
+def seconds(value):
     """
-    The episodes within the rules in the window: at config.MIN_EDGE or more and config.MIN_ANNUAL_PCT a year or more,
-    both at the peak, and on a future, as live trades, paying config.MIN_PAYOUT_HOURS or more out and found before any
-    game started, while one on a game, a match, a race, or a window, as paper trades, may be found in play. Capital is what buying every contract fillable at that
-    edge through its longest stretch at it would have cost with fees, and profit what it locks in. The annual rates weight
-    each episode by its capital, over the days until it pays.
+    A duration in seconds to the thousandth, as '0.001s', for a table cell.
+    """
+    return f"{value or 0:,.3f}s"
+
+
+def opportunity_rules(mode):
+    """
+    The episodes a mode's executor would trade, as a SQL condition on the episode and its pair, and in words. Paper
+    trades the bets on one event, a game, a match, a race, or a window, paying within config.PAPER_MAX_PAYOUT_HOURS,
+    found in play too, and live the futures paying config.MIN_PAYOUT_HOURS or more out, found before any game started.
+    """
+    if mode == "paper":
+        return ("p.game_date IS NOT NULL AND days_held * 24 <= ?", (config.PAPER_MAX_PAYOUT_HOURS,),
+                f"games, matches, races, and windows paying within {config.PAPER_MAX_PAYOUT_HOURS}h, in play too")
+    return ("p.game_date IS NULL AND live = 0 AND days_held * 24 >= ?", (config.MIN_PAYOUT_HOURS,),
+            f"futures paying {config.MIN_PAYOUT_HOURS}h+ out")
+
+
+def print_opportunities(conn, since, hours, sports, modes=("paper", "live")):
+    """
+    The episodes within each mode's rules in the window, paper then live: at config.MIN_EDGE or more and
+    config.MIN_ANNUAL_PCT a year or more, both at the peak, on the bets the mode trades, see opportunity_rules().
+    Capital is what buying every contract fillable at that edge through its longest stretch at it would have cost with
+    fees, and profit what it locks in. The annual rates weight each episode by its capital, over the days until it pays.
+    How long the edge stayed at config.MIN_EDGE or more is the longest unbroken stretch of each episode, in seconds to
+    the thousandth. Episodes before 2026-10-05 kept their stretch at 5 cents, the minimum then.
+    """
+    for mode in modes:
+        print_mode_opportunities(conn, since, hours, sports, mode)
+
+
+def print_mode_opportunities(conn, since, hours, sports, mode):
+    """
+    The episodes within one mode's rules in the window, see print_opportunities().
     """
     cents = f"{100 * config.MIN_EDGE:.0f}c"
     where, params = in_sports(sports)
+    rule, rule_params, bets = opportunity_rules(mode)
     rows = query_rows(conn, f"""
         SELECT p.sport, p.kind, p.label, trade, 100 * peak_edge, min_edge_seconds, min_edge_size, min_edge_size - min_edge_profit,
                min_edge_profit, days_held
         FROM opportunities o JOIN pairs p ON p.id = o.pair_id
-        WHERE start_ts >= ? AND peak_edge >= ? AND min_edge_seconds IS NOT NULL AND annual_pct >= ?
-          AND (p.game_date IS NOT NULL OR (live = 0 AND days_held * 24 >= ?)){where}
-        ORDER BY min_edge_profit DESC""", (since, config.MIN_EDGE, config.MIN_ANNUAL_PCT, config.MIN_PAYOUT_HOURS) + params)
-    rules = f"{cents}+, {config.MIN_ANNUAL_PCT}%+ a year, futures paying {config.MIN_PAYOUT_HOURS}h+ out, games in play too"
-    print(f"\nopportunities within the rules ({rules}), last {hours} hours")
+        WHERE start_ts >= ? AND peak_edge >= ? AND min_edge_seconds IS NOT NULL AND annual_pct >= ? AND {rule}{where}
+        ORDER BY min_edge_profit DESC""", (since, config.MIN_EDGE, config.MIN_ANNUAL_PCT) + rule_params + params)
+    print(f"\n{mode} opportunities ({cents}+, {config.MIN_ANNUAL_PCT}%+ a year, {bets}), last {hours} hours")
     if not rows:
         print("  none")
         return
@@ -200,19 +231,25 @@ def print_opportunities(conn, since, hours, sports):
     capital, profit, ret, annual, days = totals(rows)
     print(f"  {len(rows):,} episodes could have taken {capital:,.0f}$ and locked in {profit:,.2f}$")
     print(f"  {percent(ret)}% on capital, {percent(annual)}% a year, held {days or 0:,.1f} days on average")
+    print(f"  at {cents} or more for {seconds(quantile([r[5] for r in rows], 0.5))} at the median, "
+          f"{seconds(quantile([r[5] for r in rows], 0.9))} at the 90th percentile, {seconds(max(r[5] for r in rows))} at the longest")
     kinds = {}
     for r in rows:
         kinds.setdefault((r[0], r[1]), []).append(r)
     body = []
     for (sport, kind), group in sorted(kinds.items()):
         c, pr, r_, a, d = totals(group)
-        body.append((sport, kind, len(group), f"{max(r[5] for r in group):,.1f}", f"{c:,.0f}", f"{pr:,.2f}", percent(r_), percent(a), f"{d or 0:,.1f}"))
-    print_table("by kind", ("sport", "kind", "episodes", f"longest {cents}+ s", "capital $", "profit $", "return %", "annual %", "avg days"), body)
+        body.append((sport, kind, len(group), seconds(quantile([r[5] for r in group], 0.5)), seconds(max(r[5] for r in group)),
+                     f"{c:,.0f}", f"{pr:,.2f}", percent(r_), percent(a), f"{d or 0:,.1f}"))
+    print_table(f"{mode} opportunities by kind", ("sport", "kind", "episodes", f"median {cents}+", f"longest {cents}+", "capital $",
+                                                  "profit $", "return %", "annual %", "avg days"), body, left=2)
     largest = []
-    for sport, kind, label, trade, peak, seconds, size, cap, pr, d in rows[:5]:
+    for sport, kind, label, trade, peak, lasted, size, cap, pr, d in rows[:5]:
         r_, a = returns(cap, pr, d)
-        largest.append((label[:44], f"{peak:.1f}", f"{seconds:,.0f}", f"{size:,.1f}", f"{cap:,.0f}", f"{pr:,.2f}", percent(a), f"{d:,.1f}" if d else "-"))
-    print_table("largest", ("bet", "peak c", f"{cents}+ s", "size", "capital $", "profit $", "annual %", "days"), largest)
+        largest.append((label[:44], f"{peak:.1f}", seconds(lasted), f"{size:,.1f}", f"{cap:,.0f}", f"{pr:,.2f}", percent(a),
+                        f"{d:,.1f}" if d else "-"))
+    print_table(f"{mode} largest opportunities", ("bet", "peak c", f"{cents}+ for", "size", "capital $", "profit $", "annual %", "days"),
+                largest)
 
 
 def print_mode_trades(conn, since, hours, mode, sports, now):
@@ -395,7 +432,8 @@ def print_live_money(balances):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Summarize the SportsArb database.")
     ap.add_argument("--hours", type=int, default=24, help="size of the recent window for feed drops, opportunities, and trades")
-    ap.add_argument("--mode", choices=sorted(MODES), default="all", help="the trades to show: live, paper, or all, the default")
+    ap.add_argument("--mode", choices=sorted(MODES), default="all",
+                    help="the opportunities and trades to show: live, paper, or all, the default")
     ap.add_argument("--sport", default="", help="the sports to show, comma separated, every sport when left out")
     ap.add_argument("--no-live", action="store_true", help="leave out the live balances, which are read from the venues")
     args = ap.parse_args()
@@ -405,7 +443,7 @@ if __name__ == "__main__":
     conn = read_only()
     print_overview(conn, sports)
     print_gaps(conn, since, args.hours)
-    print_opportunities(conn, since, args.hours, sports)
+    print_opportunities(conn, since, args.hours, sports, MODES[args.mode])
     print_trades(conn, since, args.hours, MODES[args.mode], sports, now)
     if "live" in MODES[args.mode] and not args.no_live:
         print_live_money(read_live_balances())

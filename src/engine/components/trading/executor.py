@@ -39,11 +39,13 @@ from the trades table when the process starts, so a restart does not
 leave a trade exposed. The settler leaves alone a trade while an order to
 flatten it is in flight.
 
-A pair is traded before its game or on a season's future, never once its
-game has kicked off, while its edge is config.MIN_EDGE or more, the bet
+Live trades a pair before its game or on a season's future, never once
+its game has kicked off, while its edge is config.MIN_EDGE or more, the bet
 pays out config.MIN_PAYOUT_HOURS or more away, and the edge returns
 config.MIN_ANNUAL_PCT a year or more until then. Near a game and during
-it, faster traders take an edge before our Polymarket US leg lands. Both
+it, faster traders take an edge before our Polymarket US leg lands. Paper
+trades games in play too, and only those paying out within
+config.PAPER_MAX_PAYOUT_HOURS, see paper.py. Both
 venues must be trading, outside the weekly maintenance each publishes, see
 common/venues.py: while one has stopped, its feed may still show prices no
 order can trade at.
@@ -103,7 +105,7 @@ class Executor:
     """
 
     mode = None     # 'paper' or 'live', set by each subclass. It starts every log line.
-    in_play = False     # Whether a game is traded once it has started, and whenever it pays: paper's, which trades games.
+    in_play = False     # Whether a game is traded once it has started: paper's, which trades games.
     step = 1        # The least part of a contract an order trades: whole contracts on paper, a hundredth live, see orders.STEP.
 
     def __init__(self, conn, cash, books, log=print, clock=now_iso, is_maintenance=is_maintenance):
@@ -132,19 +134,23 @@ class Executor:
 
     # ORDERS, which each subclass fills its own way.
 
-    def book(self, key):
+    def book(self, key, when=None):
         """
-        The newest book for a contract as this executor trades against it, or None when there is none.
+        The newest book for a contract as this executor trades against it, or
+        None when there is none. when, a time by our clock, asks for the one
+        that had reached us by then, which only paper trading keeps, see
+        paper.py: live trading acts on its books as they come.
         """
         return self.books().get(key)
 
-    def fresh_book(self, key, aging=True):
+    def fresh_book(self, key, aging=True, when=None):
         """
-        The newest book for a contract, or None when there is none or, when its
-        books age, it is too old to trade, see pricing.fresh() and game.started().
+        The newest book for a contract, by when when given, or None when there is
+        none or, when its books age, it is too old to trade, see pricing.fresh()
+        and game.started().
         """
-        book = self.book(key)
-        return book if fresh(book, self.clock(), aging) else None
+        book = self.book(key, when)
+        return book if fresh(book, when or self.clock(), aging) else None
 
     def aging(self, trade):
         """
@@ -162,11 +168,11 @@ class Executor:
         """
         raise NotImplementedError
 
-    async def sell_back(self, trade, leg, quantity, floor):
+    async def sell_back(self, trade, leg, quantity, floor, when=None):
         """
         Sell back contracts held through a leg of a trade at no less than
-        floor each, where the books said they would sell. Returns a Fill whose
-        dollars are the proceeds after fees.
+        floor each, where the books said they would sell, sent at when, by our
+        clock, or now. Returns a Fill whose dollars are the proceeds after fees.
         """
         raise NotImplementedError
 
@@ -180,25 +186,27 @@ class Executor:
         trade.yes_cost, trade.no_cost = legs[0].cost, legs[1].cost
         trade.status = "failed" if trade.matched == 0 else "partial" if trade.matched < trade.quantity else "filled"
 
-    def sale_ladder(self, leg, excess, aging=True, least=0.0):
+    def sale_ladder(self, leg, excess, aging=True, least=0.0, when=None):
         """
         The ladder selling the excess back on the leg's own venue would sell
-        into, from its fresh book, its levels at least least each, or an empty
-        one when there is no fresh book or nothing would sell.
+        into, from its fresh book, by when when given, its levels at least
+        least each, or an empty one when there is no fresh book or nothing
+        would sell.
         """
-        book = self.fresh_book(leg.key, aging)
+        book = self.fresh_book(leg.key, aging, when)
         if not book:
             return []
         selling = [(price, size) for price, size in sell_ladder(book, leg.polarity, leg.side) if price >= least - 1e-9]
         sold, _ = sweep(selling, excess, leg.venue, leg.fee_info, config.FILL_SHARE, selling=True, step=self.step)
         return selling if sold else []
 
-    async def sell_excess(self, trade, leg, excess, average, selling):
+    async def sell_excess(self, trade, leg, excess, average, selling, when=None):
         """
         Sell the excess back on its own venue, no lower than the book said
-        it would sell, and record what came back. Returns (contracts sold, note).
+        it would sell, sent at when or now, and record what came back.
+        Returns (contracts sold, note).
         """
-        fill = await self.sell_back(trade, leg, excess, reach(selling, excess, config.FILL_SHARE, self.step))
+        fill = await self.sell_back(trade, leg, excess, reach(selling, excess, config.FILL_SHARE, self.step), when)
         if fill.unfunded:
             if trade.id not in self.unfunded:
                 self.log(f"{self.mode} {trade.label}: {leg.venue} lacked the cash to sell back {excess:g}, which waits until its cash grows")
@@ -215,24 +223,25 @@ class Executor:
         trade.hedge_pnl += fill.dollars - fill.filled * average
         return fill.filled, f"sold back {fill.filled:g} of {excess:g} on {leg.venue}"
 
-    async def flatten(self, trade, legs):
+    async def flatten(self, trade, legs, when=None):
         """
         Sell the excess on the leg holding more back on its own venue, sent
         like any other order, no lower than config.MIN_SALE_SHARE of what it
-        cost. Returns what was done in words, or None when nothing would sell
-        at that, its venue is not trading, or the trade has been set aside.
+        cost, at when, by our clock, on the books as they were then, or now.
+        Returns what was done in words, or None when nothing would sell at
+        that, its venue is not trading, or the trade has been set aside.
         """
         if trade.id in self.set_aside:
             return None
         long_leg, short_leg = sorted(legs, key=lambda leg: leg.held, reverse=True)
-        if self.is_maintenance(long_leg.venue, self.clock()):
+        if self.is_maintenance(long_leg.venue, when or self.clock()):
             return None
         excess = exact(long_leg.held - short_leg.held)
         average = long_leg.cost / long_leg.held         # What each contract the long leg holds cost.
-        selling = self.sale_ladder(long_leg, excess, self.aging(trade), average * config.MIN_SALE_SHARE)
+        selling = self.sale_ladder(long_leg, excess, self.aging(trade), average * config.MIN_SALE_SHARE, when)
         if not selling:
             return None
-        done, note = await self.sell_excess(trade, long_leg, excess, average, selling)
+        done, note = await self.sell_excess(trade, long_leg, excess, average, selling, when)
         if done < excess:
             note += f", {exact(excess - done):g} exposed"
         return note
@@ -260,9 +269,11 @@ class Executor:
 
     async def run_trade(self, trade, legs):
         """
-        Fill both legs, flatten any mismatch, and record the result.
+        Fill both legs, flatten any mismatch as soon as both answers are in,
+        and record the result.
         """
         fills = await asyncio.gather(*(self.fill(trade, leg) for leg in legs))
+        answered = max((fill.ts for fill in fills if fill.ts), default=None)     # When the later answer came, which paper works out after.
         for leg, fill in zip(legs, fills):
             self.cash.release(leg.venue, leg.quantity * leg.limit, shard(leg))
             leg.held, leg.cost = fill.filled, fill.dollars
@@ -273,7 +284,8 @@ class Executor:
         hedge = None                # How the mismatch was flattened, in words, when there was one.
         if trade.yes_filled != trade.no_filled:
             exposed = exact(abs(trade.yes_filled - trade.no_filled))
-            hedge = await self.flatten(trade, legs) or f"{exposed:g} exposed, {self.set_aside.get(trade.id, 'nothing to sell it into')}"
+            hedge = (await self.flatten(trade, legs, answered)
+                     or f"{exposed:g} exposed, {self.set_aside.get(trade.id, 'nothing to sell it into')}")
         self.record_holdings(trade, legs)
         notes = [f"{leg.side} leg {fill.note}" for leg, fill in zip(legs, fills) if fill.note]
         trade.hedge = ", ".join(([hedge] if hedge else []) + notes) or "none"
@@ -379,14 +391,19 @@ class Executor:
         task.add_done_callback(on_failure(self.log, f"{self.mode} trade task"))
         return task
 
+    def pays_in_time(self, hours):
+        """
+        Whether this executor trades a bet paying out hours from now: live, one config.MIN_PAYOUT_HOURS or more away.
+        """
+        return hours >= config.MIN_PAYOUT_HOURS
+
     def pays_enough(self, edge, now, pays_at):
         """
         Whether an edge is worth the capital it ties up until the bet pays at
-        pays_at: config.MIN_PAYOUT_HOURS or more away, unless this executor
-        trades in play, and returning config.MIN_ANNUAL_PCT a year or more
-        until then.
+        pays_at: when this executor trades, see pays_in_time(), and returning
+        config.MIN_ANNUAL_PCT a year or more until then.
         """
-        if not pays_at or (not self.in_play and hours_between(now, pays_at) < config.MIN_PAYOUT_HOURS):
+        if not pays_at or not self.pays_in_time(hours_between(now, pays_at)):
             return False
         return annual_pct(edge, game.days_until(now, pays_at)) >= config.MIN_ANNUAL_PCT
 

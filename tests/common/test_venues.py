@@ -28,7 +28,8 @@ from engine.helper import config, fees
     ("trading/live.PLACE", trading_live.PLACE),
     ("trading/live.POSITIONS", trading_live.POSITIONS),
     ("MAINTENANCE", MAINTENANCE),
-    ("config.PAPER_LATENCY_MS", config.PAPER_LATENCY_MS),
+    ("config.PAPER_ORDER_MS", config.PAPER_ORDER_MS),
+    ("config.PAPER_FEED_SECONDS", config.PAPER_FEED_SECONDS),
 ])
 def test_table_covers_every_venue(name, table):
     assert set(table) == set(VENUES), name

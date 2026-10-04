@@ -111,8 +111,10 @@ def test_a_trading_session_logs_its_settings_when_it_starts(tmp_path, monkeypatc
         await s.close()
     asyncio.run(scenario())
     first = capsys.readouterr().out.splitlines()[0]
-    assert first[9:].startswith("settings: min edge 0.05$ and 50% a year, live paying 24h or more out and no game once kicked off, "
-                                "paper in play too, fill share 1.0, rejects 3%")
+    assert first[9:].startswith("settings: min edge 0.02$ and 50% a year, live paying 24h or more out and no game once kicked off, "
+                                "paper paying within 24h and in play too, fill share 1.0, rejects 0%, paper orders take kalshi 12ms "
+                                "there (12 to flatten) and 8 back, polymarket_us 59ms there (24 to flatten) and 31 back, filling at "
+                                "the venue's book then, waiting up to kalshi 0.1s, polymarket_us 0.3s for it to reach us")
 
 
 def test_a_session_trading_both_modes_keeps_a_desk_for_each_and_offers_live_the_signal_first(tmp_path, monkeypatch, capsys, fake_stream):
@@ -138,7 +140,8 @@ def test_a_session_trading_both_modes_keeps_a_desk_for_each_and_offers_live_the_
     out = [line[9:] for line in capsys.readouterr().out.splitlines()]                       # Past the timestamp.
     assert out[0].startswith("settings: min edge") and out[1].startswith("LIVE TRADING with real money: trades sized as paper ones")
     assert out[2:5] == ["live trades the futures of nfl", f"no email settings in {tmp_path / 'email.json'}, alerts are only logged and stored",
-                        "paper trades the games, matches, races, and windows of every sport, in play too"]
+                        "paper trades the games, matches, races, and windows of every sport that pay within 24h, in play too"]
+    assert s.desks[1].executor.tapes is s.tapes is s.recorder.tapes         # Paper's orders meet the books the recorder tapes.
     assert "live balances read: kalshi 800$, polymarket_us 600$" in out
     heads = [line.split(":")[0] for line in out]
     assert {"live", "live settled", "paper", "paper settled"} <= set(heads) and not any(head.endswith("capital") for head in heads)

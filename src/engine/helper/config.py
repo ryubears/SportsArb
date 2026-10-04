@@ -14,10 +14,11 @@ Override one for a run with --set, for example:
 
 # TRADING, trading/executor.py
 
-MIN_EDGE = 0.05             # Net dollars per contract at the top before orders are sent, and the floor for the deeper levels they sweep.
-                            # In-game, 2 to 3 cent edges lost money after hedging.
-MIN_PAYOUT_HOURS = 24       # The soonest a bet may pay out and still be traded, so no game is traded once it is near or under way.
-                            # There the fast traders take an edge before our Polymarket US leg lands, and the leg is missed.
+MIN_EDGE = 0.02             # Net dollars per contract at the top before orders are sent, and the floor for the deeper levels they sweep.
+                            # Five cents to 2026-10-05. MIN_ANNUAL_PCT weighs an edge against the time it ties the money up, so this
+                            # floor only keeps out the noise of an edge of a cent or so.
+MIN_PAYOUT_HOURS = 24       # The soonest a bet live trades may pay out, so it trades no game once it is near or under way. There the
+                            # fast traders take an edge before our Polymarket US leg lands, and the leg is missed.
 MIN_ANNUAL_PCT = 50         # The least an edge must return a year on the capital it ties up until the bet pays, before a game or on
                             # a future. A 5 cent edge clears it if it pays within 38 days, 10 cents within 81, and 20 within 182.
 FILL_SHARE = 1.0            # The share of visible size at a level a trade asks for. At 0.5 to 2026-10-03, 222 of 231 live trades were
@@ -35,11 +36,23 @@ CONFIRM_SECONDS = {"polymarket_us": 0.3}
 
 # PAPER, trading/paper.py and money/paper.py. How paper orders fill, and the paper money.
 
-PAPER_REJECT_PROBABILITY = 0.03     # The share of orders a venue rejects outright, for rate limits and errors.
-# Signal to fill latency per venue, as median milliseconds and the sigma of a lognormal draw. From us-east-1 a signed
-# request round trip is about 35 ms to Kalshi and 30 ms to Polymarket US, and on top of that sit the feed's own lag
-# in showing us the book and the venue's matching, so the medians are set above the round trips.
-PAPER_LATENCY_MS = {"kalshi": (50, 0.35), "polymarket_us": (60, 0.35)}
+PAPER_MAX_PAYOUT_HOURS = 24     # The latest a bet paper trades may pay out, so it trades games, matches, races, and windows on the day.
+PAPER_REJECT_PROBABILITY = 0.0  # The share of orders a venue turns away for no reason paper sees. Of 1,183 live orders to 2026-10-04 none
+                                # was: 3 lacked the cash and 3 came in Kalshi's maintenance, which paper turns away as live does.
+# How long an order takes, in milliseconds, as the median and the 90th percentile of a lognormal draw. 'open' and 'flatten'
+# are from sending an order to the venue's own time on it, the clock its books are stamped with, for an order opening a
+# trade, sent beside the other leg's, and one flattening it, and 'back' from then until the answer reaches us. From the
+# 1,096 live orders 2026-10-01 to 10-04 with the venue's time: Kalshi 12 there, 10 at the 10th percentile, and 8 back,
+# 20 in all; Polymarket US 59 there for an opening order, 30 at the 10th, its median hour by hour from 34 to 79, but
+# 24 for a sale, and 31 back.
+PAPER_ORDER_MS = {
+    "kalshi": {"open": (12, 16), "flatten": (12, 16), "back": (8, 9)},
+    "polymarket_us": {"open": (59, 136), "flatten": (24, 94), "back": (31, 83)},
+}
+# How long, by our clock, after an order reaches its venue paper waits for a book the venue made later still to show
+# that every change up to it has reached us. Kalshi's books came 12 ms after the venue's time, 15 at the 90th
+# percentile, Polymarket US's 85, 160 at the 90th. A book with no later change fills as it last was.
+PAPER_FEED_SECONDS = {"kalshi": 0.1, "polymarket_us": 0.3}
 PAPER_START_BALANCE = 10000.0   # Paper dollars per venue at the start.
 
 # LIVE, trading/live.py, trading/brakes.py, and money/live.py. A live trade is sized as a paper one is, by the books and the cash

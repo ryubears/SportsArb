@@ -40,6 +40,7 @@ from common.stats import quantile
 from common.timeutil import epoch
 from common.venues import VENUES
 from db.database import read_only
+from engine.helper import config
 
 LOG_PATH = DATA_DIR / "record.log"
 TIME_OF_DAY = re.compile(r"^(\d\d):(\d\d):(\d\d) ")
@@ -222,7 +223,7 @@ if __name__ == "__main__":
     ap.add_argument("--until", help="end of the stretch, an ISO time in UTC, now unless given")
     ap.add_argument("--every", type=int, default=5, help="minutes per row of the feed table")
     ap.add_argument("--sport", help="the sport whose edges to count, all unless given")
-    ap.add_argument("--edge", type=float, default=0.05, help="the edge worth trading, in dollars, config.MIN_EDGE")
+    ap.add_argument("--edge", type=float, default=config.MIN_EDGE, help="the edge worth trading, in dollars, config.MIN_EDGE by default")
     args = ap.parse_args()
     now = datetime.now(timezone.utc)
     until = parse_time(args.until) if args.until else now

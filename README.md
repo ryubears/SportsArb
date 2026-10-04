@@ -21,8 +21,9 @@ book change for thousands of contracts, prices every cross-venue pair on
 every change, sends orders when a pair shows an edge worth the time its
 money is tied up, and settles the trades when the contracts resolve. Live
 trades futures, where an edge lasts long enough for our orders to reach
-it, and paper the bets on one event, where faster traders may take the
-edges first, to see how they would do. By default the orders are paper.
+it, and paper the bets on one event paying within a day, where faster
+traders may take the edges first, to see how they would do, its orders
+timed as live ones are. By default the orders are paper.
 With `--execute live` or `--execute both` it sends real ones. Since
 October 4 the service on the instance trades every sport's futures and the
 elections live, and `--execute both` runs paper on every event beside it.
@@ -136,6 +137,9 @@ Follow one Kalshi order book change from the wire to a trade.
 4. **Remember** (`Recorder.on_book` in `market/record.py`). The recorder
    keeps the book as the contract's newest `Book`, with our time for it
    and the venue's. If the best bid or ask changed, it tells the scanner.
+   While a paper order is in flight on the contract, the book also goes on
+   the contract's `Tape` (`market/tape.py`), every one in turn, so the
+   order can find the book the venue had when it would have arrived.
 5. **Price** (`Scanner.on_book` and `update` in `market/scan.py`, with
    `pricing.best_trade`). For every pair the contract belongs to, the
    scanner finds the cheapest way to hold yes and the cheapest way to
@@ -159,9 +163,10 @@ checks before it trades, below.
 ### The life of a trade
 
 1. **Decide** (`Executor.signal` in `trading/executor.py`). The executor
-   takes the signal when the edge is at least `MIN_EDGE`, the pair is a
-   future or its game has not kicked off (`before_kickoff`), the bet pays
-   out `MIN_PAYOUT_HOURS` or more away and the edge returns
+   takes the signal when the edge is at least `MIN_EDGE`, for live the
+   pair is a future or its game has not kicked off, the bet pays when the
+   desk trades it (`pays_in_time`), live `MIN_PAYOUT_HOURS` or more away
+   and paper within `PAPER_MAX_PAYOUT_HOURS`, and the edge returns
    `MIN_ANNUAL_PCT` a year or more until then (`pays_enough`), and a
    Polymarket US leg's book is current (`confirm_wait`): newer than the
    Kalshi leg's last change, by the venues' own clocks, or else that change
@@ -174,8 +179,10 @@ checks before it trades, below.
    the cash on the market's shard, live as on paper. The cash is reserved
    and the trade is stored before any order goes out.
 2. **Fill** (`run_trade`). Both legs go out at once.
-   - Paper (`trading/paper.py`): each order waits a latency drawn from
-     what was measured, then fills against the book as it is then.
+   - Paper (`trading/paper.py`): each order takes a trip there and back
+     drawn from what the live orders took, and fills against the book the
+     venue had when it would have arrived, by the venue's own clock, from
+     the contract's tape.
    - Live (`trading/live.py`): each order is a real immediate or cancel
      limit order through the venue client's `place_order`. It is stored in
      the orders table before it is sent and again with the answer.
@@ -507,12 +514,15 @@ share, which is everything but how an order is filled. Live trades only
 bets that pay out a day or more away, the futures, and never a game once it
 has kicked off: near a game and during it, faster traders take an edge
 before our Polymarket US order lands, and the leg is missed. Paper trades
-the bets on one event (`in_play`), before and while they are played,
-however soon they pay, to see how they would do. A signal needs a net edge
-of at least five cents per contract (`MIN_EDGE`), for live a payout at
-least 24 hours away (`MIN_PAYOUT_HOURS`), and a return of at least 50% a
-year on the money it ties up until then (`MIN_ANNUAL_PCT`). Five cents clears that for a bet
-paying within 38 days, ten cents within 81, twenty within 182. One limit
+the bets on one event (`in_play`), before and while they are played, that
+pay within 24 hours (`PAPER_MAX_PAYOUT_HOURS`), to see how they would do.
+A signal needs a net edge of at least two cents per contract (`MIN_EDGE`,
+five until 2026-10-05), for live a payout at least 24 hours away
+(`MIN_PAYOUT_HOURS`), and a return of at least 50% a year on the money it
+ties up until then (`MIN_ANNUAL_PCT`), which is what weighs an edge
+against the time it ties the money up; the two cents only keep out the
+noise of a cent or so. Two cents clears 50% a year for a bet paying within
+14 days, five cents within 38, ten within 81, twenty within 182. One limit
 order is sent per leg, both at once. Both ladders are walked together and
 each leg's limit is set at the deepest level that still leaves the minimum
 edge, so an order sweeps every level above the floor rather than only the
@@ -521,11 +531,23 @@ half until 2026-10-04), as far as the cash free on each venue pays for, both leg
 cash when they share it, live as on paper, with no cap on contracts. No
 cash is held back: trades may spend all that is free.
 
-In **paper.py** each order arrives after a latency drawn from what was
-measured from us-east-1 (about 50 ms to Kalshi, 60 ms to Polymarket US,
-lognormal) and fills against the book as it is at that moment, from the
-same in memory books. `FILL_SHARE` of the visible size at a level is
-assumed to be ours, and 3% of orders are rejected outright. A paper order leaves the
+In **paper.py** each order goes the way a live one does. It takes a trip
+to its venue and a trip back, each drawn from a lognormal with the median
+and 90th percentile the live orders took (`PAPER_ORDER_MS`). The trip there
+ends at the venue's own time on the order, the clock it stamps its books
+with: Kalshi 12 ms, Polymarket US 59 for an opening order and 24 for a
+sale, and back 8 and 31. The order fills against the book the venue had at
+that moment, the newest it made by then on the contract's tape. Our copy of
+a book runs behind the venue's, Kalshi's some 12 ms and Polymarket US's
+some 85, so the order waits until a book the venue made later has reached
+us, which shows every change up to then has, or `PAPER_FEED_SECONDS` when
+none comes. The answer comes back after the trip back, and a leg that
+filled short is sold back on the books we had seen by then, as live would,
+the sale meeting the venue's book when it would arrive. `FILL_SHARE` of
+the visible size at a level is asked for, all of it, and no order is
+rejected at random (`PAPER_REJECT_PROBABILITY`), since none of the live
+ones was: of 1,183, three lacked the cash and three came in Kalshi's
+maintenance, which paper turns away as live does. A paper order leaves the
 venue's book as it was, so paper remembers what it took from each level
 and takes it off the books it later sizes, fills, and sells into, until
 the level shrinks below that or goes. In **live.py** each order is a real
@@ -673,13 +695,18 @@ its own.
 ### Tools
 
 `src/tools/summary.py` prints a short report from the database: its size
-and the pairs of each sport in one line, feed drops, and the opportunities
-within the trading rules, an edge of `MIN_EDGE` or more paying
-`MIN_PAYOUT_HOURS` or more out and `MIN_ANNUAL_PCT` a year or more: what
-they could have taken and locked in at full size, by sport and kind, and
-the largest five. For the paper trades and then the live ones, or one of
-them with `--mode paper` or `--mode live`, it shows the trades by outcome,
-filled, partial, then failed, and by sport and kind in the window, the legs settled in it by venue, and
+and the pairs of each sport in one line, and feed drops. For paper and
+then live, or one of them with `--mode paper` or `--mode live`, it shows
+the opportunities within that desk's rules, an edge of `MIN_EDGE` or more
+and `MIN_ANNUAL_PCT` a year or more, for paper on a game, match, race, or
+window paying within `PAPER_MAX_PAYOUT_HOURS`, in play too, and for live
+on a future paying `MIN_PAYOUT_HOURS` or more out: what they could have
+taken and locked in at full size, how long the edge stayed at `MIN_EDGE`
+or more, in seconds to the thousandth, at the median, the 90th percentile,
+and the longest, the same by sport and kind, and the largest five. Episodes
+before 2026-10-05 kept that stretch at five cents. It then shows the trades
+by outcome, filled, partial, then failed, and by sport and kind in the
+window, the legs settled in it by venue, and
 the open trades: in a few lines, how many, how many of them opened in the
 last hour, day, and week and the capital those still hold, the capital
 they all hold on each venue and the profit they are expected to return
@@ -941,6 +968,23 @@ every live order since under 65 ms. The orders table now has that index,
 a retry checks the losses only when it sold something, and an edge waiting
 for a Polymarket US book is priced again the moment the wait ends rather
 than at the next tick.
+
+**Paper timed as live orders are.** Paper had drawn each order's arrival
+around 50 ms on Kalshi and 60 on Polymarket US, guesses set above the round
+trips, and filled it against our newest book then. But that book is late:
+both venues stamp each order with their own clock, the one they stamp their
+books with, and the 1,096 live orders from October 1 to 4 that carry it
+show a Kalshi order reached the venue 12 ms after we sent it and answered 8
+ms later, and a Polymarket US one 59 ms after, its median hour by hour from
+34 to 79, and answered 31 later. A Polymarket US order met the venue's book
+of some 60 ms after the signal, while paper read the venue's book of some
+20 ms before it, our copy being some 85 ms behind, so paper missed the very
+changes an edge goes in. From October 5 paper keeps every book of the
+contracts its orders are in flight on, and an order meets the one the venue
+had when it would have arrived, once a later one shows nothing is still on
+its way. The same day the minimum edge went from five cents to two, the
+return a year doing the weighing, and paper kept to the bets paying within
+a day.
 
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.

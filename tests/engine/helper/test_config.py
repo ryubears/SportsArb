@@ -30,7 +30,7 @@ def test_override_reads_each_value_as_the_settings_own_type(restore):
     ("override=1", "unknown setting"),
     ("min_payout_hours=1.5", "MIN_PAYOUT_HOURS needs a whole number"),
     ("live_max_cap=5", "unknown setting"),                     # Gone: no trade has a cap.
-    ("paper_latency_ms=5", "not a single number"),
+    ("paper_order_ms=5", "not a single number"),
     ("game_hours=3.5", "not a single number"),                 # One for each sport, so set in config.py.
     ("feed_processes=0", "FEED_PROCESSES needs true or false"),
 ])
@@ -43,7 +43,7 @@ def test_settings_are_read_when_used_not_when_imported(restore, tmp_path):
     from db import database
     config.override(["paper_start_balance=2500"])
     assert PaperBalances(database.connect(tmp_path / "t.sqlite")).amounts == {"kalshi": 2500.0, "polymarket_us": 2500.0}
-    assert "min edge 0.05$" in run.trading_settings() and "start balance 2,500$" in run.trading_settings()
+    assert "min edge 0.02$" in run.trading_settings() and "start balance 2,500$" in run.trading_settings()
 
 
 def test_the_command_line_rejects_a_bad_setting():
