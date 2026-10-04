@@ -17,17 +17,16 @@ venues, trading/ makes the trades, and money/ keeps the cash.
   table, and offers each episode to the desks.
 - The attestation watch, from trading/notify.py, which emails a human
   before the Kalshi key's location attestation lapses.
-- A Desk for each mode the run trades in, with its own money, executor,
-  and settler, and its trades stored with its mode, so paper and live
-  never mix. They trade apart: the paper desk the bets on one event, a
-  game, a match, a race, or a Bitcoin window, before it and while it is
-  played, that pay within PAPER_MAX_PAYOUT_HOURS, and the live desk the
-  futures, which pay
-  MIN_PAYOUT_HOURS or more out, bar the sports given to --not-live. On the
-  same signal live's real orders took the contracts paper's simulated ones
-  looked for: from 2026-10-04, when live began asking for all it saw,
-  paper twins of live trades failed 10 times in 13. Each desk still
-  flattens and settles every trade it holds.
+- A Desk for each mode the run trades in, with its own money, executor, and
+  settler, and its trades stored with its mode, so paper and live never
+  mix. They trade apart: the paper desk the bets on one event, a game, a
+  match, a race, or a Bitcoin window, before it and while it is played,
+  that pay within PAPER_MAX_PAYOUT_HOURS, and the live desk the futures,
+  which pay MIN_PAYOUT_HOURS or more out, bar the sports given to
+  --not-live. On the same signal live's real orders took the contracts
+  paper's simulated ones looked for: from 2026-10-04, when live began
+  asking for all it saw, paper twins of live trades failed 10 times in 13.
+  Each desk still flattens and settles every trade it holds.
   - Paper: trading/paper.py fills against the same books with the paper
     money of money/paper.py.
   - Live: trading/live.py sends real orders with the money the venues

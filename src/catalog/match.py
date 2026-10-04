@@ -14,6 +14,7 @@ Run with:
 import argparse
 from collections import Counter, defaultdict
 from catalog import notes
+from common.sports import MATCH_SPORTS
 from common.timeutil import days_between, now_iso
 from db import database
 from db.models import Bet, Pair
@@ -23,8 +24,9 @@ IDENTITY = ("kind", "season", "game_date", "team_a", "team_b", "subject", "line"
 # Flag a pair when its members stop trading more than this many days apart.
 CLOSE_GAP_LIMIT_DAYS = 60
 # Sports whose venues may date one match a day apart: Kalshi and Polymarket US date a tennis match in Asia by different
-# clocks, 'Lu vs Li' October 3 on one and October 2 on the other. The same two sides on dates this close are one match.
-NEAR_DATE_SPORTS = {"tennis", "darts", "ufc"}
+# clocks, 'Lu vs Li' October 3 on one and October 2 on the other. The same two people can also meet on days in a row, as
+# in a darts round robin, so only a date one venue alone lists moves to a near one, see near_dates().
+NEAR_DATE_SPORTS = MATCH_SPORTS
 NEAR_DATE_DAYS = 1
 
 
@@ -80,20 +82,24 @@ def make_pair(rows, sport):
 
 def near_dates(bets):
     """
-    The bets with each match's dates made one: the same two sides' dates no more than NEAR_DATE_DAYS apart become the
-    earliest of them.
+    The bets with each match's dates made one. A date both venues list for the same two sides is a match on that day,
+    and two dates one venue lists are two matches, as when the two meet on days in a row. So a date only one venue lists
+    becomes the earlier of it and a date no more than NEAR_DATE_DAYS off that only the other venue lists, when each is
+    the other's one date that near.
     """
-    dates = defaultdict(set)
+    listed = defaultdict(lambda: defaultdict(set))      # The two sides map each date to the venues listing them on it.
     for bet in bets:
         if bet["game_date"] and bet["team_a"]:
-            dates[(bet["team_a"], bet["team_b"])].add(bet["game_date"])
+            listed[(bet["team_a"], bet["team_b"])][bet["game_date"]].add(bet["venue"])
     canonical = {}
-    for sides, found in dates.items():
-        first = None
-        for date in sorted(found):
-            if first is None or days_between(first, date) > NEAR_DATE_DAYS:
-                first = date
-            canonical[(sides, date)] = first
+    for sides, dates in listed.items():
+        alone = {date: venues for date, venues in dates.items() if len(venues) == 1}
+        near = {date: [other for other in alone if alone[other] != alone[date] and abs(days_between(date, other)) <= NEAR_DATE_DAYS]
+                for date in alone}
+        for date in dates:
+            found = near.get(date, [])
+            joined = len(found) == 1 and near[found[0]] == [date]
+            canonical[(sides, date)] = min(date, found[0]) if joined else date
     return [dict(bet, game_date=canonical[((bet["team_a"], bet["team_b"]), bet["game_date"])])
             if bet["game_date"] and bet["team_a"] else bet for bet in bets]
 
@@ -102,7 +108,7 @@ def match(bets, sport):
     """
     Pair up one sport's bet rows by identity. Returns the pairs both venues
     list, and the bets that were left out because only one venue lists them.
-    A match between two people dated a day apart is one match, see near_dates().
+    A match the venues date a day apart is one match, see near_dates().
     """
     if sport in NEAR_DATE_SPORTS:
         bets = near_dates(bets)

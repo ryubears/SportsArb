@@ -7,7 +7,7 @@ and every award and leader the classifiers read carries its note.
 import pytest
 from catalog import fetch, notes
 from catalog.classify import kalshi, polymarket_us, teams
-from common import timeutil
+from common import sports, timeutil
 from engine.helper import config
 
 
@@ -21,11 +21,21 @@ def test_table_covers_every_sport(name, table):
     assert set(table) == set(fetch.SPORTS), name
 
 
-@pytest.mark.parametrize("name, sports", [
+@pytest.mark.parametrize("name, named", [
     ("timeutil.CALENDAR_SEASONS", timeutil.CALENDAR_SEASONS),
+    ("sports.TEAM_SPORTS", sports.TEAM_SPORTS),
+    ("sports.SOCCER", sports.SOCCER),
+    ("sports.MATCH_SPORTS", sports.MATCH_SPORTS),
+    ("sports.RACING", sports.RACING),
 ])
-def test_sports_named_apart_are_ones_the_catalog_fetches(name, sports):
-    assert set(sports) <= set(fetch.SPORTS), name
+def test_sports_named_apart_are_ones_the_catalog_fetches(name, named):
+    assert set(named) <= set(fetch.SPORTS), name
+
+
+def test_each_soccer_league_has_its_kalshi_code_and_no_sport_is_in_two_groups():
+    assert set(kalshi.SOCCER_LEAGUES) == set(sports.SOCCER)
+    groups = [*sports.TEAM_SPORTS, *sports.SOCCER, *sports.MATCH_SPORTS, *sports.RACING]
+    assert len(groups) == len(set(groups))
 
 
 def test_the_kalshi_series_fetched_are_the_ones_the_kalshi_classifier_reads():

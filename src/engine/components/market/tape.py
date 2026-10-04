@@ -45,6 +45,9 @@ class Tape:
         self.add(book)
 
     def add(self, book):
+        """
+        Keep a book that has just reached us, at the time it did, or None for one the recorder dropped, at the time it did so.
+        """
         self.books.append((epoch(book.ts) if book else time.time(), book))
         self.changed.set()
 

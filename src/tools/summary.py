@@ -36,12 +36,11 @@ Run with:
 import argparse
 import os
 import sys
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))     # src, so the script runs from any folder.
 from common.stats import quantile
-from common.timeutil import days_between
+from common.timeutil import at_seconds, days_between, epoch, now_iso, shift
 from db.database import DB_PATH, read_only
 from engine.helper import config
 
@@ -189,19 +188,6 @@ def opportunity_rules(mode):
             f"futures paying {config.MIN_PAYOUT_HOURS}h+ out")
 
 
-def print_opportunities(conn, since, hours, sports, modes=("paper", "live")):
-    """
-    The episodes within each mode's rules in the window, paper then live: at config.MIN_EDGE or more and
-    config.MIN_ANNUAL_PCT a year or more, both at the peak, on the bets the mode trades, see opportunity_rules().
-    Capital is what buying every contract fillable at that edge through its longest stretch at it would have cost with
-    fees, and profit what it locks in. The annual rates weight each episode by its capital, over the days until it pays.
-    How long the edge stayed at config.MIN_EDGE or more is the longest unbroken stretch of each episode, in seconds to
-    the thousandth. Episodes before 2026-10-04 16:03 UTC kept their stretch at 5 cents, the minimum then.
-    """
-    for mode in modes:
-        print_mode_opportunities(conn, since, hours, sports, mode)
-
-
 def print_mode_opportunities(conn, since, hours, sports, mode):
     """
     The episodes within one mode's rules in the window, see print_opportunities().
@@ -252,6 +238,71 @@ def print_mode_opportunities(conn, since, hours, sports, mode):
                 largest)
 
 
+def print_opportunities(conn, since, hours, sports, modes=("paper", "live")):
+    """
+    The episodes within each mode's rules in the window, paper then live: at config.MIN_EDGE or more and
+    config.MIN_ANNUAL_PCT a year or more, both at the peak, on the bets the mode trades, see opportunity_rules().
+    Capital is what buying every contract fillable at that edge through its longest stretch at it would have cost with
+    fees, and profit what it locks in. The annual rates weight each episode by its capital, over the days until it pays.
+    How long the edge stayed at config.MIN_EDGE or more is the longest unbroken stretch of each episode, in seconds to
+    the thousandth. Episodes before 2026-10-04 16:03 UTC kept their stretch at 5 cents, the minimum then.
+    """
+    for mode in modes:
+        print_mode_opportunities(conn, since, hours, sports, mode)
+
+
+def print_open_trades(conn, since, hours, mode, sports, now):
+    """
+    The open trades of one mode in a few lines, then each one opened in the window, newest first. Capital is what the
+    contracts still held cost with fees, and the expected profit what the trades locked in, a dollar for each pair held
+    less what it cost, with what flattening made or lost. A contract held without its other side, which the held column
+    shows, is counted at its cost, as if it broke even. The rate a year scales each trade's return over the days from the
+    trade to its payout, weighted by capital. They resolve from the first payout, which may be past and waiting on a
+    venue, to the last, and the average weighted by capital is when the money comes back on average.
+    """
+    where, params = in_sports(sports)
+    rows = query_rows(conn, f"""
+        SELECT t.id, p.label, t.yes_held, t.no_held, t.yes_venue, t.yes_cost, t.no_venue, t.no_cost, t.profit + t.hedge_pnl,
+               t.signal_ts, t.pays_at
+        FROM trades t JOIN pairs p ON p.id = t.pair_id
+        WHERE t.mode = ? AND t.yes_held + t.no_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id){where}
+        ORDER BY t.pays_at, t.id""", (mode,) + params)
+    if not rows:
+        print(f"\n{mode} open trades: none")
+        return
+    capital, profit, yearly, when, venues, body = 0.0, 0.0, 0.0, 0.0, {}, []
+    for trade_id, label, yes, no, yes_venue, yes_cost, no_venue, no_cost, pr, signal, pays in rows:
+        cap, days = yes_cost + no_cost, max(days_between(signal, pays), 1 / 24)
+        capital, profit, yearly = capital + cap, profit + pr, yearly + pr * 365 / days
+        when += cap * epoch(pays)
+        for venue, cost in ((yes_venue, yes_cost), (no_venue, no_cost)):
+            venues[venue] = venues.get(venue, 0.0) + cost
+        if signal >= since:
+            ret, annual = returns(cap, pr, days)
+            body.append((signal, trade_id, label[:44], short_time(signal)[:16], f"{contracts(yes)}/{contracts(no)}", f"{cap:,.2f}",
+                         f"{pr:,.2f}", percent(ret), percent(annual), pays[:10]))
+    opened = []
+    for name, window in OPENED_HOURS.items():
+        group = [r for r in rows if days_between(r[9], now) * 24 <= window]
+        opened.append((f"opened in the last {name}", f"{len(group):,}", f"{sum(r[5] + r[7] for r in group):,.2f}$"))
+    widths = [max(len(o[i]) for o in opened) for i in range(3)]
+    ret, annual = (100 * profit / capital, 100 * yearly / capital) if capital > 0 else (None, None)
+    held = ", ".join(f"{venue} {amount:,.2f}$" for venue, amount in sorted(venues.items()))
+    print(f"\n{mode} open trades: {len(rows):,}")
+    for text, count, cap in opened:
+        print(f"  {text:<{widths[0]}}  {count:>{widths[1]}} using {cap:>{widths[2]}}")
+    print(f"  capital {capital:,.2f}$, held on {held}")
+    print(f"  expected to return {profit:,.2f}$ in profit, {percent(ret)}% on capital, {percent(annual)}% a year")
+    print(f"  resolving first {rows[0][10][:10]}, on average {at_seconds(when / capital)[:10] if capital > 0 else '-'}, last {rows[-1][10][:10]}")
+    if not body:
+        print(f"  none opened in the last {hours} hours")
+        return
+    body.sort(reverse=True)
+    print_table(f"{mode} open trades opened in the last {hours} hours, newest first",
+                ("trade", "bet", "opened UTC", "held yes/no", "capital $", "profit $", "return %", "annual %", "pays"),
+                [r[1:] for r in body], left=3)
+
+
 def print_mode_trades(conn, since, hours, mode, sports, now):
     """
     One mode's trades: how many, by outcome and by kind in the window, the legs settled in it, and the open ones.
@@ -292,65 +343,6 @@ def print_mode_trades(conn, since, hours, mode, sports, now):
     print_open_trades(conn, since, hours, mode, sports, now)
 
 
-def date_at(seconds):
-    """
-    The UTC date at seconds since 1970.
-    """
-    return datetime.fromtimestamp(seconds, timezone.utc).strftime("%Y-%m-%d")
-
-
-def print_open_trades(conn, since, hours, mode, sports, now):
-    """
-    The open trades of one mode in a few lines, then each one opened in the window, newest first. Capital is what the
-    contracts still held cost with fees, and the expected profit what the trades locked in, a dollar for each pair held
-    less what it cost, with what flattening made or lost. A contract held without its other side, which the held column
-    shows, is counted at its cost, as if it broke even. The rate a year scales each trade's return over the days from the
-    trade to its payout, weighted by capital. They resolve from the first payout, which may be past and waiting on a
-    venue, to the last, and the average weighted by capital is when the money comes back on average.
-    """
-    where, params = in_sports(sports)
-    rows = query_rows(conn, f"""
-        SELECT t.id, p.label, t.yes_held, t.no_held, t.yes_venue, t.yes_cost, t.no_venue, t.no_cost, t.profit + t.hedge_pnl,
-               t.signal_ts, t.pays_at
-        FROM trades t JOIN pairs p ON p.id = t.pair_id
-        WHERE t.mode = ? AND t.yes_held + t.no_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id){where}
-        ORDER BY t.pays_at, t.id""", (mode,) + params)
-    if not rows:
-        print(f"\n{mode} open trades: none")
-        return
-    capital, profit, yearly, when, venues, body = 0.0, 0.0, 0.0, 0.0, {}, []
-    for trade_id, label, yes, no, yes_venue, yes_cost, no_venue, no_cost, pr, signal, pays in rows:
-        cap, days = yes_cost + no_cost, max(days_between(signal, pays), 1 / 24)
-        capital, profit, yearly = capital + cap, profit + pr, yearly + pr * 365 / days
-        when += cap * datetime.fromisoformat(pays).timestamp()
-        for venue, cost in ((yes_venue, yes_cost), (no_venue, no_cost)):
-            venues[venue] = venues.get(venue, 0.0) + cost
-        if signal >= since:
-            ret, annual = returns(cap, pr, days)
-            body.append((signal, trade_id, label[:44], short_time(signal)[:16], f"{contracts(yes)}/{contracts(no)}", f"{cap:,.2f}",
-                         f"{pr:,.2f}", percent(ret), percent(annual), pays[:10]))
-    opened = []
-    for name, window in OPENED_HOURS.items():
-        group = [r for r in rows if days_between(r[9], now) * 24 <= window]
-        opened.append((f"opened in the last {name}", f"{len(group):,}", f"{sum(r[5] + r[7] for r in group):,.2f}$"))
-    widths = [max(len(o[i]) for o in opened) for i in range(3)]
-    ret, annual = (100 * profit / capital, 100 * yearly / capital) if capital > 0 else (None, None)
-    held = ", ".join(f"{venue} {amount:,.2f}$" for venue, amount in sorted(venues.items()))
-    print(f"\n{mode} open trades: {len(rows):,}")
-    for text, count, cap in opened:
-        print(f"  {text:<{widths[0]}}  {count:>{widths[1]}} using {cap:>{widths[2]}}")
-    print(f"  capital {capital:,.2f}$, held on {held}")
-    print(f"  expected to return {profit:,.2f}$ in profit, {percent(ret)}% on capital, {percent(annual)}% a year")
-    print(f"  resolving first {rows[0][10][:10]}, on average {date_at(when / capital) if capital > 0 else '-'}, last {rows[-1][10][:10]}")
-    if not body:
-        print(f"  none opened in the last {hours} hours")
-        return
-    body.sort(reverse=True)
-    print_table(f"{mode} open trades opened in the last {hours} hours, newest first",
-                ("trade", "bet", "opened UTC", "held yes/no", "capital $", "profit $", "return %", "annual %", "pays"),
-                [r[1:] for r in body], left=3)
-
-
 def print_paper_money(conn):
     """
     The paper balances from the ledger. Live money is on the venues, see print_live_money().
@@ -381,7 +373,7 @@ def print_trades(conn, since, hours, modes=("live",), sports=(), now=None):
     """
     The trades of each mode asked for apart, since paper and live money never mix.
     """
-    now = now or datetime.now(timezone.utc).isoformat()
+    now = now or now_iso()
     for mode in modes:
         print_mode_trades(conn, since, hours, mode, sports, now)
         if mode == "paper":
@@ -437,8 +429,8 @@ if __name__ == "__main__":
     ap.add_argument("--sport", default="", help="the sports to show, comma separated, every sport when left out")
     ap.add_argument("--no-live", action="store_true", help="leave out the live balances, which are read from the venues")
     args = ap.parse_args()
-    now = datetime.now(timezone.utc).isoformat()
-    since = (datetime.fromisoformat(now) - timedelta(hours=args.hours)).isoformat()
+    now = now_iso()
+    since = shift(now, hours=-args.hours)
     sports = tuple(s.strip() for s in args.sport.split(",") if s.strip())
     conn = read_only()
     print_overview(conn, sports)

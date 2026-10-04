@@ -3,17 +3,16 @@
 A bot that looks for cross-venue arbitrage between the two US prediction
 markets, Kalshi and Polymarket US, and trades what it finds, on paper, with
 real money, or both at once. It covers the NFL, college football, MLB, NHL,
-NBA, WNBA, and men's college basketball, the Premier League, La Liga,
-Serie A, the Bundesliga, Ligue 1, Liga MX, MLS, the Champions League and
-Europa League, Formula 1, NASCAR, UFC, tennis, darts, the 2026 US
-elections, and Bitcoin. It follows two kinds of bet: futures, titles,
-awards, a season's leaders, season totals, election races, and Bitcoin's
-price by a date, which live trades, and the bets on one event, games,
-matches, fights, races, and Bitcoin's 15 minute windows, which paper
-trades, before and while they are played. When the cheapest way to hold *yes*
-on one venue and the cheapest way to hold *no* on the other add up to less
-than a dollar after fees, buying both locks in the difference whatever
-happens.
+NBA, WNBA, and men's college basketball, the Premier League, La Liga, Serie
+A, the Bundesliga, Ligue 1, Liga MX, MLS, the Champions League and Europa
+League, Formula 1, NASCAR, UFC, tennis, darts, the 2026 US elections, and
+Bitcoin. It follows two kinds of bet: futures, titles, awards, a season's
+leaders, season totals, election races, and Bitcoin's price by a date,
+which live trades, and the bets on one event, games, matches, fights,
+races, and Bitcoin's 15 minute windows, which paper trades, before and
+while they are played. When the cheapest way to hold *yes* on one venue and
+the cheapest way to hold *no* on the other add up to less than a dollar
+after fees, buying both locks in the difference whatever happens.
 
 The whole thing runs on an EC2 instance in us-east-1, as one process with
 each venue's feed in a child process of its own: it follows every order
@@ -163,21 +162,21 @@ checks before it trades, below.
 ### The life of a trade
 
 1. **Decide** (`Executor.signal` in `trading/executor.py`). The executor
-   takes the signal when the edge is at least `MIN_EDGE`, for live the
-   pair is a future or its game has not kicked off, the bet pays when the
-   desk trades it (`pays_in_time`), live `MIN_PAYOUT_HOURS` or more away
-   and paper within `PAPER_MAX_PAYOUT_HOURS`, and the edge returns
+   takes the signal when the edge is at least `MIN_EDGE`, for live the pair
+   is a future or its game has not kicked off, the bet pays when the desk
+   trades it (`pays_in_time`), live `MIN_PAYOUT_HOURS` or more away and
+   paper within `PAPER_MAX_PAYOUT_HOURS`, and the edge returns
    `MIN_ANNUAL_PCT` a year or more until then (`pays_enough`), and a
    Polymarket US leg's book is current (`confirm_wait`): newer than the
    Kalshi leg's last change, by the venues' own clocks, or else that change
    is `CONFIRM_SECONDS` old. Otherwise the edge waits, and the scanner
    offers it again at the next change, or the moment the wait ends
-   (`recheck`), not at the next tick up to a second later. `quantity_for` walks both ladders
-   together through the levels that keep that edge and sets each leg's
-   limit at the deepest one. It then asks for `FILL_SHARE` of what those
-   levels show, but no more than the cash each venue can spend, on Kalshi
-   the cash on the market's shard, live as on paper. The cash is reserved
-   and the trade is stored before any order goes out.
+   (`recheck`), not at the next tick up to a second later. `quantity_for`
+   walks both ladders together through the levels that keep that edge and
+   sets each leg's limit at the deepest one. It then asks for `FILL_SHARE`
+   of what those levels show, but no more than the cash each venue can
+   spend, on Kalshi the cash on the market's shard, live as on paper. The
+   cash is reserved and the trade is stored before any order goes out.
 2. **Fill** (`run_trade`). Both legs go out at once.
    - Paper (`trading/paper.py`): each order takes a trip there and back
      drawn from what the live orders took, and fills against the book the
@@ -298,31 +297,31 @@ The bets on one event:
   match and its halves, and the corners, all over 90 minutes and stoppage
   time on both venues.
 - Matches between two people, in tennis, darts, and the UFC: the winner,
-  the games and sets spreads and totals, a set's winner, the score in
-  sets, whether a fight goes the distance, and the round it is won in. The
-  two are named by their full names, the key's words in order, since
-  Kalshi writes *Wang Cong* where Polymarket US writes *Cong Wang*; Kalshi's
-  title for a winner gives only last names, so its two markets' subtitles
-  name them.
+  the games and sets spreads and totals, a set's winner, the score in sets,
+  whether a fight goes the distance, and the round it is won in. The two
+  are named by their full names, the key's words in order, since Kalshi
+  writes *Wang Cong* where Polymarket US writes *Cong Wang*; Kalshi's title
+  for a winner gives only last names, so its two markets' subtitles name
+  them.
 - Races: F1's and NASCAR's winner and F1's top constructor, a race being
   its date, from Kalshi's rules and Polymarket US's slug.
 - Bitcoin's 15 minute windows, whether the CF Benchmarks index ends the
   window at least where it began, the same rule on both venues, a window
   named by its start in UTC.
 
-For a future, Kalshi gives each kind a series of its own, `KXSB` the Super Bowl, or an
-event of its own within one, `KXEPLTOP-27TOP4` the Premier League's top
-four, and the market ticker ends in the team, `KXSB-27-KC`. Polymarket US
-tells kinds apart by the shape of the event slug with its sport's prefix
-taken off and its date written as D, `nfl-afceast-D-w` being a division
-winner, looked up with its prefix first where two sports share a shape
-that means different things, `ucl-D-lastplace`. The kinds:
+For a future, Kalshi gives each kind a series of its own, `KXSB` the Super
+Bowl, or an event of its own within one, `KXEPLTOP-27TOP4` the Premier
+League's top four, and the market ticker ends in the team, `KXSB-27-KC`.
+Polymarket US tells kinds apart by the shape of the event slug with its
+sport's prefix taken off and its date written as D, `nfl-afceast-D-w` being
+a division winner, looked up with its prefix first where two sports share a
+shape that means different things, `ucl-D-lastplace`. The kinds:
 
 - Team futures: champions, conference and division winners, top seeds,
   playoff places and rounds, best and worst records, the last undefeated
   and winless teams, college football's unbeaten teams and the conference
-  that wins its title, and in soccer the top two, four, and six, relegation,
-  last place, and the Champions League's league phase.
+  that wins its title, and in soccer the top two, four, and six,
+  relegation, last place, and the Champions League's league phase.
 - People: awards, a season's leaders in a stat, the NFL's, college
   football's by conference, the baseball postseason's, and soccer's goals
   and assists, and champions and title holders, F1 and NASCAR drivers, UFC
@@ -366,22 +365,25 @@ parser understands are counted and left out.
 
 **match.py** groups a sport's bets whose identity agrees into a `Pair`,
 whose label starts with the sport, for example `nfl champion 2027 KC`,
-`nfl spread 2026-09-20 CAR@ATL ATL 3.5`, or `politics senate_race 2026 GA
-D`. A pair only exists when both venues list the bet, and it carries every
-contract that expresses it. In tennis, darts, and the UFC the venues may
-date one match a day apart, Kalshi and Polymarket US reading a match in
-Asia by different clocks, so the same two people on dates a day apart are
-one match. Kinds with settlement rules that differ between venues carry a
+`nfl spread 2026-09-20 CAR@ATL ATL 3.5`, or
+`politics senate_race 2026 GA D`. A pair only exists when both venues list
+the bet, and it carries every contract that expresses it. In tennis, darts,
+and the UFC the venues may date one match a day apart, Kalshi and
+Polymarket US reading a match in Asia by different clocks. A date only one
+venue lists for two people then joins the one a day off that only the other
+lists. Two people can also meet on days in a row, as in a darts round
+robin, so a date both venues list, and two dates one lists, stay matches of
+their own. Kinds with settlement rules that differ between venues carry a
 note from **notes.py**: how each venue treats a postponed game, overtime, a
 retired tennis player, a fight's draw, a darts walkover, a driver who does
 not finish, and Bitcoin's index, Polymarket US reading a trimmed mean of
-its last minute where Kalshi reads the index itself; Polymarket US divides the dollar among players or teams that
-tie for an award, a lead, or a record, where Kalshi's rules do not always
-say; Kalshi reads a UFC title holder and a tennis ranking at noon Eastern
-on December 31 and Polymarket US at 11:59 PM; and Kalshi pays a race on
-the party of whoever is sworn in, in January, and control of a house on
-February 1, Polymarket US on the election. A note is a warning to read,
-not a bar.
+its last minute where Kalshi reads the index itself; Polymarket US divides
+the dollar among players or teams that tie for an award, a lead, or a
+record, where Kalshi's rules do not always say; Kalshi reads a UFC title
+holder and a tennis ranking at noon Eastern on December 31 and Polymarket
+US at 11:59 PM; and Kalshi pays a race on the party of whoever is sworn in,
+in January, and control of a house on February 1, Polymarket US on the
+election. A note is a warning to read, not a bar.
 
 **pipeline.py** runs fetch, classify, and match in one call. The live
 process runs it every hour in a child process, so new games and futures
@@ -424,24 +426,23 @@ the same for both venues. Polymarket US prices every order on the long
 side, so a short side order at p is sent at 1 - p, and when its answer does
 not say how an order ended, the order itself is looked up, since a returned
 order id does not mean the order is done. Both venues trade in hundredths
-of a contract: Polymarket US fills an order in pieces as small as one,
-0.1 then 0.89 then 0.01 for a contract, and takes orders that small, and
-Kalshi counts contracts to the hundredth too. So the pieces are added up
-and every fill, holding, and order is counted to the hundredth
-(`orders.exact`). Both clients also read the account's positions, which
-the live executor and `tools/repair_fills.py` check the trades against.
-Kalshi turns away an order whose
-market's shard lacks the cash, which counts as unfilled rather than
-refused, since nothing traded. Polymarket US turns away an order the
-account lacks the cash for, and Kalshi a sale it lacks the cash for,
-which counts as `unfunded`, not refused either. A sale can need cash:
-each venue keeps one position per market across all our trades, so
-selling the No one trade holds, in a market where others hold more Yes,
-is buying Yes. So a Kalshi sale is not reduce only, which would cancel
-such a sale unfilled every time. Trading calls go over kept HTTPS connections
-from **http.py**, since a new TLS connection costs round trips a race
-cannot spare, and are never retried, since an order sent twice trades
-twice. The field names come from the venues' published Python SDKs.
+of a contract: Polymarket US fills an order in pieces as small as one, 0.1
+then 0.89 then 0.01 for a contract, and takes orders that small, and Kalshi
+counts contracts to the hundredth too. So the pieces are added up and every
+fill, holding, and order is counted to the hundredth (`orders.exact`). Both
+clients also read the account's positions, which the live executor and
+`tools/repair_fills.py` check the trades against. Kalshi turns away an
+order whose market's shard lacks the cash, which counts as unfilled rather
+than refused, since nothing traded. Polymarket US turns away an order the
+account lacks the cash for, and Kalshi a sale it lacks the cash for, which
+counts as `unfunded`, not refused either. A sale can need cash: each venue
+keeps one position per market across all our trades, so selling the No one
+trade holds, in a market where others hold more Yes, is buying Yes. So a
+Kalshi sale is not reduce only, which would cancel such a sale unfilled
+every time. Trading calls go over kept HTTPS connections from **http.py**,
+since a new TLS connection costs round trips a race cannot spare, and are
+never retried, since an order sent twice trades twice. The field names come
+from the venues' published Python SDKs.
 
 ### Engine (`src/engine`)
 
@@ -452,24 +453,24 @@ when](#what-happens-when) describes. A desk is one mode's executor, its
 money, and its settler. `--execute` picks the desks: `paper`, the default,
 `live`, or `both`, which runs a desk of each. The desks trade apart: the
 paper desk the bets on one event, a pair with a game date, and the live
-desk the futures, a pair without one, bar the sports given to
-`--not-live`, `crypto` by default, whose futures are followed but traded by
-neither. On one signal the live desk's real orders would take the
-contracts the paper desk's simulated ones look for. Each desk still
-flattens and settles every trade it holds. The same loop starts the hourly
-catalog refresh in a child process and applies the result to the live
-connections, and with Bitcoin followed it refreshes Bitcoin's catalog alone
-20 seconds after each 15 minute window opens, when both venues list it, so
-a window is traded for most of its 15 minutes. One run trades every sport
-given to `--sport`, comma separated as in `--sport nfl,ncaaf,mlb,nhl,nba`,
-or every one with `--sport all`, since the money is one pool and a second
-process would spend the same dollars. How long a game is expected to last
-is set for every sport in `GAME_HOURS`, measured for the first five and an
-allowance for the rest, a Bitcoin window's being its 15 minutes. The pieces it wires together are in
-`engine/components/`, in three folders by what they do: `market/` follows
-the venues, `trading/` makes the trades, and `money/` keeps the cash. What
-they share is in `engine/helper/`: the settings, game timing, pricing, and
-fees.
+desk the futures, a pair without one, bar the sports given to `--not-live`,
+`crypto` by default, whose futures are followed but traded by neither. On
+one signal the live desk's real orders would take the contracts the paper
+desk's simulated ones look for. Each desk still flattens and settles every
+trade it holds. The same loop starts the hourly catalog refresh in a child
+process and applies the result to the live connections, and with Bitcoin
+followed it refreshes Bitcoin's catalog alone 20 seconds after each 15
+minute window opens, when both venues list it, so a window is traded for
+most of its 15 minutes. One run trades every sport given to `--sport`,
+comma separated as in `--sport nfl,ncaaf,mlb,nhl,nba`, or every one with
+`--sport all`, since the money is one pool and a second process would spend
+the same dollars. How long a game is expected to last is set for every
+sport in `GAME_HOURS`, measured for the first five and an allowance for the
+rest, a Bitcoin window's being its 15 minutes. The pieces it wires together
+are in `engine/components/`, in three folders by what they do: `market/`
+follows the venues, `trading/` makes the trades, and `money/` keeps the
+cash. What they share is in `engine/helper/`: the settings, game timing,
+pricing, and fees.
 
 **market/** follows the venues: their books and the edges between them.
 **record.py** holds the newest book for every paired contract in memory,
@@ -515,21 +516,21 @@ bets that pay out a day or more away, the futures, and never a game once it
 has kicked off: near a game and during it, faster traders take an edge
 before our Polymarket US order lands, and the leg is missed. Paper trades
 the bets on one event (`in_play`), before and while they are played, that
-pay within 24 hours (`PAPER_MAX_PAYOUT_HOURS`), to see how they would do.
-A signal needs a net edge of at least two cents per contract (`MIN_EDGE`,
+pay within 24 hours (`PAPER_MAX_PAYOUT_HOURS`), to see how they would do. A
+signal needs a net edge of at least two cents per contract (`MIN_EDGE`,
 five until 2026-10-04 16:03 UTC), for live a payout at least 24 hours away
 (`MIN_PAYOUT_HOURS`), and a return of at least 50% a year on the money it
-ties up until then (`MIN_ANNUAL_PCT`), which is what weighs an edge
-against the time it ties the money up; the two cents only keep out the
-noise of a cent or so. Two cents clears 50% a year for a bet paying within
-14 days, five cents within 38, ten within 81, twenty within 182. One limit
-order is sent per leg, both at once. Both ladders are walked together and
-each leg's limit is set at the deepest level that still leaves the minimum
-edge, so an order sweeps every level above the floor rather than only the
-top one. A trade asks for all of what those levels show (`FILL_SHARE`,
-half until 2026-10-04), as far as the cash free on each venue pays for, both legs from one venue's
-cash when they share it, live as on paper, with no cap on contracts. No
-cash is held back: trades may spend all that is free.
+ties up until then (`MIN_ANNUAL_PCT`), which is what weighs an edge against
+the time it ties the money up; the two cents only keep out the noise of a
+cent or so. Two cents clears 50% a year for a bet paying within 14 days,
+five cents within 38, ten within 81, twenty within 182. One limit order is
+sent per leg, both at once. Both ladders are walked together and each leg's
+limit is set at the deepest level that still leaves the minimum edge, so an
+order sweeps every level above the floor rather than only the top one. A
+trade asks for all of what those levels show (`FILL_SHARE`, half until
+2026-10-04), as far as the cash free on each venue pays for, both legs from
+one venue's cash when they share it, live as on paper, with no cap on
+contracts. No cash is held back: trades may spend all that is free.
 
 In **paper.py** each order goes the way a live one does. It takes a trip
 to its venue and a trip back, each drawn from a lognormal with the median
@@ -590,30 +591,30 @@ compared while a trade or a flatten is in flight, or when an order went
 out while the positions were read.
 
 A leg on Polymarket US trades only on a current book. That venue's books
-reached us about 85 ms after it changed them at the median, 160 at the
-90th percentile, and Kalshi's in about 12, so after a score Kalshi's new
-price could sit next to Polymarket US's old one for a moment, an edge
-already gone there. Before a trade the executor compares the venues' own
-times for the two books (`confirm_wait`). A Polymarket US book newer than
-the Kalshi book's last change already shows any reaction to it. An older
-one is trusted only once that change is `CONFIRM_SECONDS`, 0.3 seconds,
-old, long enough for a reaction on Polymarket US to have reached us, and
-until then the edge waits for the scanner to offer it again at the next
-change, or when the wait ends, when the executor asks the scanner to price
-the pair again. A Kalshi leg has no such wait, since its feed is fast.
-Both venues stop every Thursday for maintenance they publish, Kalshi from
-3 to 5 AM Eastern and Polymarket US from 6 to 8 AM, while a feed may go on
-sending books, so no trade is opened, and no order sent to flatten one,
-with a leg on a venue in its window (`venues.is_maintenance`). A pause at any other
-time is met by the brakes: the venue refuses the orders, and three
-refusals in a row halt live trading.
-Live trading takes every sport the run does. A Kalshi leg spends only the
-cash on its market's shard, football's and hockey's on shard 0, baseball's
-and basketball's on 3, so `tools/kalshi_shards.py` splits the Kalshi cash
-between the two, 90% to shard 0, where the football futures with the
-long-lasting edges are, and 10% to shard 3 (`LIVE_SHARDS`). The live
-executor emails once when either shard, or Polymarket US, falls under $5
-(`LIVE_LOW_CASH`), and again only after it has been back over.
+reached us about 85 ms after it changed them at the median, 160 at the 90th
+percentile, and Kalshi's in about 12, so after a score Kalshi's new price
+could sit next to Polymarket US's old one for a moment, an edge already
+gone there. Before a trade the executor compares the venues' own times for
+the two books (`confirm_wait`). A Polymarket US book newer than the Kalshi
+book's last change already shows any reaction to it. An older one is
+trusted only once that change is `CONFIRM_SECONDS`, 0.3 seconds, old, long
+enough for a reaction on Polymarket US to have reached us, and until then
+the edge waits for the scanner to offer it again at the next change, or
+when the wait ends, when the executor asks the scanner to price the pair
+again. A Kalshi leg has no such wait, since its feed is fast. Both venues
+stop every Thursday for maintenance they publish, Kalshi from 3 to 5 AM
+Eastern and Polymarket US from 6 to 8 AM, while a feed may go on sending
+books, so no trade is opened, and no order sent to flatten one, with a leg
+on a venue in its window (`venues.is_maintenance`). A pause at any other
+time is met by the brakes: the venue refuses the orders, and three refusals
+in a row halt live trading. Live trading takes every sport the run does. A
+Kalshi leg spends only the cash on its market's shard, football's and
+hockey's on shard 0, baseball's and basketball's on 3, so
+`tools/kalshi_shards.py` splits the Kalshi cash between the two, 90% to
+shard 0, where the football futures with the long-lasting edges are, and
+10% to shard 3 (`LIVE_SHARDS`). The live executor emails once when either
+shard, or Polymarket US, falls under $5 (`LIVE_LOW_CASH`), and again only
+after it has been back over.
 
 Live trading has brakes, in **brakes.py**, sized for a test with about $100
 on each venue. An order whose outcome cannot be known (a timeout, a dropped
@@ -1062,12 +1063,12 @@ python3 -m tools.feed_check --seconds 300 --markets 100
 src/
   api/        venue clients and the shared websocket book stream
   catalog/    fetch, classify (one parser per venue), match, notes, pipeline
-  common/     paths, time and json helpers, the venue list and maintenance windows, the logger, the timer background work runs on,
-              how a child process starts, quantiles
+  common/     paths, time and json helpers, the venue list and maintenance windows, the sports in groups, the logger,
+              the timer background work runs on, how a child process starts, quantiles
   db/         models, the SQLite schema and its migrations, reads and writes
   engine/     run, the process that wires the components together
     components/
-      market/    record, feeds, streams, scan: the venues' books and the edges between them
+      market/    record, feeds, streams, scan, tape: the venues' books and the edges between them
       trading/   executor (what paper and live share), paper, live, brakes, notify
       money/     balances (what paper and live share), paper, live, settle
     helper/      config (the settings a run is tuned by), game (when a game is played and when its bets pay out), pricing, fees
@@ -1090,6 +1091,7 @@ Where to look to change something:
 | how an edge is priced | `engine/helper/pricing.py` |
 | game timing | `engine/helper/game.py` |
 | when each venue is in maintenance | `common/venues.py` |
+| which sports are treated alike: team sports, soccer, matches, races | `common/sports.py` |
 | every tunable number | `engine/helper/config.py` |
 | when a trade is taken and sized | `engine/components/trading/executor.py` |
 | the Kalshi cash on each shard | `tools/kalshi_shards.py` |

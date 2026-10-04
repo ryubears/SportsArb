@@ -48,22 +48,14 @@ import dataclasses
 import math
 import random
 from contextlib import ExitStack, contextmanager
-from datetime import datetime, timezone
 from statistics import NormalDist
-from common.timeutil import epoch, now_iso
+from common.timeutil import at_seconds, epoch, now_iso
 from common.venues import is_maintenance
 from engine.components.trading.executor import Executor, Fill
 from engine.helper import config
 from engine.helper.pricing import book_level, fresh, ladder, sell_ladder, sweep, takes
 
 Z90 = NormalDist().inv_cdf(0.9)     # Standard deviations from the median to the 90th percentile of a normal draw.
-
-
-def at_seconds(seconds):
-    """
-    Seconds since 1970 as ISO 8601 UTC, as now_iso() gives the time.
-    """
-    return datetime.fromtimestamp(seconds, timezone.utc).isoformat(timespec="microseconds")
 
 
 class PaperExecutor(Executor):
@@ -88,16 +80,6 @@ class PaperExecutor(Executor):
         return hours <= config.PAPER_MAX_PAYOUT_HOURS
 
     # BOOKS
-
-    def book(self, key, when=None):
-        """
-        A contract's newest book, or with when the newest that had reached us
-        by then, from its tape when one is kept, less what our orders took.
-        """
-        tape = self.tapes.get(key) if self.tapes and when else None
-        if tape:
-            return self.less_ours(key, tape.seen(epoch(when)))
-        return self.less_ours(key, super().book(key), newest=True)
 
     def less_ours(self, key, book, newest=False):
         """
@@ -125,6 +107,16 @@ class PaperExecutor(Executor):
             else:
                 del self.taken[key]
         return dataclasses.replace(book, **sides)
+
+    def book(self, key, when=None):
+        """
+        A contract's newest book, or with when the newest that had reached us
+        by then, from its tape when one is kept, less what our orders took.
+        """
+        tape = self.tapes.get(key) if self.tapes and when else None
+        if tape:
+            return self.less_ours(key, tape.seen(epoch(when)))
+        return self.less_ours(key, super().book(key), newest=True)
 
     @contextmanager
     def taping(self, keys):

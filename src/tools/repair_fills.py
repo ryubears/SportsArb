@@ -10,16 +10,16 @@ Then fills were added up but still cut to whole contracts, so 6.42 was
 stored as 6. Now they are counted to the hundredth, see orders.exact().
 
 This reads every stored Polymarket US answer again with
-polymarket_us.read_answer(), corrects each order read differently, and works out
-each trade with a corrected order again from its orders, as the executor
-does: what each leg filled and holds, what that cost, the profit locked
-in, and what flattening made or lost. The live executor flattens a
+polymarket_us.read_answer(), corrects each order read differently, and
+works out each trade with a corrected order again from its orders, as the
+executor does: what each leg filled and holds, what that cost, the profit
+locked in, and what flattening made or lost. The live executor flattens a
 repaired trade holding more on one side than the other at its next start,
-by selling the excess back. A trade whose orders sold more of a leg than
-it held cannot be written as a trade, so it is left as it is, with every
-other trade on its bet, for a human to settle with the venue. Last it
-reads each venue's positions and compares them with what the live trades
-then hold, contract by contract.
+by selling the excess back. A trade whose orders sold more of a leg than it
+held cannot be written as a trade, so it is left as it is, with every other
+trade on its bet, for a human to settle with the venue. Last it reads each
+venue's positions and compares them with what the live trades then hold,
+contract by contract.
 
 A trade whose record fell behind its orders for another reason, as trade
 48 did when a sale of 0.42 of a contract went unrecorded on 2026-10-01,
@@ -36,13 +36,13 @@ would change. Run from src/ with:
 import argparse
 import dataclasses
 import json
-from api import kalshi, polymarket_us
+from api import polymarket_us
 from api.orders import exact
 from db import database
 from db.models import Trade
+from engine.components.trading.live import POSITIONS
 
 TOLERANCE = 1e-6    # Dollars and contracts closer than this are the same.
-POSITIONS = {"kalshi": kalshi.positions, "polymarket_us": polymarket_us.positions}     # Each venue's holdings, {contract: contracts}.
 
 
 class Oversold(Exception):

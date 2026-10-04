@@ -116,12 +116,6 @@ class LiveExecutor(Executor):
 
     # POSITIONS
 
-    def watch_positions(self, clock):
-        """
-        Once a second from the desk, with the wall clock in seconds. Starts a check of the positions when one is due and none runs.
-        """
-        self.checks.tick(clock, self.check_positions)
-
     async def check_positions(self):
         """
         Compare what each venue holds of each contract with what the open live
@@ -151,6 +145,12 @@ class LiveExecutor(Executor):
                 if self.told.get(key) != message:
                     self.told[key] = message
                     self.log(message)
+
+    def watch_positions(self, clock):
+        """
+        Once a second from the desk, with the wall clock in seconds. Starts a check of the positions when one is due and none runs.
+        """
+        self.checks.tick(clock, self.check_positions)
 
     # SIGNALS
 

@@ -46,4 +46,3 @@ def test_each_venue_is_in_maintenance_on_thursdays_in_eastern_time():
     assert m("kalshi", "2026-12-03T08:30:00+00:00")                         # 3:30 AM Eastern standard time, an hour later in UTC.
     assert not m("kalshi", "2026-09-30T07:30:00+00:00")                     # A Wednesday.
     assert not m("gemini", "2026-10-01T07:30:00+00:00")                     # A venue with no window never is.
-

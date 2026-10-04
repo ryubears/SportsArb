@@ -9,6 +9,7 @@ The file is not called time.py because that would shadow Python's own
 time module for every script run from the src folder.
 """
 
+import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -48,6 +49,13 @@ def epoch(value):
         return None
 
 
+def at_seconds(seconds):
+    """
+    Seconds since 1970 as ISO 8601 UTC, as now_iso() gives the time.
+    """
+    return datetime.fromtimestamp(seconds, timezone.utc).isoformat(timespec="microseconds")
+
+
 def utc_minute(seconds):
     """
     Seconds since 1970 as a time to the minute in UTC for people to read, such as '2026-10-21 14:13 UTC'.
@@ -76,17 +84,6 @@ def seconds_between(a, b):
     return (datetime.fromisoformat(b) - datetime.fromisoformat(a)).total_seconds()
 
 
-def in_weekly_window(seconds, window):
-    """
-    Whether a time, in seconds since 1970, falls in a weekly window given as
-    (weekday, Monday 0, start hour, end hour) in US Eastern time, which keeps
-    daylight saving time as the venues' schedules do.
-    """
-    weekday, start, end = window
-    eastern = datetime.fromtimestamp(seconds, timezone.utc).astimezone(EASTERN)
-    return eastern.weekday() == weekday and start <= eastern.hour < end
-
-
 def hours_between(a, b):
     """
     Hours from ISO timestamp a to ISO timestamp b, as a float.
@@ -106,6 +103,41 @@ def eastern_date(iso_time):
     Calendar date in US Eastern time for an ISO timestamp, as YYYY-MM-DD.
     """
     return datetime.fromisoformat(iso_time).astimezone(EASTERN).strftime("%Y-%m-%d")
+
+
+def in_weekly_window(seconds, window):
+    """
+    Whether a time, in seconds since 1970, falls in a weekly window given as
+    (weekday, Monday 0, start hour, end hour) in US Eastern time, which keeps
+    daylight saving time as the venues' schedules do.
+    """
+    weekday, start, end = window
+    eastern = datetime.fromtimestamp(seconds, timezone.utc).astimezone(EASTERN)
+    return eastern.weekday() == weekday and start <= eastern.hour < end
+
+
+def written_date(text):
+    """
+    A date written out, 'October 4, 2026', 'Oct 4, 2026', or 'Sept. 4 2026', as YYYY-MM-DD, or None.
+    """
+    plain = re.sub(r"^Sept\b", "Sep", text.replace(".", "").replace(",", ""))       # 'Sept' alone, not September's start.
+    for form in ("%B %d %Y", "%b %d %Y"):
+        try:
+            return datetime.strptime(plain, form).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return None
+
+
+def last_day(day, hour=None, minute=None, half=None):
+    """
+    The last day, YYYY-MM-DD, that a deadline on day at hour:minute, AM or
+    PM as half says, leaves whole: the day before at 12:00 AM, when the day
+    has not begun, and the day itself at any other time or with none, as in
+    'before Sep 1, 2026 at 12:00 AM ET' and 'by Dec 31, 2026 at 11:59 PM ET'.
+    """
+    midnight = hour is not None and int(hour) == 12 and int(minute) == 0 and half.upper() == "AM"
+    return shift(f"{day}T00:00:00+00:00", days=-1)[:10] if midnight else day
 
 
 CALENDAR_SEASONS = {"mlb"}  # Sports whose season ends in the year it starts.

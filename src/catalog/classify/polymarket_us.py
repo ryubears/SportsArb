@@ -7,21 +7,22 @@ slug names both sides and the date, the market's type its kind, and its
 slug or line whom it is on, see the tables below. Their sides are kept as
 the Kalshi classifier keeps them, so the same bet reads alike on both.
 
-Futures are bets on a season, a title, an award, a season's leader, a
-price by a deadline, or an election, which live trades. Futures are told apart by the shape of their event
-slug, with its sport's prefix taken off and its date written as D:
-'nfl-afceast-D-w' is a division winner. A shape is looked up with its
-prefix first, 'ucl-D-lastplace', where two sports share one that means
-different things, then without it. A team future's market slug ends in
-the team, though not always in the code the venue's games used: the NFL's
-champions glue city and nickname, 'bufbil', and some events use Kalshi's
-codes, 'gsw'. Its market title names the team, 'Ohio St.', which settles
-which code it is. An award's, a leader's, or a title holder's market title
-is the person, and a season total's holds its line, 'Atlanta 43+ wins',
-'2.5+ Wins', or '3,750.5+ Passing Yards', unless the shape does, 'nhl-pts100-D'.
-A future's season is the one its date falls in, or its event's end when
-that is half a year later, since a slug can carry the wrong year: the
-Champions League's final is 'ucl-final-2026-06-05-w' for 2027's.
+Futures are bets on a season, a title, an award, a season's leader, a price
+by a deadline, or an election, which live trades. Futures are told apart by
+the shape of their event slug, with its sport's prefix taken off and its
+date written as D: 'nfl-afceast-D-w' is a division winner. A shape is
+looked up with its prefix first, 'ucl-D-lastplace', where two sports share
+one that means different things, then without it. A team future's market
+slug ends in the team, though not always in the code the venue's games
+used: the NFL's champions glue city and nickname, 'bufbil', and some events
+use Kalshi's codes, 'gsw'. Its market title names the team, 'Ohio St.',
+which settles which code it is. An award's, a leader's, or a title holder's
+market title is the person, and a season total's holds its line, 'Atlanta
+43+ wins', '2.5+ Wins', or '3,750.5+ Passing Yards', unless the shape does,
+'nhl-pts100-D'. A future's season is the one its date falls in, or its
+event's end when that is half a year later, since a slug can carry the
+wrong year: the Champions League's final is 'ucl-final-2026-06-05-w' for
+2027's.
 
 Elections, 'usse-ga-2026-11-03', have a market per party, its slug ending
 in -dem or -rep, or per candidate, and a race's season is its election
@@ -35,9 +36,9 @@ import re
 from catalog.classify.teams import (ALIASES, STATES, TOP_TWO_STATES, match_sides, person, player_key, race, side_key, team_from_code,
                                     venue_codes)
 from collections import defaultdict
-from common.timeutil import days_between, eastern_date, season_from_date, shift
+from common.sports import MATCH_SPORTS, RACING, SOCCER, TEAM_SPORTS
+from common.timeutil import days_between, eastern_date, last_day, season_from_date, written_date
 from common.venues import VENUES
-from datetime import datetime
 from db.models import Bet
 
 # How each sport's event slugs start. A sport can have several, the Champions League's and the Ballon d'Or's. Bitcoin's
@@ -57,7 +58,6 @@ EVENT_PREFIX = {
 # winning by more than it. The venue's titles on positive lines contradict its prices, so only the slug and the line are
 # trusted. A game of teams keeps them away then home, the first side then the second, as Kalshi does.
 GAME_EVENT = re.compile(r"^([a-z0-9]+)-([a-z0-9]+)-([a-z0-9]+)-(\d{4}-\d{2}-\d{2})(-dh\d)?$")
-TEAM_SPORTS = {"nfl", "ncaaf", "mlb", "nhl", "nba", "wnba", "ncaab"}
 TEAM_TOTAL = re.compile(r"-tt-([a-z]+)-")   # The team in a team total's market slug, 'tsc-mlb-bos-nyy-2026-09-29-tt-nyy-1pt5'.
 GAME_KINDS = {
     **{f"{sport}_team_full_game_{bet}": kind for sport in ("football", "baseball", "hockey", "basketball")
@@ -75,7 +75,6 @@ PLAYER_KINDS = {
     **{f"basketball_player_{stat}": f"player_{stat}" for stat in ("points", "rebounds", "assists", "threes", "blocks")},
 }
 PLAYER_TITLE = re.compile(r"^Will (.+?) (?:record|score|throw) ")     # 'Will Bijan Robinson record 40+ receiving yards?'.
-SOCCER_SPORTS = {"epl", "laliga", "seriea", "bundesliga", "ligue1", "ligamx", "mls", "ucl", "uel"}
 SOCCER_KINDS = {
     "soccer_team_full_time_winner": "result", "soccer_team_first_half_winner": "first_half_result",
     "soccer_team_second_half_winner": "second_half_result",
@@ -89,7 +88,6 @@ SOCCER_KINDS = {
 }
 SCORE_SLUG = re.compile(r"-exact-score-(\d+)-(\d+)$")      # The first club's goals, then the second's.
 CORNERS_SLUG = re.compile(r"-cor-all-")                     # Both clubs' corners, not one's.
-MATCH_SPORTS = {"tennis", "darts", "ufc"}
 MATCH_KINDS = {
     "tennis_match_winner": "match_winner", "darts_match_winner": "match_winner", "ufc_fight_winner": "match_winner",
     "tennis_match_games_spread": "games_spread", "tennis_match_sets_spread": "sets_spread",
@@ -536,11 +534,8 @@ def rule_end(rules):
     The last day a price rule counts, 'before 12:00 AM ET on January 1, 2027' being December 31, 2026, or None.
     """
     m = RULE_END.search(rules or "")
-    if not m:
-        return None
-    day = datetime.strptime(m.group(4), "%B %d, %Y").strftime("%Y-%m-%d")
-    midnight = int(m.group(1)) == 12 and m.group(2) == "00" and m.group(3) == "AM"
-    return shift(f"{day}T00:00:00+00:00", days=-1)[:10] if midnight else day
+    day = written_date(m.group(4)) if m else None
+    return last_day(day, *m.group(1, 2, 3)) if day else None
 
 
 def classify_crypto(row, base):
@@ -608,10 +603,10 @@ def classify(row, outcomes=None):
         return classify_crypto(row, base)
     if row["market_type"] == "futures":
         # Before a race, whose winner is typed a future too: 'f1-dc-2026-12-06-w' is the drivers' title.
-        return classify_future(row, sport, base) or (classify_race(row, sport, base) if sport in ("f1", "nascar") else None)
+        return classify_future(row, sport, base) or (classify_race(row, sport, base) if sport in RACING else None)
     if sport in TEAM_SPORTS:
         return classify_game(row, sport, base)
-    if sport in SOCCER_SPORTS:
+    if sport in SOCCER:
         return classify_soccer(row, sport, base)
     if sport in MATCH_SPORTS:
         return classify_match(row, sport, base)

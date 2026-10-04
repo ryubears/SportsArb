@@ -9,17 +9,17 @@ them away then home, as the venues list them, and a soccer match or a
 match between two people keeps its sides in order of their keys, so a
 market names whom it is on by its subject.
 
-Futures are bets on a season, a title, an award, a season's leader, a
-price by a deadline, or an election, which live trades. Each kind has a series
-of its own, or an event of its own within a series, 'KXEPLTOP-27TOP4' the
-top four of the Premier League, which the event's key names once its year
-is taken out. A team future's market ticker ends in the team, 'KXSB-27-KC'.
-An award's, a leader's, or a title holder's names the person in its
-subtitle, 'Aaron Judge'. A team's season total has one event per team,
+Futures are bets on a season, a title, an award, a season's leader, a price
+by a deadline, or an election, which live trades. Each kind has a series of
+its own, or an event of its own within a series, 'KXEPLTOP-27TOP4' the top
+four of the Premier League, which the event's key names once its year is
+taken out. A team future's market ticker ends in the team, 'KXSB-27-KC'. An
+award's, a leader's, or a title holder's names the person in its subtitle,
+'Aaron Judge'. A team's season total has one event per team,
 'KXNFLWINS-27ARI', and one market per line, and a player's has one event
-per line and one market per player. The venues number seasons
-differently, so a future's season is the one its settlement falls in,
-which both agree on.
+per line and one market per player. The venues number seasons differently,
+so a future's season is the one its settlement falls in, which both agree
+on.
 
 Elections have a series per office and state, 'SENATEGA', one event per
 election year, '-26', and a market per party, D or R, or per candidate.
@@ -33,7 +33,7 @@ Kalshi's ticker layout.
 import re
 from catalog.classify.teams import STATES, TOP_TWO_STATES, match_sides, person, player_key, race, side_key, team_from_code
 from collections import defaultdict
-from common.timeutil import season_from_date, shift
+from common.timeutil import last_day, season_from_date, shift, written_date
 from datetime import datetime
 from db.models import Bet
 
@@ -352,19 +352,6 @@ def ticker_date(yy, mon, dd):
     return datetime.strptime(f"20{yy} {mon} {dd}", "%Y %b %d").strftime("%Y-%m-%d")
 
 
-def written_date(text):
-    """
-    A date written out, 'October 4, 2026', 'Oct 4, 2026', or 'Sept. 4 2026', as YYYY-MM-DD, or None.
-    """
-    plain = re.sub(r"^Sept", "Sep", text.replace(".", "").replace(",", ""))
-    for form in ("%B %d %Y", "%b %d %Y"):
-        try:
-            return datetime.strptime(plain, form).strftime("%Y-%m-%d")
-        except ValueError:
-            pass
-    return None
-
-
 def parse_game(tail, sport):
     """
     Parse a game event tail such as '26SEP20CARATL' or '26SEP291400PHIATL' into (date, first team, second team), the
@@ -517,11 +504,7 @@ def deadline(rules):
     """
     found = DEADLINE.search(rules or "")
     day = written_date(found.group(1)) if found else None
-    if not day:
-        return None
-    hour, minute, half = found.group(2, 3, 4)
-    midnight = hour is not None and int(hour) == 12 and int(minute) == 0 and half.lower() == "am"
-    return shift(f"{day}T00:00:00+00:00", days=-1)[:10] if midnight else day
+    return last_day(day, *found.group(2, 3, 4)) if day else None
 
 
 def classify_crypto(row, series, base):
