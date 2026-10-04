@@ -91,6 +91,6 @@ def test_leader_and_race_pairs_carry_their_notes_and_a_kind_settled_alike_none()
                             bet("kalshi", "kt", **total), bet("polymarket_us", "ust", **total)], "nfl")
     by_kind = {p.kind: p for p in pairs}
     assert by_kind["passing_yards_leader"].flags == [notes.LEADER_NOTE]
-    assert by_kind["senate_race"].flags == [notes.RACE_NOTE]
+    assert by_kind["senate_race"].flags == [notes.ELECTION_NOTE]
     assert by_kind["season_receiving_yards"].flags == []
     assert by_kind["senate_race"].label == "nfl senate_race 2027 GA D"

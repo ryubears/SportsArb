@@ -196,6 +196,14 @@ class Scanner:
         elif episode is not None:
             self.close(pair_id, now)
 
+    def reprice(self, pair_id):
+        """
+        A recheck come due: price the pair again if its episode is still open.
+        """
+        self.rechecks.pop(pair_id, None)
+        if pair_id in self.episodes:
+            self.update(pair_id, self.books(), now_iso())
+
     def recheck(self, pair_id, seconds):
         """
         Price a pair again in seconds, when a desk waits that long for a
@@ -216,14 +224,6 @@ class Scanner:
                 return
             timer.cancel()
         self.rechecks[pair_id] = loop.call_at(due, self.reprice, pair_id)
-
-    def reprice(self, pair_id):
-        """
-        A recheck come due: price the pair again if its episode is still open.
-        """
-        self.rechecks.pop(pair_id, None)
-        if pair_id in self.episodes:
-            self.update(pair_id, self.books(), now_iso())
 
     def on_book(self, venue, contract_id, books, now):
         """

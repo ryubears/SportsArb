@@ -121,4 +121,3 @@ def test_a_trade_named_is_worked_out_again_though_no_order_was_misread(conn):
     t = stored(conn, 4)
     assert (t["yes_held"], t["no_held"], t["hedge_pnl"]) == (1, 2, pytest.approx(0.49 - 0.5))
     assert t["hedge"].endswith("; worked out again from its orders")
-

@@ -14,6 +14,7 @@ Run with:
 import argparse
 from collections import Counter, defaultdict
 from catalog import notes
+from common.sports import MATCH_SPORTS
 from common.timeutil import days_between, now_iso
 from db import database
 from db.models import Bet, Pair
@@ -24,7 +25,7 @@ IDENTITY = ("kind", "season", "game_date", "team_a", "team_b", "subject", "line"
 CLOSE_GAP_LIMIT_DAYS = 60
 # Sports whose venues may date one match a day apart: Kalshi and Polymarket US date a tennis match in Asia by different
 # clocks, 'Lu vs Li' October 3 on one and October 2 on the other. The same two sides on dates this close are one match.
-NEAR_DATE_SPORTS = {"tennis", "darts", "ufc"}
+NEAR_DATE_SPORTS = MATCH_SPORTS
 NEAR_DATE_DAYS = 1
 
 

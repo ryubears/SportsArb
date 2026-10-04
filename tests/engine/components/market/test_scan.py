@@ -283,6 +283,7 @@ def test_a_pair_a_desk_waits_on_is_priced_again_once_the_wait_ends(tmp_path):
     conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket_us", "pm")], future=True)
     latest = {("kalshi", "k"): book("kalshi", "k", T0, 0.53, 0.54), ("polymarket_us", "pm"): book("polymarket_us", "pm", T0, 0.40, 0.41)}
     offered = []
+    s = scan.Scanner(conn, ("nfl",), lambda m: None, books=lambda: latest)
 
     def desk(pair, yes, no, edge, size, fee_infos, now):
         offered.append(now)
@@ -297,7 +298,7 @@ def test_a_pair_a_desk_waits_on_is_priced_again_once_the_wait_ends(tmp_path):
         assert len(s.rechecks) == 1
         await asyncio.sleep(0.2)                    # No book changes, and the tick is a second away.
 
-    s = scan.Scanner(conn, ("nfl",), lambda m: None, on_signals=[desk], books=lambda: latest)
+    s.on_signals.append(desk)
     asyncio.run(scenario())
     assert len(offered) == 2 and offered[1] > T0 and s.rechecks == {}
 

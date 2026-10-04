@@ -22,6 +22,11 @@ def test_utc_minute_reads_seconds_since_1970_to_the_minute():
     assert timeutil.utc_minute(timeutil.epoch("2026-10-21T14:13:59Z")) == "2026-10-21 14:13 UTC"
 
 
+def test_at_seconds_is_the_iso_time_epoch_reads_back():
+    assert timeutil.at_seconds(1790000000.25) == "2026-09-21T14:13:20.250000+00:00"
+    assert timeutil.epoch(timeutil.at_seconds(1790000000.25)) == 1790000000.25
+
+
 def test_shift_moves_forward_by_hours_and_days():
     t = "2026-09-20T17:00:00+00:00"
     assert timeutil.shift(t, hours=4) == "2026-09-20T21:00:00+00:00"
@@ -39,6 +44,20 @@ def test_eastern_date_rolls_late_utc_games_back_a_day():
     # A Thursday night game at 8:15 PM Eastern is already Friday in UTC.
     assert timeutil.eastern_date("2026-10-23T00:15:00+00:00") == "2026-10-22"
     assert timeutil.eastern_date("2026-09-20T17:00:00+00:00") == "2026-09-20"
+
+
+def test_written_date_reads_the_month_in_full_or_short():
+    assert timeutil.written_date("October 4, 2026") == timeutil.written_date("Oct 4, 2026") == "2026-10-04"
+    assert timeutil.written_date("September 4, 2026") == timeutil.written_date("Sept. 4 2026") == "2026-09-04"
+    assert timeutil.written_date("Noon 4, 2026") is None
+
+
+def test_last_day_of_a_deadline_at_midnight_is_the_day_before():
+    assert timeutil.last_day("2026-09-01", "12", "00", "AM") == "2026-08-31"       # 'before Sep 1, 2026 at 12:00 AM ET'.
+    assert timeutil.last_day("2027-01-01", "12", "00", "am") == "2026-12-31"
+    assert timeutil.last_day("2026-12-31", "11", "59", "PM") == "2026-12-31"
+    assert timeutil.last_day("2026-12-31", "12", "00", "PM") == "2026-12-31"       # Noon leaves the afternoon.
+    assert timeutil.last_day("2026-12-31") == "2026-12-31"                         # 'by Dec 31, 2026', no time given.
 
 
 def test_season_from_date_splits_in_august():

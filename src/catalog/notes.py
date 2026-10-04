@@ -7,6 +7,8 @@ match.py adds a pair's notes to its flags, see for_pair(). A note is a
 warning to read, not a bar: a pair trades whatever its notes say.
 """
 
+from common.sports import SOCCER
+
 # GAMES, by sport and kind, from both venues' rules text. Football, baseball, hockey, and basketball as of 2026-09.
 FOOTBALL_POSTPONED = ("If the game does not start within 48 hours, Kalshi settles at a fair price. Polymarket US waits up to two weeks "
                       "for a rescheduled game.")
@@ -43,23 +45,23 @@ MATCH_NOTES = {
     "darts": {"match_winner": "A match not played, or a walkover, settles at a fair price on Kalshi and at 50 cents on Polymarket "
                               "US, which also pays 50 cents if the match moves more than two days."},
 }
-RACE_NOTE = ("A driver who retires or is not classified loses on both venues. Kalshi pays on the FIA's final classification and "
-             "settles at a fair price if the race does not start within 48 hours; Polymarket US waits up to two weeks for it.")
+RACING_NOTE = ("A driver who retires or is not classified loses on both venues. Kalshi pays on the FIA's final classification and "
+               "settles at a fair price if the race does not start within 48 hours; Polymarket US waits up to two weeks for it.")
 # Bitcoin, as of 2026-10: both settle on CF Benchmarks' Bitcoin Real-Time Index, but read it apart.
+CROSSING_NOTE = ("Kalshi pays on the index itself crossing the price, Polymarket US on a 60 second trimmed mean of it, without the "
+                 "top and bottom fifth, crossing it, so a brief spike can settle them apart.")
 CRYPTO_NOTES = {
     "updown_15m": "Both venues compare the simple averages of the index's last 60 seconds before the window's end and its start, "
                   "rounded to the cent, Up on equal.",
-    "hit_before": "Kalshi pays on the index itself crossing the price, Polymarket US on a 60 second trimmed mean of it, without the "
-                  "top and bottom fifth, crossing it, so a brief spike can settle them apart.",
-    "dip_before": "Kalshi pays on the index itself crossing the price, Polymarket US on a 60 second trimmed mean of it, without the "
-                  "top and bottom fifth, crossing it, so a brief spike can settle them apart.",
+    "hit_before": CROSSING_NOTE,
+    "dip_before": CROSSING_NOTE,
     "year_end_range": "Kalshi reads the simple average of the index's last 60 seconds of 2026, Polymarket US a trimmed mean of "
                       "them, without the top and bottom fifth.",
 }
 KIND_NOTES = {"nfl": FOOTBALL_NOTES, "ncaaf": FOOTBALL_NOTES, "mlb": BASEBALL_NOTES, "nhl": HOCKEY_NOTES, "nba": BASKETBALL_NOTES,
               "wnba": BASKETBALL_NOTES, "ncaab": BASKETBALL_NOTES,
-              **{league: SOCCER_NOTES for league in ("epl", "laliga", "seriea", "bundesliga", "ligue1", "ligamx", "mls", "ucl", "uel")},
-              **MATCH_NOTES, "f1": {"race_winner": RACE_NOTE, "race_constructor": RACE_NOTE}, "nascar": {"race_winner": RACE_NOTE},
+              **{league: SOCCER_NOTES for league in SOCCER},
+              **MATCH_NOTES, "f1": {"race_winner": RACING_NOTE, "race_constructor": RACING_NOTE}, "nascar": {"race_winner": RACING_NOTE},
               "crypto": CRYPTO_NOTES}
 FOOTBALL_PLAYER_NOTE = ("Both venues settle to the pre-game fair price if the player never takes a snap and count overtime. Polymarket US "
                         "ignores stat corrections made after the game.")
@@ -82,13 +84,13 @@ PLAYER_NOTES = {
 # Awards, in every sport. Both venues follow the official award, and season win totals count the regular season only on both.
 AWARD_NOTE = ("Polymarket US pays $1 divided among players who share the award. Kalshi's rules say the same for some awards and "
               "nothing for others.")
-LEADER_NOTE = ("Polymarket US pays $1 divided among those who tie for the lead. Kalshi's rules leave a tie unsaid.")
-TEAM_TIE_NOTE = ("Polymarket US pays $1 divided among teams that tie for it. Kalshi's rules leave a tie unsaid.")
+LEADER_NOTE = "Polymarket US pays $1 divided among those who tie for the lead. Kalshi's rules leave a tie unsaid."
+TEAM_TIE_NOTE = "Polymarket US pays $1 divided among teams that tie for it. Kalshi's rules leave a tie unsaid."
 UFC_NOTE = ("Kalshi reads the title holder at noon Eastern on December 31, Polymarket US at 11:59 PM, so a title fight that night "
             "settles them apart. Polymarket US counts only an undisputed champion, not an interim one.")
 RANKING_NOTE = "Kalshi reads the ranking at noon Eastern on December 31, Polymarket US at 11:59 PM."
-RACE_NOTE = ("Kalshi pays on the party of whoever is sworn in or inaugurated, in January, Polymarket US on the party's nominee "
-             "winning the election, runoffs included. They part if the winner leaves or changes party before taking office.")
+ELECTION_NOTE = ("Kalshi pays on the party of whoever is sworn in or inaugurated, in January, Polymarket US on the party's nominee "
+                 "winning the election, runoffs included. They part if the winner leaves or changes party before taking office.")
 CONTROL_NOTE = ("Both venues pay on the party that wins the chamber, by its seats and the tie breaks each lists, but Kalshi's "
                 "market runs to February 1.")
 DIVISIONS = ("flyweight", "bantamweight", "featherweight", "lightweight", "welterweight", "middleweight", "light_heavyweight", "heavyweight")
@@ -108,7 +110,7 @@ FUTURE_NOTES = {
     **{kind: TEAM_TIE_NOTE for kind in ("best_record", "worst_record", "last_undefeated", "last_winless")},
     **{f"{division}_champion": UFC_NOTE for division in DIVISIONS},
     "atp_year_end_no1": RANKING_NOTE, "wta_year_end_no1": RANKING_NOTE,
-    "senate_race": RACE_NOTE, "governor_race": RACE_NOTE, "house_race": RACE_NOTE,
+    "senate_race": ELECTION_NOTE, "governor_race": ELECTION_NOTE, "house_race": ELECTION_NOTE,
     "house_control": CONTROL_NOTE, "senate_control": CONTROL_NOTE,
 }
 

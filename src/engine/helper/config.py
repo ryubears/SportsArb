@@ -12,6 +12,8 @@ Override one for a run with --set, for example:
     python3 -m engine.run --sport nfl --set min_edge=0.03 --set min_annual_pct=20
 """
 
+from common import sports
+
 # TRADING, trading/executor.py
 
 MIN_EDGE = 0.02             # Net dollars per contract at the top before orders are sent, and the floor for the deeper levels they sweep.
@@ -87,7 +89,7 @@ GAME_HOURS = {              # How long a game is expected to last, kickoff to fi
     "nba": 3.0,             # hockey playoff games ended by 3.17, of 96 basketball ones by 2.87. A game's bets are taken to pay
                             # SETTLE_HOURS after it. The rest are allowances, not yet measured: a basketball game's, a soccer
     "wnba": 2.75, "ncaab": 2.75,     # match's 90 minutes with half time and stoppage time, a tennis match's best of three or five
-    **{league: 2.0 for league in ("epl", "laliga", "seriea", "bundesliga", "ligue1", "ligamx", "mls", "ucl", "uel")},   # sets, a
+    **{league: 2.0 for league in sports.SOCCER},   # sets, a
     "tennis": 3.0, "ufc": 1.0, "darts": 1.5,     # UFC fight's walk out and five rounds with the card running late, a race's,
     "f1": 2.0, "nascar": 4.0, "crypto": 0.25,   # and a Bitcoin window's 15 minutes. Politics has no game, but every sport
     "politics": 0.0,                            # needs a length.

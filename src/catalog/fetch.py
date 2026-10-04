@@ -1,6 +1,7 @@
 """
-Fetch the open markets of each sport, of elections, and of Bitcoin from both venues into SQLite: the games, matches,
-races, and 15 minute windows paper trades, and the futures live trades.
+Fetch the open markets of each sport, of elections, and of Bitcoin from
+both venues into SQLite: the games, matches, races, and 15 minute windows
+paper trades, and the futures live trades.
 
 Run with:
     python3 -m catalog.fetch --sport nfl
@@ -11,8 +12,8 @@ import argparse
 import time
 from api import kalshi, polymarket_us
 from catalog.classify.kalshi import (CONFERENCES, CONTROL_SERIES, CRYPTO_SERIES, GAME_SERIES, HOUSE_RACE_SERIES, MATCH_SERIES,
-                                    NFL_DIVISIONS, NHL_DIVISIONS, PLAYER_SERIES, RACING_SERIES, SERIES_PATTERNS, SOCCER_SERIES, TITLE_FUTURES)
-from catalog.classify.kalshi import SOCCER_LEAGUES as SOCCER_CODES
+                                    NFL_DIVISIONS, NHL_DIVISIONS, PLAYER_SERIES, RACING_SERIES, SERIES_PATTERNS, SOCCER_LEAGUES, SOCCER_SERIES,
+                                    TITLE_FUTURES)
 from common.timeutil import now_iso
 from common.venues import VENUES
 from db import database
@@ -23,11 +24,13 @@ FETCHERS = {"kalshi": kalshi.contracts, "polymarket_us": polymarket_us.contracts
 # thousands of series, so only the ones the Kalshi classifier reads are fetched, by ticker, or for elections, which have
 # a series per state, by the shapes it reads. Each sport's futures are listed here, and its games' series added from the
 # classifier's tables by their prefix, GAME_PREFIXES. Polymarket US is fetched by tag.
-# Adding a sport means adding it here, to polymarket_us.EVENT_PREFIX, config.GAME_HOURS, an alias file in
-# classify/aliases/, empty when it names only people, and its Kalshi series to the Kalshi classifier.
-# tests/catalog/test_sports.py fails until the tables agree.
-SOCCER_LEAGUES = {"epl": ("EPL", "PREMIERLEAGUE", "epl"), "laliga": ("LALIGA", "LALIGA", "lal"), "seriea": ("SERIEA", "SERIEA", "sea"),
-                  "bundesliga": ("BUNDESLIGA", "BUNDESLIGA", "bun"), "ligue1": ("LIGUE1", "LIGUE1", "lg1")}
+# Adding a sport means adding it here, to polymarket_us.EVENT_PREFIX, to its group in common/sports.py when it has one,
+# to config.GAME_HOURS, an alias file in classify/aliases/, empty when it names only people, and its Kalshi series to the
+# Kalshi classifier. tests/catalog/test_sports.py fails until the tables agree.
+# Europe's five big leagues, whose futures Kalshi lists alike: the league's code in their series, its champion's series,
+# and its Polymarket US tag.
+BIG_FIVE = {"epl": ("EPL", "PREMIERLEAGUE", "epl"), "laliga": ("LALIGA", "LALIGA", "lal"), "seriea": ("SERIEA", "SERIEA", "sea"),
+            "bundesliga": ("BUNDESLIGA", "BUNDESLIGA", "bun"), "ligue1": ("LIGUE1", "LIGUE1", "lg1")}
 SPORTS = {
     "nfl": {
         "kalshi": {
@@ -72,7 +75,7 @@ SPORTS = {
     **{sport: {"kalshi": {"tickers": [f"KX{champion}", *(f"KX{short}{s}" for s in ("TOP", "RELEGATION", "LAST", "LEADER"))]
                           + (["KXEPLTEAMPOINTS"] if sport == "epl" else [])},
                "polymarket_us": {"tags": [tag]}}
-       for sport, (short, champion, tag) in SOCCER_LEAGUES.items()},
+       for sport, (short, champion, tag) in BIG_FIVE.items()},
     "ligamx": {"kalshi": {"tickers": ["KXLIGAMX"]}, "polymarket_us": {"tags": ["lmx"]}},
     "mls": {"kalshi": {"tickers": ["KXMLSCUP", "KXMLSEAST", "KXMLSWEST"]}, "polymarket_us": {"tags": ["mls"]}},
     "ucl": {
@@ -93,7 +96,7 @@ SPORTS = {
 }
 # Each sport's Kalshi series on one game, match, race, or window, by the prefix of their tickers.
 GAME_PREFIXES = {"nfl": ("KXNFL",), "ncaaf": ("KXNCAAF",), "mlb": ("KXMLB",), "nhl": ("KXNHL",), "nba": ("KXNBA",), "wnba": ("KXWNBA",),
-                 "ncaab": ("KXNCAAMB",), **{sport: (f"KX{code}",) for sport, code in SOCCER_CODES.items()},
+                 "ncaab": ("KXNCAAMB",), **{sport: (f"KX{code}",) for sport, code in SOCCER_LEAGUES.items()},
                  "tennis": ("KXATP", "KXWTA"), "ufc": ("KXUFC",), "darts": ("KXDARTS",), "f1": ("KXF1",), "nascar": ("KXNASCAR",),
                  "crypto": ("KXBTC",)}
 EVENT_SERIES = {*GAME_SERIES, *PLAYER_SERIES, *SOCCER_SERIES, *MATCH_SERIES, *RACING_SERIES, *CRYPTO_SERIES}

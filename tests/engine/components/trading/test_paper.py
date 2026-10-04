@@ -7,7 +7,7 @@ import dataclasses
 import random
 import types
 import pytest
-from common.timeutil import epoch
+from common.timeutil import at_seconds, epoch
 from common.venues import VENUES
 from db import database
 from db.models import Book
@@ -16,7 +16,7 @@ from engine.components.market.tape import Tapes
 from engine.components.money import settle
 from engine.components.money.paper import PaperBalances
 from engine.components.trading.executor import Executor
-from engine.components.trading.paper import PaperExecutor, at_seconds
+from engine.components.trading.paper import PaperExecutor
 from engine.helper import config
 from trade_setup import CLOSE, FEES, KICKOFF, NO, NO_K_FEES, NO_PM_FEES, NOW, PAIR, PAYS_AT, YES, books, stored
 
@@ -278,6 +278,17 @@ def test_signal_is_refused_for_thin_edges_poor_returns_payouts_within_a_day_and_
     assert ex.tasks == set() and stored(conn) == []
 
 
+def at(ex, pair, yes, no, edge, now, fees=FEES):
+    """
+    Send one signal at now inside a loop and wait for its trade.
+    """
+    async def scenario():
+        sent = ex.signal(pair, yes, no, edge, 100, fees, now)
+        await asyncio.gather(*ex.tasks)
+        return sent
+    return asyncio.run(scenario())
+
+
 def test_paper_trades_bets_paying_within_a_day_in_play_too_and_nothing_further_out(tmp_path, quick, monkeypatch):
     # Paper trades the bets on one event, a game here, before and while it is played, once it pays within 24 hours.
     monkeypatch.setattr(config, "PAPER_MAX_PAYOUT_HOURS", 24)
@@ -288,17 +299,6 @@ def test_paper_trades_bets_paying_within_a_day_in_play_too_and_nothing_further_o
     assert at(ex, PAIR, YES, NO, 0.50, "2026-09-21T21:00:00+00:00") is True           # Pays out in under 24 hours.
     _, _, ex = executor(tmp_path / "under way", books())
     assert at(ex, PAIR, YES, NO, 0.50, "2026-09-22T17:30:00+00:00") is True           # Under way.
-
-
-def at(ex, pair, yes, no, edge, now, fees=FEES):
-    """
-    Send one signal at now inside a loop and wait for its trade.
-    """
-    async def scenario():
-        sent = ex.signal(pair, yes, no, edge, 100, fees, now)
-        await asyncio.gather(*ex.tasks)
-        return sent
-    return asyncio.run(scenario())
 
 
 def test_edges_before_kickoff_and_on_futures_that_pay_enough_are_traded(tmp_path, quick):
@@ -511,7 +511,6 @@ def test_no_trade_opens_and_no_sale_goes_out_on_a_venue_that_is_not_trading(tmp_
     ex.is_maintenance = in_maintenance()
     asyncio.run(ex.retry(NOW))
     assert stored(conn)[0]["yes_held"] == 0 and ex.exposed == {}
-
 
 
 # TIMED AS LIVE ORDERS ARE, against the books the recorder tapes

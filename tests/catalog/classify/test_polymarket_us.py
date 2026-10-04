@@ -176,5 +176,3 @@ def test_a_top_two_state_pairs_only_candidates():
     alaska = election("usgub-ak-2026-11-03", "usgubewc-usgub-ak-2026-11-03-clibis", "Click Bishop")
     assert (alaska.kind, alaska.subject) == ("governor_race", "AK click bishop")
     assert election("usse-xx-2026-11-03", "ewc-usse-xx-2026-11-03-dem") is None             # No such state.
-
-

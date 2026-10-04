@@ -6,8 +6,8 @@ limit order per leg. Each leg's limit is the deepest level that still
 leaves config.MIN_EDGE when both ladders are walked together, so the order
 sweeps every level above the floor, not just the top one. How an order
 reaches its venue and what comes back is the one thing that differs:
-paper.py fills it against the in memory books after a simulated latency,
-live.py sends it to the venue. Everything else is here.
+paper.py fills it against the book the venue had when a live order would
+have reached it, live.py sends it to the venue. Everything else is here.
 
 An edge is taken only while each leg's book is current. Polymarket US
 books reach us some 85 ms after the venue changes them, Kalshi's in 12, so
@@ -39,34 +39,33 @@ from the trades table when the process starts, so a restart does not
 leave a trade exposed. The settler leaves alone a trade while an order to
 flatten it is in flight.
 
-Live trades a pair before its game or on a season's future, never once
-its game has kicked off, while its edge is config.MIN_EDGE or more, the bet
+Live trades a pair before its game or on a season's future, never once its
+game has kicked off, while its edge is config.MIN_EDGE or more, the bet
 pays out config.MIN_PAYOUT_HOURS or more away, and the edge returns
-config.MIN_ANNUAL_PCT a year or more until then. Near a game and during
-it, faster traders take an edge before our Polymarket US leg lands. Paper
+config.MIN_ANNUAL_PCT a year or more until then. Near a game and during it,
+faster traders take an edge before our Polymarket US leg lands. Paper
 trades games in play too, and only those paying out within
-config.PAPER_MAX_PAYOUT_HOURS, see paper.py. Both
-venues must be trading, outside the weekly maintenance each publishes, see
-common/venues.py: while one has stopped, its feed may still show prices no
-order can trade at.
-A trade asks for config.FILL_SHARE of what the books show at that edge,
-the share we expect to get, as far as the cash free on each venue pays
-for, live as on paper. Every trade is stored in the trades table as soon
-as it is sent and updated when it is done, and every dollar moved goes
-through the cash the executor was given. Settling what was bought is
+config.PAPER_MAX_PAYOUT_HOURS, see paper.py. Both venues must be trading,
+outside the weekly maintenance each publishes, see common/venues.py: while
+one has stopped, its feed may still show prices no order can trade at. A
+trade asks for config.FILL_SHARE of what the books show at that edge, the
+share we expect to get, as far as the cash free on each venue pays for,
+live as on paper. Every trade is stored in the trades table as soon as it
+is sent and updated when it is done, and every dollar moved goes through
+the cash the executor was given. Settling what was bought is
 money/settle.py's job.
 """
 
 import asyncio
 import dataclasses
 from dataclasses import dataclass
+from api.orders import exact
 from common.log import on_failure
 from common.timeutil import epoch, hours_between, now_iso
 from common.venues import is_maintenance
 from db import database
 from db.models import Ledger, Leg, Trade
 from engine.helper import config, game
-from api.orders import exact
 from engine.helper.pricing import annual_pct, depth, fresh, ladder, reach, sell_ladder, sweep, trade_words
 
 
@@ -458,9 +457,10 @@ class Executor:
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """
         Called by the scanner when a pair shows an edge. Sends the two legs
-        when the edge, the game not having started, the time until the bet
-        pays, its return a year, and the balances allow. Returns True when
-        orders were sent, so the scanner sends no more for this episode. The
+        when the edge, the game not having started, unless this executor
+        trades in play, the time until the bet pays, its return a year, both
+        venues trading, and the balances allow. Returns True when orders
+        were sent, so the scanner sends no more for this episode. The
         scanner's size counts every level with a positive edge, while the
         legs are sized from the levels that keep config.MIN_EDGE, see
         quantity_for(). The cost is reserved here, before anything is

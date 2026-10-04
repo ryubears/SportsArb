@@ -23,11 +23,11 @@ Live trading halts, with every order stopped, when:
   such order only sets its own trade aside, see live.py, and the halt names
   every one in the window, since none of them is emailed on its own.
 - One venue refused its last config.LIVE_REJECT_LIMIT orders. A refusal is
-  the venue answering that it will not take an order, so nothing traded:
-  an error status in the 400s, such as not authorized, not enough money on
-  Kalshi, a bad price, or too many requests, or Polymarket US rejecting the order,
-  for example because the market has closed. An order it took that found
-  nothing at its price is unfilled, not refused, and so is one that
+  the venue answering that it will not take an order, so nothing traded: an
+  error status in the 400s, such as not authorized, not enough money on
+  Kalshi, a bad price, or too many requests, or Polymarket US rejecting the
+  order, for example because the market has closed. An order it took that
+  found nothing at its price is unfilled, not refused, and so is one that
   Polymarket US turned away for having no liquidity or for being slow. One
   it turned away for lack of cash is unfunded, not refused either: the
   venue works, and the low cash email tells a human, see live.py.

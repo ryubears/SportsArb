@@ -1,14 +1,14 @@
 """
 Kalshi API client.
 
-Three jobs. The query half walks series to events to markets on the
-public API, sports' and elections', turns every open market into a
-Contract, and reads the account's balance. The streaming half opens one websocket with a signed
-API key, subscribes to order book updates, and keeps a live book for each
-ticker restated from the Yes side so it matches Polymarket US's shape.
+Three jobs. The query half walks series to events to markets on the public
+API, sports' and elections', turns every open market into a Contract, and
+reads the account's balance. The streaming half opens one websocket with a
+signed API key, subscribes to order book updates, and keeps a live book for
+each ticker restated from the Yes side so it matches Polymarket US's shape.
 Tickers can be added and removed while the connection runs. The trading
-half sends signed orders for the live executor. This is the only file
-that knows Kalshi's field names and message formats.
+half sends signed orders for the live executor. This is the only file that
+knows Kalshi's field names and message formats.
 """
 
 import asyncio
@@ -390,13 +390,13 @@ def order_body(ticker, action, outcome, quantity, price, client_id):
     """
     An immediate or cancel limit order for quantity contracts of one side of
     a market, to the hundredth Kalshi counts in, at price or better for that
-    side. The order endpoint quotes
-    every order on the yes side, so a no side price p is sent as 1 - p. A
-    sale is not reduce only. Kalshi keeps one position per market, so
-    where one trade's Yes nets against more No held by others, selling it
-    is buying No, which reduce only would cancel unfilled every time: on
-    2026-10-01 that sent one sale 57,000 times in 16 hours. An order that
-    would trade against one of our own is cancelled rather than filled.
+    side. The order endpoint quotes every order on the yes side, so a no
+    side price p is sent as 1 - p. A sale is not reduce only. Kalshi keeps
+    one position per market, so where one trade's Yes nets against more No
+    held by others, selling it is buying No, which reduce only would cancel
+    unfilled every time: on 2026-10-01 that sent one sale 57,000 times in 16
+    hours. An order that would trade against one of our own is cancelled
+    rather than filled.
     """
     yes_price = price if outcome == "yes" else 1 - price
     body = {"ticker": ticker, "client_order_id": client_id, "side": BOOK_SIDES[(action, outcome)], "count": str(orders.size(quantity)),
