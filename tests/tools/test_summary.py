@@ -82,6 +82,11 @@ def test_a_sport_filter_keeps_only_its_pairs_episodes_and_trades(tmp_path, monke
     assert "\nlive trades: 0 in all, 0 in the last 12 hours" in out
 
 
+def test_all_modes_show_paper_then_live(tmp_path, monkeypatch, capsys):
+    out = report(tmp_path, monkeypatch, capsys, lambda conn: None, modes=summary.MODES["all"])
+    assert out.index("\npaper trades: ") < out.index("\npaper open trades: ") < out.index("\nlive trades: ") < out.index("\nlive open trades: ")
+
+
 def test_settled_legs_count_by_when_each_leg_settled(tmp_path, monkeypatch, capsys):
     def fill(conn):
         for yes_at, no_at in ((BEFORE, INSIDE), (BEFORE, BEFORE)):
@@ -111,29 +116,60 @@ def test_live_money_shows_each_venue_read_now_with_the_kalshi_shards(capsys):
         "live money on the venues, read now: kalshi 92.00$ (shard 0 0.00$, shard 3 92.00$), polymarket_us not read (401 unauthorized)"]
 
 
+def open_trades(conn, mode="live", pair_id=1):
+    """
+    Add open trades of the mode on the pair: (held a side, yes cost, no cost, locked in, flattening, signal, pays at).
+    One opened half an hour before NOW settling in December, one opened ten hours before it paying on September 27,
+    already past and waiting on a venue, one opened two days before it paying October 6, one opened ten days before it
+    paying October 4 that lost 2 cents flattening, and one in the window flattened to nothing, which holds nothing.
+    """
+    for held, yes_cost, no_cost, profit, hedge, signal, pays_at in (
+            (5, 2.5, 2.25, 0.25, 0.0, "2026-09-27T23:30:00+00:00", "2026-12-20T00:00:00+00:00"),
+            (5, 2.0, 2.7, 0.30, 0.0, "2026-09-27T14:00:00+00:00", "2026-09-27T20:00:00+00:00"),
+            (5, 2.0, 2.7, 0.30, 0.0, "2026-09-26T00:00:00+00:00", "2026-10-06T00:00:00+00:00"),
+            (5, 3.0, 1.7, 0.30, -0.02, "2026-09-18T00:00:00+00:00", "2026-10-04T20:45:00+00:00"),
+            (0, 0.0, 0.0, 0.0, -0.05, INSIDE, INSIDE)):
+        database.insert_trade(conn, Trade(mode=mode, pair_id=pair_id, trade="t", signal_ts=signal, edge=0.06, quantity=5,
+                                          yes_venue="kalshi", yes_contract="k", yes_polarity="yes", yes_limit=0.5,
+                                          no_venue="polymarket_us", no_contract="p", no_polarity="yes", no_limit=0.45,
+                                          pays_at=pays_at, yes_held=held, no_held=held, yes_cost=yes_cost, no_cost=no_cost,
+                                          profit=profit, hedge_pnl=hedge, status="filled"))
+
+
 def test_open_trades_are_summed_up_with_when_they_opened_and_resolve(tmp_path, monkeypatch, capsys):
-    def fill(conn):
-        # (held a side, yes cost, no cost, locked in, flattening, signal, pays at): one opened half an hour ago settling in
-        # December, one opened two days ago paying on September 27, already past and waiting on a venue, one opened ten
-        # days ago paying October 4 that lost 2 cents flattening, and one flattened to nothing, which holds nothing.
-        for held, yes_cost, no_cost, profit, hedge, signal, pays_at in (
-                (5, 2.5, 2.25, 0.25, 0.0, "2026-09-27T23:30:00+00:00", "2026-12-20T00:00:00+00:00"),
-                (5, 2.0, 2.7, 0.30, 0.0, "2026-09-26T00:00:00+00:00", "2026-09-27T20:00:00+00:00"),
-                (5, 3.0, 1.7, 0.30, -0.02, "2026-09-18T00:00:00+00:00", "2026-10-04T20:45:00+00:00"),
-                (0, 0.0, 0.0, 0.0, -0.05, INSIDE, INSIDE)):
-            database.insert_trade(conn, Trade(mode="live", pair_id=1, trade="t", signal_ts=signal, edge=0.06, quantity=5,
-                                              yes_venue="kalshi", yes_contract="k", yes_polarity="yes", yes_limit=0.5,
-                                              no_venue="polymarket_us", no_contract="p", no_polarity="yes", no_limit=0.45,
-                                              pays_at=pays_at, yes_held=held, no_held=held, yes_cost=yes_cost, no_cost=no_cost,
-                                              profit=profit, hedge_pnl=hedge, status="filled"))
-    out = report(tmp_path, monkeypatch, capsys, fill)
+    out = report(tmp_path, monkeypatch, capsys, open_trades)
     lines = out.split("\nlive open trades: ")[1].splitlines()
-    assert lines[0] == "3 open, 1 opened in the last hour, 1 in the last day, 2 in the last week"
-    # 0.83$ on 14.15$ is 5.9%. A year's rate weighted by capital: 23.1% on 4.75$ over 83 days, 1,271% on 4.70$ over 1.8 days,
-    # and 129% on 4.70$ over 16.9 days.
-    assert lines[1] == "  capital 14.15$, holding kalshi 7.50$, polymarket_us 6.65$, expected to return 0.83$ in profit, 5.9% on it, 472.7% a year"
-    # The average is weighted by capital: a third of it on each date, which comes to October 28.
-    assert lines[2] == "  resolving first 2026-09-27, next 2026-10-04, on average 2026-10-28, last 2026-12-20"
+    # The capital of each window is what its trades still hold.
+    assert lines[0] == "4 open, 1 opened in the last hour using 4.75$, 2 in the last day using 9.45$, 3 in the last week using 14.15$"
+    # 1.13$ on 18.85$ is 6.0%. A year's rate weighted by capital: 23.1% on 4.75$ over 83 days, 9,319% on 4.70$ over
+    # 0.25 days, 233% on 4.70$ over 10 days, and 129% on 4.70$ over 16.9 days.
+    assert lines[1] == "  capital 18.85$, holding kalshi 9.50$, polymarket_us 9.35$, expected to return 1.13$ in profit, 6.0% on it, 2,419.7% a year"
+    # The average is weighted by capital: about a quarter of it on each date, which comes to October 22.
+    assert lines[2] == "  resolving first 2026-09-27, on average 2026-10-22, last 2026-12-20"
+    # Each one opened in the 12 hours of the window, newest first. The one flattened to nothing is not open.
+    assert table(out, "live open trades opened in the last 12 hours, newest first") == [
+        ["1", "nfl", "the", "bet", "2026-09-27", "23:30", "5/5", "4.75", "0.25", "5.3", "23.1", "2026-12-20", "00:00"],
+        ["2", "nfl", "the", "bet", "2026-09-27", "14:00", "5/5", "4.70", "0.30", "6.4", "9,319.1", "2026-09-27", "20:00"]]
+
+
+def test_open_trades_keep_to_the_mode_and_sports(tmp_path, monkeypatch, capsys):
+    def fill(conn):
+        open_trades(conn, "paper", pair_id=1)
+        open_trades(conn, "live", pair_id=2)
+    out = report(tmp_path, monkeypatch, capsys, fill, modes=summary.MODES["all"], sports=("nba",))
+    assert "\npaper open trades: none" in out
+    assert out.split("\nlive open trades: ")[1].startswith("4 open, ")
+    assert [r[:2] for r in table(out, "live open trades opened in the last 12 hours, newest first")] == [["6", "nba"], ["7", "nba"]]
+
+
+def test_open_trades_none_opened_in_the_window_say_so(tmp_path, monkeypatch, capsys):
+    out = report(tmp_path, monkeypatch, capsys, lambda conn: open_trades(conn))
+    assert "  none opened in the last" not in out
+    out = report(tmp_path / "b", monkeypatch, capsys, lambda conn: database.insert_trade(conn, Trade(
+        mode="live", pair_id=1, trade="t", signal_ts=BEFORE, edge=0.06, quantity=5, yes_venue="kalshi", yes_contract="k",
+        yes_polarity="yes", yes_limit=0.5, no_venue="polymarket_us", no_contract="p", no_polarity="yes", no_limit=0.45,
+        pays_at="2026-12-20T00:00:00+00:00", yes_held=5, no_held=5, yes_cost=2.5, no_cost=2.25, profit=0.25, status="filled")))
+    assert out.split("\nlive open trades: ")[1].splitlines()[3] == "  none opened in the last 12 hours"
 
 
 def test_contract_counts_show_to_the_hundredth_without_float_noise():
