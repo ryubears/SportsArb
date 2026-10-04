@@ -613,8 +613,8 @@ within the trading rules, an edge of `MIN_EDGE` or more paying
 `MIN_PAYOUT_HOURS` or more out and `MIN_ANNUAL_PCT` a year or more: what
 they could have taken and locked in at full size, by sport and kind, and
 the largest five. For the paper trades and then the live ones, or one of
-them with `--mode paper` or `--mode live`, it shows the trades by outcome
-and by sport and kind in the window, the legs settled in it by venue, and
+them with `--mode paper` or `--mode live`, it shows the trades by outcome,
+filled, partial, then failed, and by sport and kind in the window, the legs settled in it by venue, and
 the open trades: in a few lines, how many, how many of them opened in the
 last hour, day, and week and the capital those still hold, the capital
 they all hold on each venue and the profit they are expected to return

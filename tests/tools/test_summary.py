@@ -192,3 +192,24 @@ def test_a_long_list_wraps_onto_indented_lines_without_splitting_an_item(capsys)
     assert all(line.startswith("  ") and len(line) <= summary.WIDTH for line in wrapped)
     assert " ".join(line.strip() for line in wrapped) == ", ".join(sports)
     assert lines[-1] == "  none"
+
+
+def test_outcomes_show_filled_then_partial_then_failed(tmp_path, monkeypatch, capsys):
+    def fill(conn):
+        for status, matched in (("failed", 0), ("filled", 5), ("partial", 2)):
+            database.insert_trade(conn, Trade(mode="live", pair_id=1, trade="t", signal_ts=INSIDE, edge=0.06, quantity=5,
+                                              yes_venue="kalshi", yes_contract="k", yes_polarity="yes", yes_limit=0.5,
+                                              no_venue="polymarket_us", no_contract="p", no_polarity="yes", no_limit=0.45,
+                                              pays_at="2026-12-20T00:00:00+00:00", yes_held=matched, no_held=matched, matched=matched,
+                                              status=status))
+    out = report(tmp_path, monkeypatch, capsys, fill)
+    assert [r[0] for r in table(out, "live by outcome, last 12 hours")] == ["filled", "partial", "failed"]
+    assert sorted(["sent", "unfilled", "partial", "error", "filled", "new"], key=summary.by_status) == [
+        "filled", "partial", "unfilled", "error", "sent", "new"]
+
+
+def test_feed_drops_follow_the_pairs_after_a_blank_line(tmp_path, monkeypatch, capsys):
+    report(tmp_path, monkeypatch, capsys, lambda conn: None)
+    summary.print_gaps(database.read_only(tmp_path / "t.sqlite"), SINCE, 12)
+    out = capsys.readouterr().out
+    assert out == "\nfeed drops, last 12 hours\n  none\n"

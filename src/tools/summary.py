@@ -43,6 +43,9 @@ from engine.helper import config
 MODES = {"live": ("live",), "paper": ("paper",), "all": ("paper", "live")}     # What --mode shows, in order.
 OPENED_HOURS = {"hour": 1, "day": 24, "week": 24 * 7}     # The windows the open trades are counted as opened in.
 WIDTH = 100         # The longest line a list of items wraps at.
+# The order trade and order statuses are shown in, best first: a trade is filled, partial, or failed, and an order
+# filled, partial, or one of the ways it took nothing. One not listed comes last.
+STATUSES = ("filled", "partial", "failed", "unfilled", "unfunded", "rejected", "error", "sent")
 
 
 def query_rows(conn, sql, params=()):
@@ -106,6 +109,13 @@ def print_listed(title, items):
     print(line)
 
 
+def by_status(status):
+    """
+    Where a status sorts in STATUSES, for sorting rows by it.
+    """
+    return STATUSES.index(status) if status in STATUSES else len(STATUSES)
+
+
 def in_sports(sports, column="p.sport"):
     """
     A SQL condition keeping the sports, and its parameters, or nothing when every sport is kept.
@@ -142,7 +152,7 @@ def print_gaps(conn, since, hours):
     gaps = query_rows(conn, """
         SELECT venue, COUNT(*), COALESCE(SUM((julianday(end_ts) - julianday(start_ts)) * 86400), 0), SUM(end_ts IS NULL)
         FROM gaps WHERE start_ts >= ? GROUP BY venue ORDER BY venue""", (since,))
-    print_listed(f"feed drops, last {hours} hours",
+    print_listed(f"\nfeed drops, last {hours} hours",
                  [f"{v} {n} ({secs:.0f}s down{f', {open_} without an end' if open_ else ''})" for v, n, secs, open_ in gaps])
 
 
@@ -213,8 +223,9 @@ def print_mode_trades(conn, since, hours, mode, sports, now):
     if recent:
         body = query_rows(conn, f"""
             SELECT status, COUNT(*), SUM(quantity), SUM(matched), ROUND(SUM(profit), 2), ROUND(SUM(hedge_pnl), 2), ROUND(SUM(profit + hedge_pnl), 2)
-            FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ? AND signal_ts >= ?{where} GROUP BY status ORDER BY status""",
+            FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ? AND signal_ts >= ?{where} GROUP BY status""",
             (mode, since) + params)
+        body.sort(key=lambda r: by_status(r[0]))
         print_table(f"{mode} by outcome, last {hours} hours", ("status", "trades", "wanted", "matched", "locked in $", "hedges $", "net $"),
                     [(s, n, contracts(q), contracts(m), *rest) for s, n, q, m, *rest in body])
         body = query_rows(conn, f"""
@@ -318,7 +329,8 @@ def print_live_orders(conn, since, hours, sports):
     body = query_rows(conn, f"""
         SELECT o.venue, purpose, o.status, COUNT(*), SUM(o.quantity), SUM(filled), ROUND(SUM(dollars), 2), ROUND(SUM(fees), 2), ROUND(AVG(latency_ms))
         FROM orders o JOIN trades t ON t.id = o.trade_id JOIN pairs p ON p.id = t.pair_id WHERE sent_at >= ?{where}
-        GROUP BY o.venue, purpose, o.status ORDER BY o.venue, purpose, o.status""", (since,) + params)
+        GROUP BY o.venue, purpose, o.status""", (since,) + params)
+    body.sort(key=lambda r: (r[0], r[1], by_status(r[2])))
     if body:
         print_table(f"live orders, last {hours} hours", ("venue", "purpose", "status", "orders", "asked", "filled", "dollars $", "fees $", "avg ms"),
                     [(v, p, s, n, contracts(q), contracts(f), *rest) for v, p, s, n, q, f, *rest in body])
