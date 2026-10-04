@@ -220,8 +220,14 @@ class LiveExecutor(Executor):
         self.brakes.check_results()
 
     async def retry(self, now):
-        await super().retry(now)
-        self.brakes.check_results()
+        """
+        Retry the exposed trades, and check the results only when a sale changed one. The retry runs every tick while
+        a trade is exposed, and a check every tick held up the orders queued behind it, see brakes.check_results().
+        """
+        sold = await super().retry(now)
+        if sold:
+            self.brakes.check_results()
+        return sold
 
     def settled(self, trade_id):
         super().settled(trade_id)

@@ -21,8 +21,8 @@ trades futures only, where an edge lasts long enough for our orders to
 reach it, not games, where faster traders take the edges first. By default
 the orders are paper. With `--execute live` or `--execute both` it sends
 real ones. The service on the instance trades the NFL, college football,
-MLB, NHL, and NBA live and on paper, and every other sport and the
-elections on paper only, until they show what they can do.
+MLB, NHL, and NBA live, and every other sport and the elections on paper
+only, until they show what they can do.
 
 ## How it works
 
@@ -158,10 +158,11 @@ checks before it trades, below.
    future or its game has not kicked off (`before_kickoff`), the bet pays
    out `MIN_PAYOUT_HOURS` or more away and the edge returns
    `MIN_ANNUAL_PCT` a year or more until then (`pays_enough`), and a
-   Polymarket US leg's book is current (`confirmed`): newer than the Kalshi
-   leg's last change, by the venues' own clocks, or else that change is
-   `CONFIRM_SECONDS` old. Otherwise the edge waits, and the scanner offers
-   it again at the next change or tick. `quantity_for` walks both ladders
+   Polymarket US leg's book is current (`confirm_wait`): newer than the
+   Kalshi leg's last change, by the venues' own clocks, or else that change
+   is `CONFIRM_SECONDS` old. Otherwise the edge waits, and the scanner
+   offers it again at the next change, or the moment the wait ends
+   (`recheck`), not at the next tick up to a second later. `quantity_for` walks both ladders
    together through the levels that keep that edge and sets each leg's
    limit at the deepest one. It then asks for `FILL_SHARE` of what those
    levels show, but no more than the cash each venue can spend, on Kalshi
@@ -387,8 +388,11 @@ venue connections, the scanner, and a `Desk` for each mode it trades in
 together, and a one-second timer ticks it, as [What happens
 when](#what-happens-when) describes. A desk is one mode's executor, its
 money, and its settler. `--execute` picks the desks: `paper`, the default,
-`live`, or `both`, which trades the same signals on paper and for real and
-so measures how far the paper fills are from real ones. The same loop
+`live`, or `both`, which runs a desk of each. With both, the paper desk
+trades only the sports given to `--paper-sport`, and nothing new without
+them, while still flattening and settling the trades it holds: on a sport
+both trade, the live desk's real orders take the contracts the paper
+desk's simulated ones look for. The same loop
 starts the hourly catalog refresh in a child process and applies the result
 to the live connections. One run trades every sport given to `--sport`,
 comma separated as in `--sport nfl,ncaaf,mlb,nhl,nba`, or every one with
@@ -396,7 +400,8 @@ comma separated as in `--sport nfl,ncaaf,mlb,nhl,nba`, or every one with
 spend the same dollars. A sport given to `--paper-sport` is followed and
 traded on paper only: the live desk is offered no signal on its pairs, so
 a new sport can show what it does before real money goes on it, and
-`--paper-sport all` takes every sport not given to `--sport`. How long a game is expected to last is set for the
+`--paper-sport all` takes every sport not given to `--sport`. Without a
+live desk, paper trades every sport. How long a game is expected to last is set for the
 first five sports in `GAME_HOURS`, which the engine's game timing still
 reads should a game ever be cataloged again. The pieces it wires together are in
 `engine/components/`, in three folders by what they do: `market/` follows
@@ -511,12 +516,13 @@ reached us about 85 ms after it changed them at the median, 160 at the
 90th percentile, and Kalshi's in about 12, so after a score Kalshi's new
 price could sit next to Polymarket US's old one for a moment, an edge
 already gone there. Before a trade the executor compares the venues' own
-times for the two books (`confirmed`). A Polymarket US book newer than
+times for the two books (`confirm_wait`). A Polymarket US book newer than
 the Kalshi book's last change already shows any reaction to it. An older
 one is trusted only once that change is `CONFIRM_SECONDS`, 0.3 seconds,
 old, long enough for a reaction on Polymarket US to have reached us, and
 until then the edge waits for the scanner to offer it again at the next
-change or tick. A Kalshi leg has no such wait, since its feed is fast.
+change, or when the wait ends, when the executor asks the scanner to price
+the pair again. A Kalshi leg has no such wait, since its feed is fast.
 Both venues stop every Thursday for maintenance they publish, Kalshi from
 3 to 5 AM Eastern and Polymarket US from 6 to 8 AM, while a feed may go on
 sending books, so no trade is opened, and no order sent to flatten one,
@@ -553,6 +559,9 @@ more orders of any kind, when the orders themselves fail:
 It halts new trades, but goes on flattening what is exposed, when the
 live trades decided in the last 6 hours lost more than 10% of the live
 money, net. If the orders then fail as above, flattening stops as well.
+That is checked after each trade, each settlement, and each retry that
+sold something, not after a retry that sold nothing, which runs every
+second while a trade is exposed.
 
 A trade is decided once its legs hold the same number of contracts, which
 pay a dollar each whichever way the game goes, or once it settles. Each
@@ -853,6 +862,26 @@ election edge must be some 11 to 14 cents. Two hundred of the new pairs,
 every kind among them, were read against both venues' own wording, and
 each named the same team, person, race, or line on both.
 
+Asking for all of what the books showed made the two desks race for it.
+Both acted on the same signal, and the live desk's real order took the
+thinner leg's whole level, nearly always on Polymarket US, before the paper
+desk's simulated order read the book, which in the first half hour was
+45 to 383 ms after the signal. Paper twins of live trades that filled went
+from failing 19 times in 107 on October 3 to 10 times in 13. So from then
+the paper desk trades only the paper-only sports while live runs.
+
+The same day showed why one live trade in six had gone out some 157 ms
+after its signal while the rest went out within 20. Every second a trade
+stayed exposed, the retry to flatten it ended with the loss check, whose
+query joined the orders to their trades with no index on the trade, so
+SQLite built one over every order each time: some 150 ms with the 116,000
+orders the October 1 bug had left, during which the orders of a trade the
+same tick had decided waited their turn. Deleting those orders brought
+every live order since under 65 ms. The orders table now has that index,
+a retry checks the losses only when it sold something, and an edge waiting
+for a Polymarket US book is priced again the moment the wait ends rather
+than at the next tick.
+
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.
 The paper edge is real. Whether it is reachable is a question of whether
@@ -883,7 +912,7 @@ paper only, as the instance does with `--sport nfl,ncaaf,mlb,nhl,nba
 --paper-sport all --execute both`. `--no-trade`
 scans without trading, `--no-scan` only records, and `--seconds 120` runs a
 short test. `--execute live` trades with real money and `--execute both`
-trades the same signals on paper and for real. The settings a run is tuned
+runs both desks, paper trading only the `--paper-sport` sports. The settings a run is tuned
 by, such as the minimum edge, the annual return, and the starting balance,
 are in `src/engine/helper/config.py`. Those only paper trading reads start
 with `PAPER_`, those only live trading reads with `LIVE_`, and the rest

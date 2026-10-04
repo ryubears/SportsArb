@@ -278,3 +278,11 @@ def test_trades_and_settlements_from_before_live_trading_are_paper(tmp_path):
     conn.commit(); conn.close()
     conn = database.connect(path)
     assert (conn.execute("SELECT mode FROM trades").fetchone()[0], conn.execute("SELECT mode FROM settlements").fetchone()[0]) == ("paper", "paper")
+
+
+def test_orders_are_joined_to_their_trades_through_an_index(tmp_path):
+    conn = database.connect(tmp_path / "t.sqlite")
+    plan = " ".join(r[3] for r in conn.execute(
+        "EXPLAIN QUERY PLAN SELECT t.id, MAX(o.answered_at) FROM trades t LEFT JOIN orders o ON o.trade_id = t.id GROUP BY t.id"))
+    # Without it SQLite built a throwaway index over every order on each join: some 150 ms at 116,000 orders on 2026-10-03.
+    assert "USING INDEX idx_orders_trade" in plan and "AUTOMATIC" not in plan

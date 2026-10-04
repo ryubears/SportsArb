@@ -167,6 +167,10 @@ CREATE TABLE IF NOT EXISTS orders (
     note           TEXT,               -- Why the venue rejected the order, or the error.
     response       TEXT                -- The venue's answer as JSON, for reconciling.
 );
+-- The brakes and the reports join orders to their trades. Without this SQLite built a throwaway index over every order
+-- on each join: on 2026-10-03, with 116,000 orders, the brakes' check took some 150 ms on the instance and held up the
+-- orders queued behind it.
+CREATE INDEX IF NOT EXISTS idx_orders_trade ON orders (trade_id);
 
 -- The paper balances. Live money is read from the venues and has no ledger.
 CREATE TABLE IF NOT EXISTS ledger (

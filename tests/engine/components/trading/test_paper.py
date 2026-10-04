@@ -415,6 +415,17 @@ def test_an_edge_waits_for_the_polymarket_us_book_to_catch_up_with_a_kalshi_move
     assert run(ex) == [True]
 
 
+def test_an_edge_that_waits_asks_to_be_priced_again_when_the_wait_ends(tmp_path, quick):
+    latest = books()
+    moved(latest, "kalshi", 0.1)                            # Kalshi moved a tenth of a second ago, so the wait ends in two tenths.
+    moved(latest, "polymarket_us", 2.0)
+    conn, cash, ex = executor(tmp_path, latest)
+    asked = []
+    ex.recheck = lambda pair_id, seconds: asked.append((pair_id, round(seconds, 3)))
+    assert run(ex) == [False]
+    assert asked == [(PAIR["id"], round(config.CONFIRM_SECONDS["polymarket_us"] - 0.1, 3))]
+
+
 def test_an_edge_trades_once_the_other_venues_move_is_older_than_the_wait_or_when_only_kalshi_is_behind(tmp_path, quick):
     latest = books()
     moved(latest, "kalshi", config.CONFIRM_SECONDS["polymarket_us"] + 0.01)     # Long enough ago that a reaction would have come.

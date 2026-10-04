@@ -16,8 +16,9 @@ an edge that is gone by the time an order arrives. A leg on a venue in
 config.CONFIRM_SECONDS must have a book newer, by the venues' own clocks,
 than the other leg's last change, or wait until that change is old enough
 that any reaction to it would have reached us. The scanner offers the edge
-again at the next change or tick, so one that is real is taken then. Once
-it is taken, both legs' orders go out at once.
+again at the next change, or as soon as the wait ends, through recheck,
+so one that is real is taken then. Once it is taken, both legs' orders go
+out at once.
 
 When the two legs fill unevenly the executor goes flat at once by selling
 the excess back on its own venue, and records the result with fees. A
@@ -122,7 +123,8 @@ class Executor:
                                     # tried again only once that cash has grown, by a payout, a deposit, or a sale.
         self.unsold = {}            # Trade id maps to when, in seconds since 1970, it may be flattened again after a sale that filled nothing.
         self.set_aside = {}         # Trade id maps to why no more orders are sent for it, which only live trading does.
-        self.waiting = set()        # Pairs whose edge waited for a book to catch up since the last summary, see confirmed().
+        self.waiting = set()        # Pairs whose edge waited for a book to catch up since the last summary, see confirm_wait().
+        self.recheck = None         # Called with (pair id, seconds) when an edge waits, to price the pair again once the wait ends.
         self.retrying = None        # The task flattening exposed trades while one runs.
         self.totals = {"trades": 0, "profit": 0.0, "hedge": 0.0}
         self.reload_exposed()
@@ -311,7 +313,9 @@ class Executor:
         whose last sale filled nothing waits config.SALE_RETRY_SECONDS, and
         one whose last sale its venue turned away for lack of cash waits until
         the cash there has grown, rather than sending the same order every tick.
+        Returns whether anything was sold, which is all that changes a result.
         """
+        sold = False
         for trade_id, (trade, legs) in list(self.exposed.items()):
             if trade_id not in self.exposed:
                 continue        # Settled while an earlier trade was being flattened.
@@ -336,6 +340,7 @@ class Executor:
                 self.flattening.discard(trade_id)
             if not note or [leg.held for leg in legs] == held:
                 continue        # Nothing sold, so nothing to record.
+            sold = True
             self.record_holdings(trade, legs)
             left = exact(abs(legs[0].held - legs[1].held))
             trade.hedge += f", then {note} at {now[11:19]}"
@@ -344,6 +349,7 @@ class Executor:
             self.log(f"{self.mode} flattened {trade.label}: {note}, {left:g} still exposed, hedge {trade.hedge_pnl:+.2f}$")
             if not left:
                 self.forget(trade_id)
+        return sold
 
     def summary(self):
         """
@@ -383,25 +389,27 @@ class Executor:
             return False
         return annual_pct(edge, game.days_until(now, pays_at)) >= config.MIN_ANNUAL_PCT
 
-    def confirmed(self, yes, no, now):
+    def confirm_wait(self, yes, no, now):
         """
-        Whether each leg's book is current enough to trade on. A leg on a
-        venue in config.CONFIRM_SECONDS needs a book newer, by the venues'
-        own clocks, than the other leg's last change, or else that change
-        must be at least that many seconds old. A book the venue gave no time
-        for counts from when it reached us.
+        How many seconds until each leg's book is current enough to trade on,
+        0 when it is now, or None when a leg has no book. A leg on a venue in
+        config.CONFIRM_SECONDS needs a book newer, by the venues' own clocks,
+        than the other leg's last change, or else that change must be at
+        least that many seconds old. A book the venue gave no time for counts
+        from when it reached us.
         """
         times = []
         for member in (yes, no):
             book = self.book((member["venue"], member["contract_id"]))
             if book is None:
-                return False
+                return None
             times.append(book.at if book.at is not None else epoch(book.ts))
         (yes_at, no_at), clock = times, epoch(now)
+        wait = 0.0
         for member, own, other in ((yes, yes_at, no_at), (no, no_at, yes_at)):
-            if own < other and clock - other < config.CONFIRM_SECONDS.get(member["venue"], 0):
-                return False
-        return True
+            if own < other:
+                wait = max(wait, other + config.CONFIRM_SECONDS.get(member["venue"], 0) - clock)
+        return wait
 
     def quantity_for(self, legs):
         """
@@ -447,8 +455,11 @@ class Executor:
         pays_at = game.pays_at((yes, no), pair["sport"])
         if not self.pays_enough(edge, now, pays_at):
             return False
-        if not self.confirmed(yes, no, now):
+        wait = self.confirm_wait(yes, no, now)
+        if wait is None or wait > 0:
             self.waiting.add(pair["id"])
+            if wait and self.recheck:
+                self.recheck(pair["id"], wait)
             return False
         legs = [Leg(side, m["venue"], m["contract_id"], m["polarity"], fee_info=fee_infos[(m["venue"], m["contract_id"])])
                 for side, m in (("yes", yes), ("no", no))]

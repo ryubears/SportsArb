@@ -137,7 +137,8 @@ def test_a_session_trading_both_modes_keeps_a_desk_for_each_and_offers_live_the_
     assert s.desks[1].cash.amounts == {"kalshi": 10000.0, "polymarket_us": 10000.0}         # Paper money is its own.
     out = [line[9:] for line in capsys.readouterr().out.splitlines()]                       # Past the timestamp.
     assert out[0].startswith("settings: min edge") and out[1].startswith("LIVE TRADING with real money: trades sized as paper ones")
-    assert out[2] == f"no email settings in {tmp_path / 'email.json'}, alerts are only logged and stored"
+    assert out[2:4] == ["live trades nfl", "paper trades nothing new without --paper-sport, and flattens and settles what it holds"]
+    assert out[4] == f"no email settings in {tmp_path / 'email.json'}, alerts are only logged and stored"
     assert "live balances read: kalshi 800$, polymarket_us 600$" in out
     heads = [line.split(":")[0] for line in out]
     assert {"live", "live settled", "paper", "paper settled"} <= set(heads) and not any(head.endswith("capital") for head in heads)
@@ -160,6 +161,33 @@ def test_a_paper_only_sport_is_offered_to_the_paper_desk_alone(tmp_path, monkeyp
         await s.close()
         return s, offered, results
     s, offered, results = asyncio.run(scenario())
-    assert [(d.mode, d.sports) for d in s.desks] == [("live", ("nfl",)), ("paper", None)]
-    assert offered == [("live", "nfl"), ("paper", "nfl"), ("paper", "epl")] and results == [True, True, False, True]
-    assert "paper only, not traded live: epl" in capsys.readouterr().out
+    # The paper desk leaves the live sports alone, where live's real orders would take what its simulated ones look for.
+    assert [(d.mode, d.sports) for d in s.desks] == [("live", ("nfl",)), ("paper", ("epl",))]
+    assert offered == [("live", "nfl"), ("paper", "epl")] and results == [True, False, False, True]
+    out = capsys.readouterr().out
+    assert "live trades nfl" in out and "paper trades only epl" in out
+
+
+def test_without_a_live_desk_paper_trades_every_sport(tmp_path, monkeypatch, fake_stream):
+    for venue in streams.STREAMS:
+        monkeypatch.setitem(streams.STREAMS, venue, fake_stream)
+    s = run.Session(database.connect(tmp_path / "test.sqlite"), ("nfl", "epl"), executors=run.EXECUTE["paper"], paper_sports=("epl",))
+    assert [(d.mode, d.sports) for d in s.desks] == [("paper", None)]
+
+
+def test_with_a_live_desk_and_no_paper_sports_paper_trades_nothing_new(tmp_path, monkeypatch, capsys, fake_stream):
+    monkeypatch.setattr(money_live, "READERS", {"kalshi": lambda: (800.0, {}), "polymarket_us": lambda: (600.0, {})})
+    monkeypatch.setattr(trading_live, "POSITIONS", {"kalshi": lambda: {}, "polymarket_us": lambda: {}})
+    monkeypatch.setattr(notify, "EMAIL_FILE", tmp_path / "email.json")
+    for venue in streams.STREAMS:
+        monkeypatch.setitem(streams.STREAMS, venue, fake_stream)
+
+    async def scenario():
+        s = run.Session(database.connect(tmp_path / "test.sqlite"), ("nfl",), executors=run.EXECUTE["both"])
+        s.start()
+        await s.close()
+        return s
+    s = asyncio.run(scenario())
+    assert [(d.mode, d.sports) for d in s.desks] == [("live", ("nfl",)), ("paper", ())]
+    assert s.desks[1].signal({"sport": "nfl"}, None, None, 0.1, 5, {}, "now") is False
+    assert "paper trades nothing new without --paper-sport, and flattens and settles what it holds" in capsys.readouterr().out

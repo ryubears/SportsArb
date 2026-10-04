@@ -16,8 +16,12 @@ venues, trading/ makes the trades, and money/ keeps the cash.
   before the Kalshi key's location attestation lapses.
 - A Desk for each mode the run trades in, with its own money, executor,
   and settler, and its trades stored with its mode, so paper and live
-  never mix. Both can run at once on the same signals, which shows how far
-  the paper fills are from real ones.
+  never mix. Both can run at once, the live desk trading the sports given
+  to --sport and the paper desk only those given to --paper-sport: on the
+  same signal live's real orders take the contracts paper's simulated ones
+  look for, so from 2026-10-04, when live began asking for all it saw,
+  paper twins of live trades failed 10 times in 13. The paper desk still
+  flattens and settles the trades it holds on every sport.
   - Paper: trading/paper.py fills against the same books with the paper
     money of money/paper.py.
   - Live: trading/live.py sends real orders with the money the venues
@@ -35,7 +39,8 @@ second process would spend the same dollars. Only futures are cataloged,
 so a run trades seasons, titles, awards, leaders, and elections. A sport
 given to --paper-sport is followed and traded on paper only, the live desk
 leaving its signals alone, to see how it does before real money goes on
-it. --paper-sport all takes every sport not given to --sport.
+it. --paper-sport all takes every sport not given to --sport. With a live
+desk the paper desk trades nothing else.
 
 Run with:
     python3 -m engine.run --sport nfl
@@ -47,7 +52,7 @@ Run with:
     python3 -m engine.run --sport nfl --no-scan
     python3 -m engine.run --sport nfl --no-trade
     python3 -m engine.run --sport nfl --execute live
-    python3 -m engine.run --sport nfl --execute both
+    python3 -m engine.run --sport nfl --paper-sport epl --execute both
     python3 -m engine.run --sport nfl --set min_edge=0.03 --set min_annual_pct=50
 
 For a long run on a laptop, stop the Mac from sleeping while it runs:
@@ -190,7 +195,8 @@ class Session:
     the venue connections, the scanner, and a Desk for each mode it trades
     in. Without a scanner only the books are recorded, and without a desk
     the scanner only stores what it sees. The sports in paper_sports are
-    traded by the paper desk only.
+    traded by the paper desk only, and with a live desk the paper desk
+    trades nothing else.
     """
 
     def __init__(self, conn, sports, with_scanner=True, executors=("paper",), paper_sports=()):
@@ -199,11 +205,16 @@ class Session:
         self.paper_sports = tuple(s for s in sports if s in paper_sports)
         self.notifier = notify.Notifier(conn, log)
         self.attestation = notify.AttestationWatch(conn, self.notifier, log)
-        # The executors trade against the recorder's books, which exist once the recorder does, below.
-        live_sports = tuple(s for s in sports if s not in self.paper_sports)
-        self.desks = [Desk(mode, conn, lambda: self.recorder.books, self.notifier, sports=live_sports if mode == "live" else None)
+        # The executors trade against the recorder's books, which exist once the recorder does, below. With a live desk
+        # the paper desk trades only the paper-only sports, since on a sport both trade live's real orders take what
+        # paper's look for.
+        self.live_sports = tuple(s for s in sports if s not in self.paper_sports)
+        desk_sports = {"live": self.live_sports, "paper": self.paper_sports if "live" in executors else None}
+        self.desks = [Desk(mode, conn, lambda: self.recorder.books, self.notifier, sports=desk_sports[mode])
                       for mode in executors] if with_scanner else []
-        self.scanner = scan.Scanner(conn, sports, log, [d.signal for d in self.desks]) if with_scanner else None
+        self.scanner = scan.Scanner(conn, sports, log, [d.signal for d in self.desks], books=lambda: self.recorder.books) if with_scanner else None
+        for desk in self.desks:
+            desk.executor.recheck = self.scanner.recheck
         self.recorder = Recorder(conn, self.scanner)
         self.streams = Streams(self.recorder)
         self.last_status = self.last_summary = time.time()
@@ -216,8 +227,10 @@ class Session:
             log(trading_settings())
         if any(d.mode == "live" for d in self.desks):
             log(live_settings())
-            if self.paper_sports:
-                log(f"paper only, not traded live: {', '.join(self.paper_sports)}")
+            log(f"live trades {', '.join(self.live_sports) or 'nothing new'}")
+            if any(d.mode == "paper" for d in self.desks):
+                log(f"paper trades only {', '.join(self.paper_sports)}" if self.paper_sports
+                    else "paper trades nothing new without --paper-sport, and flattens and settles what it holds")
             if not notify.EMAIL_FILE.exists():
                 log(f"no email settings in {notify.EMAIL_FILE}, alerts are only logged and stored")
         targets = load_targets(self.conn, self.sports)
@@ -389,7 +402,7 @@ if __name__ == "__main__":
                     help="sports to follow and trade on paper only, comma separated, or all for every sport not given to --sport")
     ap.add_argument("--no-trade", action="store_true", help="scan without trading")
     ap.add_argument("--execute", choices=sorted(EXECUTE), default="paper",
-                    help="trade on paper, with real money on the venues, or both at once on the same signals")
+                    help="trade on paper, with real money on the venues, or both at once, paper then trading only the --paper-sport sports")
     ap.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
                     help="override a setting from engine/helper/config.py for this run, for example --set min_edge=0.03, repeatable")
     args = ap.parse_args()

@@ -405,6 +405,21 @@ def test_a_sale_that_sold_nothing_is_tried_again_only_a_minute_later(tmp_path):
     assert len(venues.orders) == 5 and ex.exposed == {} and stored(conn, "trades")[0]["yes_held"] == 4
 
 
+def test_a_retry_checks_the_results_only_when_it_sold_something(tmp_path, monkeypatch):
+    venues = Venues(polymarket_us=[fills(), fills(0), fills()], kalshi=[fills(4)])
+    conn, cash, ex = executor(tmp_path, venues)
+    trade(ex)                                                           # The 6 yes over found no taker.
+    checks = []
+    monkeypatch.setattr(database, "load_trade_cash", lambda *args: checks.append(args) or [])
+    for second in range(1, 60):
+        assert asyncio.run(ex.retry(f"2026-09-20T17:30:{second:02d}+00:00")) is False
+    # The retry runs every tick while a trade is exposed. A check each time, over 116,000 orders on 2026-10-03, held up
+    # the orders queued behind it some 150 ms.
+    assert checks == []
+    at(ex, "2026-09-20T17:31:00+00:00")
+    assert asyncio.run(ex.retry(ex.clock())) is True and len(checks) == 1 and ex.exposed == {}
+
+
 def test_a_fraction_sold_back_on_a_later_try_is_recorded(tmp_path):
     venues = Venues(polymarket_us=[fills(), fills(0), fills()], kalshi=[fills(9.58)])
     logs = []

@@ -2,6 +2,7 @@
 Tests for the scanner's episode detection over the recorder's in memory books.
 """
 
+import asyncio
 import pytest
 from common.timeutil import days_between
 from db import database
@@ -276,3 +277,45 @@ def test_recorder_prices_only_top_of_book_changes(tmp_path):
     r.on_book("kalshi", "k", [[0.5, 10], [0.48, 5]], [[0.52, 7]])     # Only a deeper level moved.
     r.on_book("kalshi", "k", [[0.5, 11]], [[0.52, 7]])                # Size at the top moved.
     assert calls == [("kalshi", "k"), ("kalshi", "k")]
+
+
+def test_a_pair_a_desk_waits_on_is_priced_again_once_the_wait_ends(tmp_path):
+    conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket_us", "pm")], future=True)
+    latest = {("kalshi", "k"): book("kalshi", "k", T0, 0.53, 0.54), ("polymarket_us", "pm"): book("polymarket_us", "pm", T0, 0.40, 0.41)}
+    offered = []
+
+    def desk(pair, yes, no, edge, size, fee_infos, now):
+        offered.append(now)
+        if len(offered) == 1:                       # Waits, as for a Polymarket US book to catch up with a Kalshi move.
+            s.recheck(pair["id"], 0.05)
+            s.recheck(pair["id"], 0.5)              # A later ask keeps the sooner timer.
+            return False
+        return True
+
+    async def scenario():
+        s.on_book("polymarket_us", "pm", latest, T0)
+        assert len(s.rechecks) == 1
+        await asyncio.sleep(0.2)                    # No book changes, and the tick is a second away.
+
+    s = scan.Scanner(conn, ("nfl",), lambda m: None, on_signals=[desk], books=lambda: latest)
+    asyncio.run(scenario())
+    assert len(offered) == 2 and offered[1] > T0 and s.rechecks == {}
+
+
+def test_a_recheck_needs_a_running_loop_and_ends_with_its_episode(tmp_path):
+    conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket_us", "pm")], future=True)
+    latest = {("kalshi", "k"): book("kalshi", "k", T0, 0.53, 0.54), ("polymarket_us", "pm"): book("polymarket_us", "pm", T0, 0.40, 0.41)}
+    s = scan.Scanner(conn, ("nfl",), lambda m: None, books=lambda: latest)
+    s.on_book("polymarket_us", "pm", latest, T0)
+    pair_id = next(iter(s.episodes))
+    s.recheck(pair_id, 0.05)                        # Outside a loop the next change or tick prices it.
+    assert s.rechecks == {}
+
+    async def scenario():
+        s.recheck(pair_id, 0.05)
+        timer = s.rechecks[pair_id]
+        latest[("kalshi", "k")] = book("kalshi", "k", T0, 0.40, 0.41)
+        s.on_book("kalshi", "k", latest, T0)        # The edge is gone, so its episode ends, and the timer with it.
+        return timer
+    timer = asyncio.run(scenario())
+    assert s.episodes == {} and s.rechecks == {} and timer.cancelled()

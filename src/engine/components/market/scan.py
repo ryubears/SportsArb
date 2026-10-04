@@ -19,8 +19,13 @@ The recorder drives the Scanner with the books it holds in memory and
 the Scanner stores every episode as it ends, so the opportunities table
 is the log of everything it saw. The summary script reads it. The
 pricing itself lives in pricing.py.
+
+A desk that turns an edge down only to wait for a book to catch up asks
+for the pair again once the wait ends, through recheck(), so the edge is
+offered then rather than at the next change or tick, up to a second later.
 """
 
+import asyncio
 from collections import defaultdict
 from dataclasses import dataclass, field
 from common.timeutil import now_iso, seconds_between
@@ -29,6 +34,8 @@ from db.models import Opportunity
 from engine.helper import config
 from engine.helper.game import days_until, pays_at as payout_time, started
 from engine.helper.pricing import Priced, annual_pct, best_trade, fresh, return_pct, trade_words
+
+RECHECK_MARGIN = 0.005      # Seconds past a wait's end that a recheck prices the pair, so the wait is surely over by our clock.
 
 
 @dataclass
@@ -117,11 +124,13 @@ class Scanner:
     until it takes a trade, and then not again, see trading/executor.py.
     """
 
-    def __init__(self, conn, sports, log=print, on_signals=()):
+    def __init__(self, conn, sports, log=print, on_signals=(), books=None):
         self.conn = conn
         self.sports = sports
         self.log = log
         self.on_signals = list(on_signals)  # Each is called with the trade to make until it takes one in the episode.
+        self.books = books                  # Returns the recorder's books, for a recheck, which no book change brings.
+        self.rechecks = {}                  # Pair id maps to the timer that prices it again once a desk's wait ends.
         self.episodes = {}                  # Pair id maps to its open Episode.
         self.finished = []                  # (kind, Opportunity) for episodes ended since the last summary.
         self.reload()
@@ -131,6 +140,9 @@ class Scanner:
         End an episode, store it, and log it when it was worth something.
         """
         episode = self.episodes.pop(pair_id)
+        timer = self.rechecks.pop(pair_id, None)
+        if timer is not None:
+            timer.cancel()
         o = episode.opportunity(now)
         database.insert_opportunities(self.conn, [o])
         self.finished.append((episode.pair["kind"], o))
@@ -183,6 +195,35 @@ class Scanner:
                     episode.taken.add(i)
         elif episode is not None:
             self.close(pair_id, now)
+
+    def recheck(self, pair_id, seconds):
+        """
+        Price a pair again in seconds, when a desk waits that long for a
+        book to catch up, see Executor.confirm_wait(). A pair keeps one timer,
+        the soonest asked for. Outside a running loop, and without books,
+        the next change or tick prices it instead.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if self.books is None:
+            return
+        due = loop.time() + seconds + RECHECK_MARGIN
+        timer = self.rechecks.get(pair_id)
+        if timer is not None:
+            if timer.when() <= due:
+                return
+            timer.cancel()
+        self.rechecks[pair_id] = loop.call_at(due, self.reprice, pair_id)
+
+    def reprice(self, pair_id):
+        """
+        A recheck come due: price the pair again if its episode is still open.
+        """
+        self.rechecks.pop(pair_id, None)
+        if pair_id in self.episodes:
+            self.update(pair_id, self.books(), now_iso())
 
     def on_book(self, venue, contract_id, books, now):
         """
