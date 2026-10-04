@@ -615,7 +615,7 @@ they could have taken and locked in at full size, by sport and kind, and
 the largest five. For the paper trades and then the live ones, or one of
 them with `--mode paper` or `--mode live`, it shows the trades by outcome
 and by sport and kind in the window, the legs settled in it by venue, and
-the open trades: in three lines, how many, how many of them opened in the
+the open trades: in a few lines, how many, how many of them opened in the
 last hour, day, and week and the capital those still hold, the capital
 they all hold on each venue and the profit they are expected to return
 with its rate a year weighted by capital, and the first, average, and last
@@ -625,8 +625,10 @@ window, newest first, with what it holds, its capital, expected profit and
 rates, and when it pays. The paper section ends with the paper money from
 the ledger, and the live one with the real orders sent by venue and what
 came back, and the live balances read from the venues now, with Kalshi's
-shards. `--hours` sets the window, `--sport nfl,ncaaf` narrows everything
-to some sports, and `--no-live` leaves out the live balances.
+shards. Each section is a title line with its details on indented lines
+under it, and a long list, such as the pairs of each sport, wraps at 100
+characters. `--hours` sets the window, `--sport nfl,ncaaf` narrows
+everything to some sports, and `--no-live` leaves out the live balances.
 
 `src/tools/live_check.py` reads both venues' balances with the keys in
 `data/` and says when the Kalshi key's location attestation lapses, and

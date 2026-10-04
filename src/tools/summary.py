@@ -42,6 +42,7 @@ from engine.helper import config
 
 MODES = {"live": ("live",), "paper": ("paper",), "all": ("paper", "live")}     # What --mode shows, in order.
 OPENED_HOURS = {"hour": 1, "day": 24, "week": 24 * 7}     # The windows the open trades are counted as opened in.
+WIDTH = 100         # The longest line a list of items wraps at.
 
 
 def query_rows(conn, sql, params=()):
@@ -89,6 +90,22 @@ def print_table(title, header, body, left=1):
         print("  " + "  ".join(str(v).ljust(w) if i < left else str(v).rjust(w) for i, (v, w) in enumerate(zip(r, widths))))
 
 
+def print_listed(title, items):
+    """
+    Print a title line, then its items comma separated on indented lines no longer than WIDTH, an item never split
+    across two, or none.
+    """
+    print(title)
+    line = " "
+    for i, item in enumerate(items or ["none"]):
+        item += "," if i < len(items) - 1 else ""
+        if len(line) > 1 and len(line) + 1 + len(item) > WIDTH:
+            print(line)
+            line = " "
+        line += " " + item
+    print(line)
+
+
 def in_sports(sports, column="p.sport"):
     """
     A SQL condition keeping the sports, and its parameters, or nothing when every sport is kept.
@@ -113,8 +130,9 @@ def print_overview(conn, sports):
         SELECT p.sport, COUNT(*) FROM pairs p WHERE p.id IN (SELECT pair_id FROM bets WHERE pair_id IS NOT NULL){where}
         GROUP BY p.sport ORDER BY COUNT(*) DESC""", params)
     total = sum(n for _, n in counts)
-    print(f"database {DB_PATH}, {size / 1e6:,.0f} MB, last matched {short_time(first_value(conn, 'SELECT MAX(matched_at) FROM pairs'))} UTC")
-    print(f"{total:,} pairs: " + (", ".join(f"{s} {n:,}" for s, n in counts) or "none"))
+    print(f"database {DB_PATH}, {size / 1e6:,.0f} MB")
+    print_listed(f"{total:,} pairs, last matched {short_time(first_value(conn, 'SELECT MAX(matched_at) FROM pairs'))} UTC",
+                 [f"{s} {n:,}" for s, n in counts])
 
 
 def print_gaps(conn, since, hours):
@@ -124,8 +142,8 @@ def print_gaps(conn, since, hours):
     gaps = query_rows(conn, """
         SELECT venue, COUNT(*), COALESCE(SUM((julianday(end_ts) - julianday(start_ts)) * 86400), 0), SUM(end_ts IS NULL)
         FROM gaps WHERE start_ts >= ? GROUP BY venue ORDER BY venue""", (since,))
-    print(f"feed drops, last {hours} hours: " + (", ".join(
-        f"{v} {n} ({secs:.0f}s down{f', {open_} without an end' if open_ else ''})" for v, n, secs, open_ in gaps) if gaps else "none"))
+    print_listed(f"feed drops, last {hours} hours",
+                 [f"{v} {n} ({secs:.0f}s down{f', {open_} without an end' if open_ else ''})" for v, n, secs, open_ in gaps])
 
 
 def returns(capital, profit, days):
@@ -152,8 +170,9 @@ def print_opportunities(conn, since, hours, sports):
         WHERE start_ts >= ? AND live = 0 AND peak_edge >= ? AND min_edge_seconds IS NOT NULL AND days_held * 24 >= ? AND annual_pct >= ?{where}
         ORDER BY min_edge_profit DESC""", (since, config.MIN_EDGE, config.MIN_PAYOUT_HOURS, config.MIN_ANNUAL_PCT) + params)
     rules = f"{cents}+, paying {config.MIN_PAYOUT_HOURS}h+ out, {config.MIN_ANNUAL_PCT}%+ a year"
+    print(f"\nopportunities within the rules ({rules}), last {hours} hours")
     if not rows:
-        print(f"\nopportunities within the rules ({rules}): none in the last {hours} hours")
+        print("  none")
         return
 
     def totals(group):
@@ -165,9 +184,8 @@ def print_opportunities(conn, since, hours, sports):
         return capital, profit, 100 * profit / capital, 100 * yearly / capital, days
 
     capital, profit, ret, annual, days = totals(rows)
-    print(f"\nopportunities within the rules ({rules}): {len(rows):,} episodes in the last {hours} hours could have taken "
-          f"{capital:,.0f}$ and locked in {profit:,.2f}$, {percent(ret)}% on capital, {percent(annual)}% a year, held {days or 0:,.1f} "
-          f"days on average")
+    print(f"  {len(rows):,} episodes could have taken {capital:,.0f}$ and locked in {profit:,.2f}$")
+    print(f"  {percent(ret)}% on capital, {percent(annual)}% a year, held {days or 0:,.1f} days on average")
     kinds = {}
     for r in rows:
         kinds.setdefault((r[0], r[1]), []).append(r)
@@ -240,7 +258,7 @@ def print_open_trades(conn, since, hours, mode, sports, now):
     """
     where, params = in_sports(sports)
     rows = query_rows(conn, f"""
-        SELECT t.id, p.sport, p.label, t.yes_held, t.no_held, t.yes_venue, t.yes_cost, t.no_venue, t.no_cost, t.profit + t.hedge_pnl,
+        SELECT t.id, p.label, t.yes_held, t.no_held, t.yes_venue, t.yes_cost, t.no_venue, t.no_cost, t.profit + t.hedge_pnl,
                t.signal_ts, t.pays_at
         FROM trades t JOIN pairs p ON p.id = t.pair_id
         WHERE t.mode = ? AND t.yes_held + t.no_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id){where}
@@ -249,7 +267,7 @@ def print_open_trades(conn, since, hours, mode, sports, now):
         print(f"\n{mode} open trades: none")
         return
     capital, profit, yearly, when, venues, body = 0.0, 0.0, 0.0, 0.0, {}, []
-    for trade_id, sport, label, yes, no, yes_venue, yes_cost, no_venue, no_cost, pr, signal, pays in rows:
+    for trade_id, label, yes, no, yes_venue, yes_cost, no_venue, no_cost, pr, signal, pays in rows:
         cap, days = yes_cost + no_cost, max(days_between(signal, pays), 1 / 24)
         capital, profit, yearly = capital + cap, profit + pr, yearly + pr * 365 / days
         when += cap * datetime.fromisoformat(pays).timestamp()
@@ -257,24 +275,27 @@ def print_open_trades(conn, since, hours, mode, sports, now):
             venues[venue] = venues.get(venue, 0.0) + cost
         if signal >= since:
             ret, annual = returns(cap, pr, days)
-            body.append((signal, trade_id, sport, label[:44], short_time(signal)[:16], f"{contracts(yes)}/{contracts(no)}", f"{cap:,.2f}",
-                         f"{pr:,.2f}", percent(ret), percent(annual), short_time(pays)[:16]))
+            body.append((signal, trade_id, label[:44], short_time(signal)[:16], f"{contracts(yes)}/{contracts(no)}", f"{cap:,.2f}",
+                         f"{pr:,.2f}", percent(ret), percent(annual), pays[:10]))
     opened = []
     for name, window in OPENED_HOURS.items():
-        group = [r for r in rows if days_between(r[10], now) * 24 <= window]
-        opened.append(f"{len(group):,}{'' if opened else ' opened'} in the last {name} using {sum(r[6] + r[8] for r in group):,.2f}$")
+        group = [r for r in rows if days_between(r[9], now) * 24 <= window]
+        opened.append((f"opened in the last {name}", f"{len(group):,}", f"{sum(r[5] + r[7] for r in group):,.2f}$"))
+    widths = [max(len(o[i]) for o in opened) for i in range(3)]
     ret, annual = (100 * profit / capital, 100 * yearly / capital) if capital > 0 else (None, None)
     held = ", ".join(f"{venue} {amount:,.2f}$" for venue, amount in sorted(venues.items()))
-    print(f"\n{mode} open trades: {len(rows):,} open, {', '.join(opened)}")
-    print(f"  capital {capital:,.2f}$, holding {held}, expected to return {profit:,.2f}$ in profit, {percent(ret)}% on it, "
-          f"{percent(annual)}% a year")
-    print(f"  resolving first {rows[0][11][:10]}, on average {date_at(when / capital) if capital > 0 else '-'}, last {rows[-1][11][:10]}")
+    print(f"\n{mode} open trades: {len(rows):,}")
+    for text, count, cap in opened:
+        print(f"  {text:<{widths[0]}}  {count:>{widths[1]}} using {cap:>{widths[2]}}")
+    print(f"  capital {capital:,.2f}$, held on {held}")
+    print(f"  expected to return {profit:,.2f}$ in profit, {percent(ret)}% on capital, {percent(annual)}% a year")
+    print(f"  resolving first {rows[0][10][:10]}, on average {date_at(when / capital) if capital > 0 else '-'}, last {rows[-1][10][:10]}")
     if not body:
         print(f"  none opened in the last {hours} hours")
         return
     body.sort(reverse=True)
     print_table(f"{mode} open trades opened in the last {hours} hours, newest first",
-                ("trade", "sport", "bet", "opened UTC", "held yes/no", "capital $", "profit $", "return %", "annual %", "pays UTC"),
+                ("trade", "bet", "opened UTC", "held yes/no", "capital $", "profit $", "return %", "annual %", "pays"),
                 [r[1:] for r in body], left=3)
 
 
@@ -284,7 +305,9 @@ def print_paper_money(conn):
     """
     balances = query_rows(conn, "SELECT venue, ROUND(balance, 2) FROM ledger WHERE id IN (SELECT MAX(id) FROM ledger GROUP BY venue) ORDER BY venue")
     if balances:
-        print("\npaper money from the ledger: " + ", ".join(f"{v} {a:,.2f}$" for v, a in balances))
+        print("\npaper money from the ledger")
+        for venue, amount in balances:
+            print(f"  {venue} {amount:,.2f}$")
 
 
 def print_live_orders(conn, since, hours, sports):
@@ -346,7 +369,9 @@ def print_live_money(balances):
         parts = [f"shard {s} {a:,.2f}$" for s, a in sorted(shards.items()) if a or s in config.LIVE_SHARDS.get(venue, ())]
         return f"{venue} {dollars:,.2f}$" + (f" ({', '.join(parts)})" if parts else "")
 
-    print("\nlive money on the venues, read now: " + ", ".join(money(venue, reading) for venue, reading in balances.items()))
+    print("\nlive money on the venues, read now")
+    for venue, reading in balances.items():
+        print(f"  {money(venue, reading)}")
 
 
 # MAIN
