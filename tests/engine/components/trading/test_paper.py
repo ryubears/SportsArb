@@ -586,7 +586,7 @@ def test_a_change_the_venue_made_after_the_order_arrived_does_not_stop_it(tmp_pa
 
 # THE IN-PLAY TEST, paper twins of live trades on the same signal
 
-def twinned(tmp_path, footprints, start=config.PAPER_START_BALANCE):
+def twinned(tmp_path, footprints, start=config.PAPER_START_BALANCE, lead=None):
     """
     Send the paper twin of a live trade of 5 contracts at NOW, on books of 5 a level. Live's own yes order reached
     Polymarket US 30 ms after the signal and bought all 5 at 0.45, so the venue's books from then show the level gone.
@@ -604,7 +604,7 @@ def twinned(tmp_path, footprints, start=config.PAPER_START_BALANCE):
 
     async def scenario():
         sent = footprints.sent(legs[0], False, 0.45) if footprints else None
-        twin = ex.twin(PAIR, YES, NO, live, legs, NOW)
+        twin = ex.twin(PAIR, YES, NO, live, legs, NOW, lead)
         await asyncio.sleep(0)                  # The twin starts, and tapes its books from here.
         for book in (stamped("polymarket_us", 0.44, 0.46, 0.030, 0.110), stamped("polymarket_us", 0.44, 0.46, 0.100, 0.180),
                      stamped("kalshi", 0.53, 0.54, 0.020, 0.032)):
@@ -638,3 +638,20 @@ def test_without_giving_back_a_paper_twin_would_find_what_our_live_order_took_go
 def test_no_paper_twin_is_sent_when_the_paper_money_falls_short(tmp_path, timed):
     conn, twin = twinned(tmp_path, Footprints(clock=lambda: T), start=2.0)
     assert twin is None and stored(conn) == []
+
+
+@pytest.mark.full_share
+def test_a_paper_twin_sends_polymarket_us_first_when_its_live_trade_did(tmp_path, timed):
+    conn, twin = twinned(tmp_path, Footprints(clock=lambda: T), lead="polymarket_us")
+    t = stored(conn)[0]
+    # Polymarket US's answer came at 90 ms, 60 there and 30 back, and only then went Kalshi's order: 12 there and 8 back.
+    assert (t["status"], t["yes_filled"], t["no_filled"]) == ("filled", 5, 5)
+    assert (t["yes_fill_ts"], t["no_fill_ts"]) == (at_seconds(T + 0.09), at_seconds(T + 0.11))
+
+
+@pytest.mark.full_share
+def test_a_paper_twin_that_missed_on_polymarket_us_first_sends_no_kalshi_order(tmp_path, timed):
+    conn, twin = twinned(tmp_path, None, lead="polymarket_us")     # Without giving back, our live order took the 0.45 level.
+    t = stored(conn)[0]
+    assert (t["status"], t["yes_filled"], t["no_filled"], t["hedge"]) == ("failed", 0, 0, "no leg not sent, as polymarket_us filled nothing first")
+    assert stored(conn, "ledger")[-1]["reason"] == "transfer_in"        # No buy, so the money never moved.

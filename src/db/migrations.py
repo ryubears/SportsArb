@@ -203,9 +203,21 @@ def step_9_drop_trade_caps(conn):
         conn.execute("ALTER TABLE trades DROP COLUMN cap")
 
 
+def step_10_twin_sequences(conn):
+    """
+    The in-play test's trades with a leg on each venue now say in what order
+    their two orders went out. Every one before this sent both at once.
+    """
+    if "sequence" not in [r[1] for r in conn.execute("PRAGMA table_info(twins)")]:
+        conn.execute("ALTER TABLE twins ADD COLUMN sequence TEXT")
+    if conn.execute("SELECT 1 FROM twins LIMIT 1").fetchone():     # Only a database that ran the test has trades with venues.
+        conn.execute("""UPDATE twins SET sequence = 'together' WHERE sequence IS NULL AND live_trade_id IN
+                        (SELECT id FROM trades WHERE yes_venue != no_venue)""")
+
+
 # Step n brings a database from user_version n - 1 to n. Only ever add to the end.
 STEPS = [step_1_catch_up, step_2_settlements, step_3_opening_balances, step_4_modes, step_5_drop_quotes, step_6_pair_sports,
-         step_7_min_edge_stretch, step_8_drop_transfers, step_9_drop_trade_caps]
+         step_7_min_edge_stretch, step_8_drop_transfers, step_9_drop_trade_caps, step_10_twin_sequences]
 
 
 def migrate(conn, fresh):

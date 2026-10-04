@@ -192,11 +192,11 @@ def test_in_the_in_play_test_live_is_offered_games_too_and_paper_twins_each_trad
             offered.append(("live", pair["game_date"]))
             if pair["game_date"]:
                 database.insert_twin(s.conn, 41)
-                live.executor.twins[pair["id"]] = (now, yes, no, types.SimpleNamespace(id=41), ["legs"])
+                live.executor.twins[pair["id"]] = (now, yes, no, types.SimpleNamespace(id=41), ["legs"], "polymarket_us")
             return True
         live.executor.signal = live_signal
         paper.executor.signal = lambda pair, *args: offered.append(("paper", pair["game_date"])) or True
-        paper.executor.twin = lambda pair, yes, no, trade, legs, now: offered.append(("twin", trade.id, legs)) or types.SimpleNamespace(id=42)
+        paper.executor.twin = lambda pair, yes, no, trade, legs, now, lead: offered.append(("twin", trade.id, legs, lead)) or types.SimpleNamespace(id=42)
         game, future = {"id": 1, "sport": "nfl", "game_date": "2026-10-11"}, {"id": 2, "sport": "nfl", "game_date": None}
         results = [desk.signal(pair, "y", "n", 0.1, 5, {}, "now") for pair in (game, future) for desk in s.desks]
         results.append(paper.signal(game, "y", "n", 0.1, 5, {}, "later"))           # Live took nothing then.
@@ -207,10 +207,11 @@ def test_in_the_in_play_test_live_is_offered_games_too_and_paper_twins_each_trad
     assert s.desks[0].markets is None and s.desks[0].executor.in_play_test and s.desks[1].twins is s.desks[0].executor
     assert s.desks[0].executor.footprints is s.desks[1].executor.footprints is not None
     # Paper sends the twin of live's trade on the game in place of its own, and trades the game itself when live did not.
-    assert offered == [("live", "2026-10-11"), ("twin", 41, ["legs"]), ("live", None), ("paper", "2026-10-11")]
-    assert results == [True, True, True, False, True] and twins == [(41, 42)]
+    assert offered == [("live", "2026-10-11"), ("twin", 41, ["legs"], "polymarket_us"), ("live", None), ("paper", "2026-10-11")]
+    assert results == [True, True, True, False, True] and twins == [(41, 42, None)]
     assert "live in-play test: live also trades the games, matches, races, and windows under way that pay within 24h, at most " \
-           "5 contracts a trade, for 100 trades, 0 taken so far, each with a paper twin on the same signal" in capsys.readouterr().out
+           "5 contracts a trade, for 200 trades, 0 taken so far, each with a paper twin on the same signal, those with a leg on each " \
+           "venue sending both orders at once and Polymarket US's first by turns" in capsys.readouterr().out
 
 
 def test_the_in_play_test_needs_both_desks_on_the_command_line():

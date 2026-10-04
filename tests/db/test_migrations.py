@@ -4,6 +4,7 @@ Tests for numbered migrations: each step runs once per database, and never on a 
 
 import sqlite3
 from db import database, migrations
+from db.models import Trade
 
 
 def version(conn):
@@ -107,3 +108,20 @@ def test_the_database_layer_does_not_import_the_live_code():
         modules = [n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)]
         modules += [a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names]
         assert not [m for m in modules if m.split(".")[0] in ("engine", "catalog", "api")], path.name
+
+
+def test_the_in_play_tests_trades_with_a_leg_on_each_venue_sent_both_orders_at_once_before_it_said(tmp_path):
+    path = tmp_path / "t.sqlite"
+    conn = database.connect(path)
+    conn.execute("ALTER TABLE twins DROP COLUMN sequence")
+    for yes_venue, no_venue in (("polymarket_us", "kalshi"), ("kalshi", "kalshi")):
+        trade_id = database.insert_trade(conn, Trade(mode="live", pair_id=1, trade="t", signal_ts="s", edge=0.03, quantity=5, pays_at="p",
+                                                     yes_venue=yes_venue, yes_contract="y", yes_polarity="yes", yes_limit=0.45,
+                                                     no_venue=no_venue, no_contract="n", no_polarity="yes", no_limit=0.5))
+        conn.execute("INSERT INTO twins (live_trade_id) VALUES (?)", (trade_id,))
+    conn.execute("PRAGMA user_version = 9")
+    conn.commit()
+    conn.close()
+    conn = database.connect(path)
+    assert [tuple(r) for r in conn.execute("SELECT live_trade_id, sequence FROM twins ORDER BY live_trade_id")] == [(1, "together"), (2, None)]
+    assert version(conn) == len(migrations.STEPS)

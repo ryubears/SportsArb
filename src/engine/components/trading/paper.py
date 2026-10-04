@@ -43,7 +43,8 @@ the flattening, and storing each trade, is the shared Executor's, and the
 money is the PaperBalances from money/paper.py.
 
 In the in-play test a live trade taken in play has a paper twin: a paper
-trade on the same signal, of the same size and limits, see twin(). Our
+trade on the same signal, of the same size and limits, its orders sent in
+the same order, see twin(). Our
 live orders are real and take from the books the twin's orders meet, so
 paper adds back what they took, see footprints.py.
 """
@@ -217,11 +218,11 @@ class PaperExecutor(Executor):
         await self.until(answered)
         return Fill(filled, dollars, ms, ts, "no book" if book is None and not selling else "")
 
-    async def fill(self, trade, leg):
+    async def fill(self, trade, leg, when=None):
         """
-        Send one leg's buy order and fill it against the book the venue had when it would arrive.
+        Send one leg's buy order, at when or now, and fill it against the book the venue had when it would arrive.
         """
-        return await self.order(trade, leg, "open", leg.quantity, leg.limit)
+        return await self.order(trade, leg, "open", leg.quantity, leg.limit, when)
 
     async def sell_back(self, trade, leg, quantity, floor, when=None):
         """
@@ -229,12 +230,13 @@ class PaperExecutor(Executor):
         """
         return await self.order(trade, leg, "flatten", quantity, when=when)
 
-    def twin(self, pair, yes, no, live, live_legs, now):
+    def twin(self, pair, yes, no, live, live_legs, now, lead=None):
         """
         Send the paper twin of a live trade just taken in play on the pair,
         through the members yes and no: the same signal, the same legs, the
-        same limits, the same size, when the paper money pays for it.
-        Returns the paper Trade, or None.
+        same limits, the same size, the leg on lead's venue first when the
+        live trade sent it first, when the paper money pays for it. Returns
+        the paper Trade, or None.
         """
         legs = [dataclasses.replace(leg, held=0, cost=0.0) for leg in live_legs]
         per_contract = {}
@@ -242,7 +244,7 @@ class PaperExecutor(Executor):
             per_contract[(leg.venue, shard(leg))] = per_contract.get((leg.venue, shard(leg)), 0.0) + leg.limit
         if any(self.cash.spendable(venue, part) < live.quantity * cost for (venue, part), cost in per_contract.items()):
             return None
-        return self.open(pair, yes, no, live.edge, legs, live.quantity, live.pays_at, now)
+        return self.open(pair, yes, no, live.edge, legs, live.quantity, live.pays_at, now, lead)
 
     async def run_trade(self, trade, legs):
         """

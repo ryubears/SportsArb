@@ -211,8 +211,8 @@ class Desk:
             return False
         taken = self.twins.twin_of(pair["id"], now) if self.twins else None
         if taken:
-            live_yes, live_no, live, live_legs = taken
-            twin = self.executor.twin(pair, live_yes, live_no, live, live_legs, now)
+            live_yes, live_no, live, live_legs, lead = taken
+            twin = self.executor.twin(pair, live_yes, live_no, live, live_legs, now, lead)
             if twin:
                 database.set_twin(self.executor.conn, live.id, twin.id)
             return twin is not None
@@ -286,7 +286,8 @@ class Session:
                 taken = next(d.executor.in_play_trades for d in self.desks if d.mode == "live")
                 log(f"live in-play test: live also trades the games, matches, races, and windows under way that pay within "
                     f"{config.PAPER_MAX_PAYOUT_HOURS}h, at most {config.LIVE_IN_PLAY_CONTRACTS} contracts a trade, for "
-                    f"{config.LIVE_IN_PLAY_TRADES} trades, {taken} taken so far, each with a paper twin on the same signal")
+                    f"{config.LIVE_IN_PLAY_TRADES} trades, {taken} taken so far, each with a paper twin on the same signal, those with a "
+                    f"leg on each venue sending both orders at once and Polymarket US's first by turns")
             if not notify.EMAIL_FILE.exists():
                 log(f"no email settings in {notify.EMAIL_FILE}, alerts are only logged and stored")
         if any(d.mode == "paper" for d in self.desks):

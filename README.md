@@ -237,7 +237,7 @@ place (see the top of `db/database.py`):
 | settlements | the settler |
 | ledger | paper money, every dollar in and out |
 | alerts | every email the live process sends: low cash, halts, and the Kalshi key's attestation |
-| twins | the in-play test, each live trade in play and its paper twin |
+| twins | the in-play test, each live trade in play, its paper twin, and the order its orders went in |
 
 Trades and settlements carry a `mode`, `paper` or `live`, so the two modes
 never mix. Every table has a model in `db/models.py` and its schema in
@@ -584,7 +584,9 @@ it is sent and updated when it is done.
 A trade opens in whole contracts, at least one, so no order opens a
 fraction of a contract, but a leg may fill to the hundredth,
 6.42 of 7 for one, and live trading counts it so: the other leg's 0.58
-over is sold back like any excess, in an order for 0.58 of a contract.
+over is sold back like any excess, in an order for 0.58 of a contract. A
+Kalshi order sent after Polymarket US's, in the in-play test below, asks
+for what that filled, to the hundredth.
 Paper trading keeps to whole contracts, as its fills are worked out from
 the books (`Executor.step`). Every `LIVE_POSITION_SECONDS`, 5 minutes, the
 live executor reads each venue's positions and compares them with what
@@ -626,20 +628,32 @@ With `--live-in-play` live also trades the games, matches, races, and
 windows under way that paper trades, by paper's rules: once the game has
 started by any member's kickoff, since a Kalshi contract gives none, paying
 within 24 hours, at most 5 contracts a trade (`LIVE_IN_PLAY_CONTRACTS`),
-the ladders walked only as deep as the levels that hold them, until 100
-such trades (`LIVE_IN_PLAY_TRADES`). They are counted in the `twins` table,
-so a restart goes on from there, and the futures go on as before. On each
-of those signals paper sends a twin in place of its own trade, with the
-same legs, limits, and size (`PaperExecutor.twin`). Our live orders are
-real and take from the books the twin's orders meet, so each leaves a
-footprint (**footprints.py**): from the venue's time on its answer and the
-book on the tape just before then, what it took from each level. Paper adds
-that back to every book the venue made after, until the level falls below
-what our order left of it, as other takers or cancels would have taken ours
-too, and waits up to 2 seconds for the answers of live orders sent before
-its own. The brakes cover these trades as any live trade.
-`tools/in_play_test.py` sets the live trades beside their twins. While the
-test runs paper trades those signals at 5 contracts, not at its own size.
+the ladders walked only as deep as the levels that hold them, until 200
+such trades (`LIVE_IN_PLAY_TRADES`, 100 at first). They are counted in the
+`twins` table, so a restart goes on from there, and the futures go on as
+before. On each of those signals paper sends a twin in place of its own
+trade, with the same legs, limits, and size (`PaperExecutor.twin`). Our
+live orders are real and take from the books the twin's orders meet, so
+each leaves a footprint (**footprints.py**): from the venue's time on its
+answer and the book on the tape just before then, what it took from each
+level. Paper adds that back to every book the venue made after, until the
+level falls below what our order left of it, as other takers or cancels
+would have taken ours too, and waits up to 2 seconds for the answers of
+live orders sent before its own. The brakes cover these trades as any live
+trade. A trade with a leg on each venue sends both orders at once, or
+Polymarket US's first and Kalshi's only once that has answered, for what
+it filled, by turns (`Executor.fill_legs`), and its twin does the same.
+Sent at once the Kalshi leg lands first, in some 12 ms against Polymarket
+US's 59, and in the first trades live's Polymarket US legs filled 2 times
+in 10 where paper's twins filled 7, though live's had arrived as quickly:
+another trader may take the Polymarket US quote away once our Kalshi leg
+trades, and Kalshi legs bought for a Polymarket US leg that then missed
+are sold back at a loss. Sent first, a Polymarket US leg that misses
+leaves nothing to sell back, at the cost of Kalshi's going out some 100 ms
+later. The twins table says which way each trade went, and
+`tools/in_play_test.py` sets the live trades beside their twins, each way
+apart. While the test runs paper trades those signals at 5 contracts, not
+at its own size.
 
 Live trading has brakes, in **brakes.py**, sized for a test with about $100
 on each venue. An order whose outcome cannot be known (a timeout, a dropped
@@ -783,12 +797,13 @@ nothing, so it also serves as a check that the live records match the
 venues. Stop the recorder before `--apply`.
 
 `src/tools/in_play_test.py` reports the in-play test: the live trades in
-play beside their paper twins on the same signals, how many of each filled
-in full, in part, on one leg, or not at all, the contracts matched, how
-often each venue's leg filled, what was locked in and what the sales back
-made, the result of those settled, each venue's round trip, measured live
-and drawn on paper, how often the two matched the same contracts, and the
-newest pairs one by one, `--recent 20` of them.
+play beside their paper twins on the same signals, for those sending both
+orders at once and those sending Polymarket US's first apart, how many of
+each filled in full, in part, on one leg, or not at all, the contracts
+matched, how often each venue's leg filled of those sent, what was locked
+in and what the sales back made, the result of those settled, each venue's
+round trip, measured live and drawn on paper, how often the two matched
+the same contracts, and the newest pairs one by one, `--recent 20` of them.
 
 `src/tools/latency_report.py` reports, over a stretch such as a game, how
 far behind the venues the books ran, minute by minute from the status

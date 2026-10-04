@@ -79,7 +79,8 @@ LIVE_MAX_LOSS_SHARE = 0.10  # Net loss of the trades decided in the window, as a
 # trades, a few contracts at a time, each beside a paper twin of the same size on the same signal, to see whether paper's
 # fills in play are ones live gets.
 LIVE_IN_PLAY_CONTRACTS = 5  # The most contracts a live trade in play asks for.
-LIVE_IN_PLAY_TRADES = 100   # The live trades in play after which the test takes no more. Futures go on as before.
+LIVE_IN_PLAY_TRADES = 200   # The live trades in play after which the test takes no more. Futures go on as before. 100 when
+                            # the test began on 2026-10-04.
 KEY_CHECK_HOURS = 1         # Between readings of when the Kalshi key's location attestation lapses, see notify.AttestationWatch.
 KEY_WARN_HOURS = 48         # How long before it lapses the email goes out, so it comes before the day it does.
 

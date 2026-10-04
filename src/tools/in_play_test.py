@@ -9,14 +9,18 @@ trading/live.py and trading/paper.py. The twins table pairs them. Where
 the two did alike, paper's fills in play are ones live gets; where live did
 worse, paper is optimistic there.
 
-For the live trades and their twins it prints, side by side, how many
-filled in full, in part, on one leg only, or not at all, the contracts
-asked for and matched, how often each venue's leg filled, what was locked
-in and what the sales back made, the result of those settled, counting
-what each leg paid out, and each venue's round trip, measured live and
-drawn on paper. Then how often the two matched the same contracts, live
-fewer, or paper fewer, and the newest pairs one by one. Reads only, so it
-is safe to run while the live process is writing.
+The trades with a leg on each venue take turns sending both orders at
+once and Polymarket US's first, Kalshi's only once that has answered, so
+the two ways are shown apart: those sent at once, with the trades whose
+legs were both on one venue, and those sent Polymarket US first. For each,
+live and paper side by side: how many filled in full, in part, on one leg
+only, or not at all, the contracts asked for and matched, how often each
+venue's leg filled, what was locked in and what the sales back made, the
+result of those settled, counting what each leg paid out, and each venue's
+round trip, measured live and drawn on paper. Then how often the two
+matched the same contracts, live fewer, or paper fewer, and the newest
+pairs one by one. Reads only, so it is safe to run while the live process
+is writing.
 
 The script sets its own import path, so it runs from any folder.
 
@@ -42,8 +46,9 @@ COLUMNS = ("id", "signal_ts", "quantity", "yes_venue", "yes_filled", "yes_latenc
 
 def load_pairs(conn):
     """
-    Each live trade of the test, oldest first, as (label, live, paper), each trade a dict of COLUMNS with 'settled',
-    its result once both legs have paid out, and paper None when it had no twin.
+    Each live trade of the test, oldest first, as (label, live, paper, sequence), each trade a dict of COLUMNS with
+    'settled', its result once both legs have paid out, paper None when it had no twin, and sequence as the twins
+    table says, null in a database from before it did.
     """
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'twins'").fetchone():
         return []
@@ -58,9 +63,10 @@ def load_pairs(conn):
         payout = row[-1]
         t["settled"] = None if payout is None else payout - t["yes_cost"] - t["no_cost"] + t["hedge_pnl"]
         return t
-    rows = conn.execute("""SELECT w.live_trade_id, w.paper_trade_id, p.label FROM twins w
-                           JOIN trades t ON t.id = w.live_trade_id JOIN pairs p ON p.id = t.pair_id ORDER BY w.live_trade_id""")
-    return [(label, trade(live_id), trade(paper_id)) for live_id, paper_id, label in rows.fetchall()]
+    sequence = "w.sequence" if "sequence" in [r[1] for r in conn.execute("PRAGMA table_info(twins)")] else "NULL"
+    rows = conn.execute(f"""SELECT w.live_trade_id, w.paper_trade_id, p.label, {sequence} FROM twins w
+                            JOIN trades t ON t.id = w.live_trade_id JOIN pairs p ON p.id = t.pair_id ORDER BY w.live_trade_id""")
+    return [(label, trade(live_id), trade(paper_id), order) for live_id, paper_id, label, order in rows.fetchall()]
 
 
 def outcome(t):
@@ -74,6 +80,13 @@ def outcome(t):
     return "one leg" if t["yes_filled"] or t["no_filled"] else "neither"
 
 
+def sent(t, side):
+    """
+    Whether a trade's leg had an order sent: one that was not, as Kalshi's when Polymarket US first filled nothing, took no time.
+    """
+    return bool(t[f"{side}_latency_ms"])
+
+
 def side_by_side(trades):
     """
     The rows comparing one side's trades, live's or paper's: the cells of one column.
@@ -83,13 +96,12 @@ def side_by_side(trades):
     cells = [len(trades)] + [sum(1 for t in trades if outcome(t) == o) for o in ("in full", "in part", "one leg", "neither")]
     cells += [f"{asked:g}", f"{matched:g} ({100 * matched / asked:.0f}%)" if asked else "0"]
     for venue in VENUES:
-        legs = [t[f"{side}_filled"] for t in trades for side in ("yes", "no") if t[f"{side}_venue"] == venue]
+        legs = [t[f"{side}_filled"] for t in trades for side in ("yes", "no") if t[f"{side}_venue"] == venue and sent(t, side)]
         cells.append(f"{sum(1 for filled in legs if filled)} of {len(legs)}")
     cells += [f"{sum(t['profit'] for t in trades):,.2f}", f"{sum(t['hedge_pnl'] for t in trades):+,.2f}",
               f"{sum(settled):+,.2f} ({len(settled)})" if settled else "-"]
     for venue in VENUES:
-        ms = [t[f"{side}_latency_ms"] for t in trades for side in ("yes", "no")
-              if t[f"{side}_venue"] == venue and t[f"{side}_latency_ms"] is not None]
+        ms = [t[f"{side}_latency_ms"] for t in trades for side in ("yes", "no") if t[f"{side}_venue"] == venue and sent(t, side)]
         cells.append(f"{quantile(ms, 0.5):,.0f} / {quantile(ms, 0.9):,.0f}" if ms else "-")
     return cells
 
@@ -101,27 +113,32 @@ def print_report(conn, recent=20):
     pairs = load_pairs(conn)
     print(f"in-play test: {len(pairs)} of {config.LIVE_IN_PLAY_TRADES} live trades, at most {config.LIVE_IN_PLAY_CONTRACTS} "
           f"contracts each" + (f", {short_time(pairs[0][1]['signal_ts'])} to {short_time(pairs[-1][1]['signal_ts'])} UTC" if pairs else ""))
-    twinned = [(label, live, paper) for label, live, paper in pairs if paper]
+    twinned = [pair for pair in pairs if pair[2]]
     if len(twinned) < len(pairs):
         print(f"  {len(pairs) - len(twinned)} without a paper twin, when the paper money fell short, left out below")
     if not twinned:
         return
     names = (["trades", "matched in full", "matched in part", "one leg only", "neither leg", "contracts asked", "contracts matched"]
-             + [f"{venue} legs filled" for venue in VENUES]
+             + [f"{venue} legs filled, of those sent" for venue in VENUES]
              + ["locked in $", "sales back $", "settled $ (trades)"]
              + [f"{venue} round trip ms, median / 90th" for venue in VENUES])
-    live, paper = side_by_side([p[1] for p in twinned]), side_by_side([p[2] for p in twinned])
-    print_table("live beside paper, on the same signals", ("", "live", "paper twin"),
-                [(name, a, b) for name, a, b in zip(names, live, paper)])
-    fewer = sum(1 for _, a, b in twinned if a["matched"] < b["matched"])
-    more = sum(1 for _, a, b in twinned if a["matched"] > b["matched"])
-    print(f"\nmatched the same contracts on {len(twinned) - fewer - more} signals of {len(twinned)}, "
-          f"live fewer than paper on {fewer}, live more on {more}")
-    body = [(short_time(a["signal_ts"])[11:], label[:48], f"{a['yes_filled']:g}/{a['no_filled']:g} of {a['quantity']:g}",
-             f"{b['yes_filled']:g}/{b['no_filled']:g}", f"{a['profit'] + a['hedge_pnl']:+.2f}", f"{b['profit'] + b['hedge_pnl']:+.2f}")
-            for label, a, b in reversed(twinned[-recent:])]
+    ways = [("both at once", [p for p in twinned if p[3] != "polymarket_first"]),
+            ("Polymarket US first", [p for p in twinned if p[3] == "polymarket_first"])]
+    columns = [side_by_side([p[side] for p in group]) if group else ["-"] * len(names) for _, group in ways for side in (1, 2)]
+    print_table("live beside paper, on the same signals", ("", "at once: live", "paper", "PM first: live", "paper"),
+                [(name, *cells) for name, *cells in zip(names, *columns)])
+    print()
+    for way, group in ways:
+        fewer = sum(1 for _, a, b, _ in group if a["matched"] < b["matched"])
+        more = sum(1 for _, a, b, _ in group if a["matched"] > b["matched"])
+        print(f"{way}: matched the same contracts on {len(group) - fewer - more} signals of {len(group)}, "
+              f"live fewer than paper on {fewer}, live more on {more}")
+    body = [(short_time(a["signal_ts"])[11:], label[:44], {"polymarket_first": "PM first", "together": "at once"}.get(order, "-"),
+             f"{a['yes_filled']:g}/{a['no_filled']:g} of {a['quantity']:g}", f"{b['yes_filled']:g}/{b['no_filled']:g}",
+             f"{a['profit'] + a['hedge_pnl']:+.2f}", f"{b['profit'] + b['hedge_pnl']:+.2f}")
+            for label, a, b, order in reversed(twinned[-recent:])]
     print_table(f"the newest {len(body)}, yes/no legs filled, and locked in plus sales back",
-                ("time", "bet", "live filled", "paper filled", "live $", "paper $"), body, left=2)
+                ("time", "bet", "orders", "live filled", "paper filled", "live $", "paper $"), body, left=3)
 
 
 # MAIN

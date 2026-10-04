@@ -29,7 +29,13 @@ of them, counted in the twins table so a restart goes on from there. Each
 one has a paper twin on the same signal, of the same size and limits, see
 paper.py, so live fills in play can be set against paper's, and each order
 leaves a footprint of what it took, which paper adds back, see
-footprints.py.
+footprints.py. Its trades with a leg on each venue take turns: one sends
+both orders at once, the next Polymarket US's first and Kalshi's only once
+that has answered, for what it filled, see Executor.fill_legs(). A Kalshi
+leg lands first otherwise, and another trader seeing it trade may take the
+Polymarket US quote away before our order gets there, while a Polymarket
+US leg that misses first leaves nothing to sell back. The twins table
+says which each trade did, and its twin does the same.
 
 An order whose outcome cannot be known, because no answer came, the venue
 failed on its side, or its answer cannot be read, leaves what its trade
@@ -79,7 +85,8 @@ class LiveExecutor(Executor):
         super().__init__(conn, cash, books, log, clock, is_maintenance)
         self.in_play_test = in_play     # Whether the in-play test runs, trading games under way too.
         self.in_play_trades = database.count_twins(conn)    # Live trades the test has taken, this run and before it.
-        self.twins = {}             # Pair id maps to (now, yes, no, Trade, legs) for an in-play trade just taken, for paper's twin.
+        self.twins = {}             # Pair id maps to (now, yes, no, Trade, legs, lead) for an in-play trade just taken, for paper's twin.
+        self.sequence = database.last_twin_sequence(conn)   # How the test's last trade with a leg on each venue sent its orders.
         self.footprints = footprints    # Where each order leaves what it took, for paper to give back, or None.
         self.place = place or PLACE
         self.threads = ThreadPoolExecutor(ORDER_THREADS, thread_name_prefix="orders")
@@ -209,21 +216,34 @@ class LiveExecutor(Executor):
         """
         return config.LIVE_IN_PLAY_CONTRACTS if self.in_play(pair) else None
 
-    def opened(self, pair, yes, no, trade, legs, now):
+    def choose_lead(self, pair, legs):
         """
-        Count an in-play trade, store it in the twins table, and keep it for paper's twin on the same signal.
+        In the in-play test, for a trade with a leg on each venue, take turns
+        with the test's last such trade: both orders at once, or Polymarket
+        US's first. Otherwise both at once.
+        """
+        if not self.in_play(pair) or {leg.venue for leg in legs} != {"kalshi", "polymarket_us"}:
+            return None
+        self.sequence = "together" if self.sequence == "polymarket_first" else "polymarket_first"
+        return "polymarket_us" if self.sequence == "polymarket_first" else None
+
+    def opened(self, pair, yes, no, trade, legs, lead, now):
+        """
+        Count an in-play trade, store it in the twins table with the order its orders went in, and keep it for
+        paper's twin on the same signal.
         """
         if not self.in_play(pair):
             return
         self.in_play_trades += 1
-        database.insert_twin(self.conn, trade.id)
-        self.twins[pair["id"]] = (now, yes, no, trade, legs)
+        mixed = {leg.venue for leg in legs} == {"kalshi", "polymarket_us"}
+        database.insert_twin(self.conn, trade.id, ("polymarket_first" if lead else "together") if mixed else None)
+        self.twins[pair["id"]] = (now, yes, no, trade, legs, lead)
         if self.in_play_trades >= config.LIVE_IN_PLAY_TRADES:
             self.log(f"live in-play test: {self.in_play_trades} trades taken, so no more in play; futures go on")
 
     def twin_of(self, pair_id, now):
         """
-        The in-play trade this executor took on the pair at now, as (yes, no, Trade, legs), for paper's twin, or None.
+        The in-play trade this executor took on the pair at now, as (yes, no, Trade, legs, lead), for paper's twin, or None.
         """
         taken = self.twins.pop(pair_id, None)
         return taken[1:] if taken and taken[0] == now else None
@@ -276,8 +296,8 @@ class LiveExecutor(Executor):
         note = f"{answer.status}: {answer.note}" if answer.note else ""
         return Fill(answer.filled, answer.dollars, order.latency_ms, order.answered_at, note, answer.status == "unfunded")
 
-    async def fill(self, trade, leg):
-        return await self.send(trade, leg, "open", "buy", leg.quantity, leg.limit)
+    async def fill(self, trade, leg, when=None):
+        return await self.send(trade, leg, "open", "buy", leg.quantity, leg.limit)       # Sent now: when is paper's.
 
     async def sell_back(self, trade, leg, quantity, floor, when=None):
         return await self.send(trade, leg, "flatten", "sell", quantity, floor)      # Sent now: live flattens as its answers come.

@@ -176,7 +176,9 @@ CREATE INDEX IF NOT EXISTS idx_orders_trade ON orders (trade_id);
 -- signal, of the same size and limits, it is set against.
 CREATE TABLE IF NOT EXISTS twins (
     live_trade_id   INTEGER PRIMARY KEY,    -- The live trade, see trades.
-    paper_trade_id  INTEGER                 -- Its paper twin, or null when the paper money could not pay for one.
+    paper_trade_id  INTEGER,                -- Its paper twin, or null when the paper money could not pay for one.
+    sequence        TEXT                    -- With a leg on each venue, 'together' when both orders went out at once, or
+                                            -- 'polymarket_first' when Kalshi's waited for Polymarket US's answer. Null otherwise.
 );
 
 -- The paper balances. Live money is read from the venues and has no ledger.

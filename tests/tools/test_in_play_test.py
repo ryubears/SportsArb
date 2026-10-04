@@ -24,17 +24,17 @@ def trade(conn, mode, yes_filled, no_filled, yes_ms, no_ms, profit=0.0, hedge=0.
     return database.insert_trade(conn, t)
 
 
-def test_the_live_trades_are_set_beside_their_paper_twins(tmp_path, capsys):
+def test_the_live_trades_are_set_beside_their_paper_twins_for_each_order_of_their_orders(tmp_path, capsys):
     conn = database.connect(tmp_path / "t.sqlite")
     conn.execute("INSERT INTO pairs (id, sport, label, kind, venues, contracts, flags, matched_at) "
                  "VALUES (1, 'nfl', 'nfl spread 2026-10-05 IND@WAS IND 3.5', 'spread', 'kalshi,polymarket_us', 2, '[]', ?)", (SIGNAL,))
-    # Both filled in full on one signal. On the next live's Polymarket US leg missed, which paper's filled, and live sold back
-    # its Kalshi leg 2 cents a contract under what it paid. A third live trade found the paper money short.
-    pairs = [(trade(conn, "live", 5, 5, 95, 20, profit=0.15), trade(conn, "paper", 5, 5, 90, 20, profit=0.15)),
-             (trade(conn, "live", 0, 5, 240, 21, hedge=-0.10), trade(conn, "paper", 5, 5, 88, 19, profit=0.15)),
-             (trade(conn, "live", 5, 5, 99, 22, profit=0.15), None)]
-    for live, paper in pairs:
-        database.insert_twin(conn, live)
+    # Both orders at once, and both filled in full. Then Polymarket US first, where live's missed, so its Kalshi order was
+    # never sent, while paper's twin filled both. A third live trade found the paper money short.
+    pairs = [(trade(conn, "live", 5, 5, 95, 20, profit=0.15), trade(conn, "paper", 5, 5, 90, 20, profit=0.15), "together"),
+             (trade(conn, "live", 0, 0, 60, 0), trade(conn, "paper", 5, 5, 88, 19, profit=0.15), "polymarket_first"),
+             (trade(conn, "live", 5, 5, 99, 22, profit=0.15), None, "together")]
+    for live, paper, sequence in pairs:
+        database.insert_twin(conn, live, sequence)
         database.set_twin(conn, live, paper)
     s = Settlement(pairs[0][0], SIGNAL, mode="live")                    # The first live trade has paid out: yes won.
     s.record("yes", "yes", 5.0, SIGNAL)
@@ -43,25 +43,28 @@ def test_the_live_trades_are_set_beside_their_paper_twins(tmp_path, capsys):
     conn.commit()
     in_play_test.print_report(database.read_only(tmp_path / "t.sqlite"))
     out = capsys.readouterr().out
-    assert out.startswith("in-play test: 3 of 100 live trades, at most 5 contracts each, 2026-10-05 17:01:14 to 2026-10-05 17:01:14 UTC\n"
+    assert out.startswith("in-play test: 3 of 200 live trades, at most 5 contracts each, 2026-10-05 17:01:14 to 2026-10-05 17:01:14 UTC\n"
                           "  1 without a paper twin, when the paper money fell short, left out below\n")
     table = out.split("\nlive beside paper, on the same signals\n")[1].split("\n\n")[0].splitlines()[1:]    # Past the header.
     rows = {cells[0]: cells[1:] for cells in (re.split(r"\s{2,}", line.strip()) for line in table)}
-    assert rows["trades"] == ["2", "2"]
-    assert rows["matched in full"] == ["1", "2"] and rows["one leg only"] == ["1", "0"]
-    assert rows["contracts matched"] == ["5 (50%)", "10 (100%)"]
-    assert rows["kalshi legs filled"] == ["2 of 2", "2 of 2"] and rows["polymarket_us legs filled"] == ["1 of 2", "2 of 2"]
-    assert rows["locked in $"] == ["0.15", "0.30"] and rows["sales back $"] == ["-0.10", "+0.00"]
+    # Sent at once, then Polymarket US first: live and paper each.
+    assert rows["trades"] == ["1", "1", "1", "1"]
+    assert rows["matched in full"] == ["1", "1", "0", "1"] and rows["neither leg"] == ["0", "0", "1", "0"]
+    assert rows["contracts matched"] == ["5 (100%)", "5 (100%)", "0 (0%)", "5 (100%)"]
+    assert rows["polymarket_us legs filled, of those sent"] == ["1 of 1", "1 of 1", "0 of 1", "1 of 1"]
+    assert rows["kalshi legs filled, of those sent"] == ["1 of 1", "1 of 1", "0 of 0", "1 of 1"]       # Live's never went.
+    assert rows["locked in $"] == ["0.15", "0.15", "0.00", "0.15"] and rows["sales back $"] == ["+0.00"] * 4
     # The settled live trade paid 5 on yes against the 2.25 + 2.60 its legs cost.
-    assert rows["settled $ (trades)"] == ["+0.15 (1)", "-"]
-    assert rows["polymarket_us round trip ms, median / 90th"] == ["240 / 240", "90 / 90"]     # The upper of two, as quantile() reads.
-    assert "matched the same contracts on 1 signals of 2, live fewer than paper on 1, live more on 0" in out
+    assert rows["settled $ (trades)"] == ["+0.15 (1)", "-", "-", "-"]
+    assert rows["kalshi round trip ms, median / 90th"] == ["20 / 20", "20 / 20", "-", "19 / 19"]
+    assert ("both at once: matched the same contracts on 1 signals of 1, live fewer than paper on 0, live more on 0\n"
+            "Polymarket US first: matched the same contracts on 0 signals of 1, live fewer than paper on 1, live more on 0") in out
     newest = out.split("legs filled, and locked in plus sales back\n")[1].splitlines()[1].split()
-    assert newest[:2] == ["17:01:14", "nfl"] and newest[-6:] == ["0/5", "of", "5", "5/5", "-0.10", "+0.15"]
+    assert newest[:2] == ["17:01:14", "nfl"] and newest[-8:] == ["PM", "first", "0/0", "of", "5", "5/5", "+0.00", "+0.15"]
 
 
 def test_a_database_without_the_test_says_it_has_no_trades(tmp_path, capsys):
     path = tmp_path / "t.sqlite"
     database.connect(path).execute("DROP TABLE twins")
     in_play_test.print_report(database.read_only(path))
-    assert capsys.readouterr().out == "in-play test: 0 of 100 live trades, at most 5 contracts each\n"
+    assert capsys.readouterr().out == "in-play test: 0 of 200 live trades, at most 5 contracts each\n"

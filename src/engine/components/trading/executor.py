@@ -18,7 +18,10 @@ than the other leg's last change, or wait until that change is old enough
 that any reaction to it would have reached us. The scanner offers the edge
 again at the next change, or as soon as the wait ends, through recheck,
 so one that is real is taken then. Once it is taken, both legs' orders go
-out at once.
+out at once, unless the trade has a lead, see fill_legs(): then the lead's
+order goes first and the other's only once it has answered, for no more
+than it filled. The in-play test sends half its trades with a leg on each
+venue Polymarket US first, see live.py.
 
 When the two legs fill unevenly the executor goes flat at once by selling
 the excess back on its own venue, and records the result with fees. A
@@ -125,6 +128,7 @@ class Executor:
                                     # tried again only once that cash has grown, by a payout, a deposit, or a sale.
         self.unsold = {}            # Trade id maps to when, in seconds since 1970, it may be flattened again after a sale that filled nothing.
         self.set_aside = {}         # Trade id maps to why no more orders are sent for it, which only live trading does.
+        self.leads = {}             # Trade id maps to the venue whose leg goes first, for a trade whose legs are not sent at once.
         self.waiting = set()        # Pairs whose edge waited for a book to catch up since the last summary, see confirm_wait().
         self.recheck = None         # Called with (pair id, seconds) when an edge waits, to price the pair again once the wait ends.
         self.retrying = None        # The task flattening exposed trades while one runs.
@@ -160,10 +164,11 @@ class Executor:
         kept = self.games.get(trade.id)
         return game.started(*kept, self.clock()) if kept else True
 
-    async def fill(self, trade, leg):
+    async def fill(self, trade, leg, when=None):
         """
         Buy leg.quantity contracts of one leg of a trade at no more than
-        leg.limit each, to open the trade. Returns a Fill.
+        leg.limit each, to open the trade, sent at when, by our clock, or
+        now. Returns a Fill.
         """
         raise NotImplementedError
 
@@ -266,15 +271,36 @@ class Executor:
         self.unfunded.pop(trade_id, None)
         self.unsold.pop(trade_id, None)
 
+    async def fill_legs(self, trade, legs):
+        """
+        Send both legs' orders and return their Fills, in the legs' order.
+        Both go out at once, unless the trade has a lead in leads: then the
+        leg on that venue goes first, and the other only once it has
+        answered, for no more than it filled, and not at all when it filled
+        nothing, so a lead that misses leaves nothing to sell back.
+        """
+        lead = self.leads.pop(trade.id, None)
+        if lead is None:
+            return list(await asyncio.gather(*(self.fill(trade, leg) for leg in legs)))
+        first = next(leg for leg in legs if leg.venue == lead)
+        second = next(leg for leg in legs if leg is not first)
+        led = await self.fill(trade, first)
+        second.quantity = exact(min(second.quantity, led.filled))
+        if second.quantity < self.step:
+            follow = Fill(ts=led.ts, note=f"not sent, as {lead} filled nothing first")
+        else:
+            follow = await self.fill(trade, second, led.ts)
+        return [led, follow] if legs[0] is first else [follow, led]
+
     async def run_trade(self, trade, legs):
         """
-        Fill both legs, flatten any mismatch as soon as both answers are in,
-        and record the result.
+        Fill both legs, see fill_legs(), flatten any mismatch as soon as both answers are in, and record the result.
         """
-        fills = await asyncio.gather(*(self.fill(trade, leg) for leg in legs))
+        reserved = [leg.quantity * leg.limit for leg in legs]
+        fills = await self.fill_legs(trade, legs)
         answered = max((fill.ts for fill in fills if fill.ts), default=None)     # When the later answer came, which paper works out after.
-        for leg, fill in zip(legs, fills):
-            self.cash.release(leg.venue, leg.quantity * leg.limit, shard(leg))
+        for leg, fill, cost in zip(legs, fills, reserved):
+            self.cash.release(leg.venue, cost, shard(leg))
             leg.held, leg.cost = fill.filled, fill.dollars
             if fill.filled:
                 self.cash.apply(Ledger(fill.ts, leg.venue, -fill.dollars, "buy", trade.id), shard(leg))
@@ -503,13 +529,21 @@ class Executor:
         quantity = self.quantity_for(legs, self.most(pair))
         if quantity < 1:
             return False
-        self.opened(pair, yes, no, self.open(pair, yes, no, edge, legs, quantity, pays_at, now), legs, now)
+        lead = self.choose_lead(pair, legs)
+        self.opened(pair, yes, no, self.open(pair, yes, no, edge, legs, quantity, pays_at, now, lead), legs, lead, now)
         return True
 
-    def open(self, pair, yes, no, edge, legs, quantity, pays_at, now):
+    def choose_lead(self, pair, legs):
+        """
+        The venue whose leg of a trade on the pair goes first, see fill_legs(), or None to send both at once, as here.
+        """
+        return None
+
+    def open(self, pair, yes, no, edge, legs, quantity, pays_at, now, lead=None):
         """
         Send a trade of quantity contracts on both legs, whose limits are
-        set: reserve its cost, store it, and start its orders. Returns the Trade.
+        set, the leg on lead's venue first when given: reserve its cost,
+        store it, and start its orders. Returns the Trade.
         """
         for leg in legs:
             leg.quantity = quantity
@@ -521,13 +555,15 @@ class Executor:
                       no_venue=no["venue"], no_contract=no["contract_id"], no_polarity=no["polarity"], no_limit=no_leg.limit)
         database.insert_trade(self.conn, trade)
         self.games[trade.id] = (pair.get("game_date"), (yes, no))
+        if lead:
+            self.leads[trade.id] = lead
         self.spawn(self.run_trade(trade, legs))
         return trade
 
-    def opened(self, pair, yes, no, trade, legs, now):
+    def opened(self, pair, yes, no, trade, legs, lead, now):
         """
-        Called once a signal on the pair, through the members yes and no, has sent trade, with its legs. Nothing
-        more here, see LiveExecutor.opened().
+        Called once a signal on the pair, through the members yes and no, has sent trade, with its legs, the leg
+        on lead's venue first when given. Nothing more here, see LiveExecutor.opened().
         """
 
     def tick(self, now):
