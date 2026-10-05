@@ -18,13 +18,16 @@ from common import sports
 
 MIN_EDGE = 0.02             # Net dollars per contract at the top before orders are sent, and the floor for the deeper levels they sweep.
                             # Five cents to 2026-10-04. MIN_ANNUAL_PCT weighs an edge against the time it ties the money up, so this
-                            # floor only keeps out the noise of an edge of a cent or so.
+                            # floor only keeps out the noise of an edge of a cent or so. Paper's, and the stretch the scanner times.
+                            # Live has its own from 2026-10-05: on a future each level its orders sweep must return MIN_ANNUAL_PCT a
+                            # year, and on a game under way LIVE_IN_PLAY_MIN_EDGE.
 MIN_PAYOUT_HOURS = 24       # The soonest a future, or a bet on a game before it starts, may pay out for live to trade it. A game
                             # under way live trades only with run.py --live-in-play, by MAX_PAYOUT_HOURS.
 MAX_PAYOUT_HOURS = 24       # The latest a bet on a game, match, race, or window may pay out for paper to trade it, before it and while
                             # it is played, and for live to trade it once under way, so both trade the ones on the day.
 MIN_ANNUAL_PCT = 50         # The least an edge must return a year on the capital it ties up until the bet pays, before a game or on
                             # a future. A 5 cent edge clears it if it pays within 38 days, 10 cents within 81, and 20 within 182.
+                            # Live's future orders sweep only the levels that clear it too, see LiveExecutor.min_edge().
 FILL_SHARE = 1.0            # The share of visible size at a level a trade asks for. At 0.5 to 2026-10-03, 222 of 231 live trades were
                             # sized by it, not the cash, every Kalshi order filled in full, Polymarket US orders of 10 or more filled
                             # in full 45 times in 46, and another taker bought the same side at our price within 10 s of 4 of 140.
@@ -61,8 +64,15 @@ PAPER_START_BALANCE = 10000.0   # Paper dollars per venue at the start.
 # LIVE, trading/live.py, trading/brakes.py, and money/live.py. A live trade is sized as a paper one is, by the books and the cash
 # alone. The brakes are sized for a test with about 100 dollars on each venue.
 
-LIVE_MIN_EDGE_SECONDS = 0.5 # How long a pair's edge must have stayed at MIN_EDGE or more, unbroken, as the scanner times it,
-                            # before live trades it, from 2026-10-05 at the user's asking. Paper takes an edge when first seen.
+LIVE_IN_PLAY_MIN_EDGE = 0.05    # The least edge live trades on a game under way, in place of MIN_EDGE, and the floor for the deeper
+                                # levels its orders sweep there, from 2026-10-05 at the user's asking.
+LIVE_IN_PLAY_CONTRACTS = 5      # The most contracts a live trade on a game under way asks for, from 2026-10-05 at the user's asking.
+LIVE_IN_PLAY_TRADES = 200       # The live trades on games under way after which live takes no more, from 2026-10-05 at the user's
+                                # asking. Counted by the trades table's in_play column, which trades before then lack, so a restart
+                                # goes on from there; raise it to run more. Futures go on.
+LIVE_IN_PLAY_PM_SECONDS = 0.0   # On a game under way, how long before a signal the Polymarket US leg's book may have reached us for
+                                # live to trade it, from 2026-10-05 at the user's asking. At 0 only the signal that book's own change
+                                # brings is traded, since in play a price that has stood still there may be one no order can fill.
 LIVE_BALANCE_SECONDS = 15   # Between readings of the venues' balances. Under http.IDLE_SECONDS, so each reading also keeps the
                             # venue's kept connection open for the next order: one opened afresh took Polymarket US 11 ms longer.
 LIVE_LOW_CASH = 5.0         # Dollars on a live venue, or on one of its shards in LIVE_SHARDS, under which a human is emailed, once until

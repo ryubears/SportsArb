@@ -25,20 +25,27 @@ the records are wrong, see check_positions().
 
 Live trades the futures, see executor.py, and with run.py --live-in-play
 also the games, matches, races, and windows under way that pay within
-config.MAX_PAYOUT_HOURS, sized as any other trade, by the books and the
-cash, with Polymarket US's order first and Kalshi's only once that has
-answered, for what it filled, see Executor.fill_legs(). From 2026-10-04 to
-10-05 the in-play test traded 200 of them at no more than 5 contracts,
-each beside a paper twin on the same signal, see tools/in_play_test.py.
-When paper trades the same games, each live order leaves a footprint of
-what it took, which paper adds back, see footprints.py.
+config.MAX_PAYOUT_HOURS, by its own rules below, with Polymarket US's
+order first and Kalshi's only once that has answered, for what it filled,
+see Executor.fill_legs(). From 2026-10-04 to 10-05 the in-play test traded
+200 of them at no more than 5 contracts, each beside a paper twin on the
+same signal, see tools/in_play_test.py. When paper trades the same games,
+each live order leaves a footprint of what it took, which paper adds back,
+see footprints.py.
 
-Since 2026-10-05 live trades an edge, future or game, only once it has
-stayed at config.MIN_EDGE or more for config.LIVE_MIN_EDGE_SECONDS, half
-a second, by the scanner's episode: one that ends sooner is never traded,
-and one still there when the time is up is priced again then and traded,
-see hold(). Paper takes an edge when first seen, so the two no longer trade
-the same signals.
+Live takes an edge the moment it sees it, as paper does. From 2026-10-05
+04:07 UTC it took one only once it had lasted half a second, until the
+user dropped that with the rules below. A future's orders sweep only the
+levels that return config.MIN_ANNUAL_PCT a year until it pays, not every
+level down to config.MIN_EDGE, see min_edge(). On a game under way live
+takes an edge of config.LIVE_IN_PLAY_MIN_EDGE or more, five cents, and
+takes it only on the signal a change of the Polymarket US leg's book
+brings, see just_quoted(), since in play a price that has stood still
+there may be one no order can fill. It asks for no more than
+config.LIVE_IN_PLAY_CONTRACTS a trade, and takes no more such trades once
+it has made config.LIVE_IN_PLAY_TRADES, counted in the trades table so a
+restart goes on from there, see plays(). All from 2026-10-05, at the
+user's asking.
 
 An order whose outcome cannot be known, because no answer came, the venue
 failed on its side, or its answer cannot be read, leaves what its trade
@@ -63,7 +70,8 @@ from db import database
 from db.models import Order
 from engine.components.trading.brakes import Brakes
 from engine.components.trading.executor import Executor, Fill
-from engine.helper import config
+from engine.helper import config, game
+from engine.helper.pricing import edge_for_annual
 
 PLACE = {"kalshi": kalshi.place_order, "polymarket_us": polymarket_us.place_order}   # How each venue takes an order.
 POSITIONS = {"kalshi": kalshi.positions, "polymarket_us": polymarket_us.positions}    # How each venue reports what the account holds.
@@ -96,6 +104,7 @@ class LiveExecutor(Executor):
         self.positions = POSITIONS if positions is None else positions
         self.checks = Periodic(lambda: config.LIVE_POSITION_SECONDS, log, "live position check")
         self.told = {}              # (venue, contract) maps to the mismatch last logged on it, so it is logged once.
+        self.in_play_trades = database.count_in_play_trades(conn, self.mode)    # Trades made on games under way, before this start too.
 
     @property
     def halted(self):
@@ -177,33 +186,72 @@ class LiveExecutor(Executor):
 
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """
-        Take the signal as the paper executor would, unless live trading has halted.
+        Take the signal by the shared rules and live's own, unless live
+        trading has halted. Count a trade on a game under way, and log when
+        the last of config.LIVE_IN_PLAY_TRADES is taken.
         """
         if self.halted:
             return False
-        return super().signal(pair, yes, no, edge, size, fee_infos, now)
+        sent = super().signal(pair, yes, no, edge, size, fee_infos, now)
+        if sent and self.in_game(pair, yes, no, now):
+            self.in_play_trades += 1
+            if self.in_play_trades == config.LIVE_IN_PLAY_TRADES:
+                self.log(f"live has made {self.in_play_trades} trades on games under way, so it makes no more; futures go on")
+        return sent
 
-    def hold(self, pair, now):
+    def in_game(self, pair, yes, no, now):
         """
-        How many seconds until the pair's edge has stayed at config.MIN_EDGE
-        or more for config.LIVE_MIN_EDGE_SECONDS, by the scanner's episode, 0
-        once it has, or without a scanner to say when it began, as in tests.
+        Whether live trades the pair now as a game under way, which it does only with in_play, see plays().
         """
-        since = self.edge_since(pair["id"]) if self.edge_since else None
-        if since is None:
-            return 0.0
-        return max(0.0, config.LIVE_MIN_EDGE_SECONDS - seconds_between(since, now))
+        return self.in_play and pair.get("game_date") is not None and self.under_way(pair, yes, no, now)
+
+    def min_edge(self, pair, yes, no, now):
+        """
+        config.LIVE_IN_PLAY_MIN_EDGE on a game under way. Otherwise, on a
+        future, the edge that returns config.MIN_ANNUAL_PCT a year until the
+        bet pays, so each level its orders sweep returns that, as the top
+        must, see pays_enough(). config.MIN_EDGE for a bet that gives no
+        payout time, which pays_enough() turns down anyway.
+        """
+        if self.in_game(pair, yes, no, now):
+            return config.LIVE_IN_PLAY_MIN_EDGE
+        pays_at = game.pays_at((yes, no), pair["sport"])
+        if not pays_at:
+            return config.MIN_EDGE
+        return edge_for_annual(config.MIN_ANNUAL_PCT, game.days_until(now, pays_at))
+
+    def most(self, pair, yes, no, now):
+        """
+        config.LIVE_IN_PLAY_CONTRACTS on a game under way, otherwise as many as the books and the cash allow.
+        """
+        return config.LIVE_IN_PLAY_CONTRACTS if self.in_game(pair, yes, no, now) else None
+
+    def just_quoted(self, pair, yes, no, now):
+        """
+        On a game under way, whether the Polymarket US leg's book reached us
+        no more than config.LIVE_IN_PLAY_PM_SECONDS before now. At 0 only the
+        signal its own change brings is traded, not one brought by Kalshi's
+        book, another member's, a recheck, or the tick. Any otherwise.
+        """
+        if not self.in_game(pair, yes, no, now):
+            return True
+        for member in (yes, no):
+            if member["venue"] == "polymarket_us":
+                book = self.book((member["venue"], member["contract_id"]))
+                return book is not None and seconds_between(book.ts, now) <= config.LIVE_IN_PLAY_PM_SECONDS
+        return True
 
     def plays(self, pair, yes, no, now):
         """
         A future, and with in_play a game, match, race, or window only once
         it is under way, judged by every member of the pair, since a Kalshi
-        contract gives no kickoff. Otherwise as the shared Executor says:
-        live's desk offers it only futures then, see run.py.
+        contract gives no kickoff, until config.LIVE_IN_PLAY_TRADES of them
+        have been made. Otherwise as the shared Executor says: live's desk
+        offers it only futures then, see run.py.
         """
         if not self.in_play or pair.get("game_date") is None:
             return super().plays(pair, yes, no, now)
-        return self.under_way(pair, yes, no, now)
+        return self.under_way(pair, yes, no, now) and self.in_play_trades < config.LIVE_IN_PLAY_TRADES
 
     def pays_in_time(self, hours, pair):
         """

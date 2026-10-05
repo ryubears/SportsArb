@@ -42,6 +42,14 @@ def test_depth_stops_where_the_edge_falls_under_the_floor():
     assert pricing.depth(leg_a, leg_b, fee, fee, 0.05) == (0.46, 0.47, 100)      # The third level is under 5 cents.
     assert pricing.depth(leg_a, leg_b, fee, fee, 0.08) == (0.45, 0.47, 1)        # Only the top level clears 8 cents.
     assert pricing.depth(leg_a, leg_b, fee, fee, 0.09) == (None, None, 0)        # Nothing does.
+    assert pricing.depth(leg_a, leg_b, fee, fee, 0.05, most=1) == (0.45, 0.47, 1)       # The top level holds the one asked for.
+    assert pricing.depth(leg_a, leg_b, fee, fee, 0.05, most=5) == (0.46, 0.47, 100)     # Five need the second.
+
+
+def test_the_edge_for_a_return_a_year_returns_just_that():
+    assert pricing.edge_for_annual(50, 365) == pytest.approx(1 / 3)       # A third of a dollar on the two thirds both legs cost, in a year.
+    for days in (1 / 24, 4.25, 27.25, 180):
+        assert pricing.annual_pct(pricing.edge_for_annual(50, days), days) == pytest.approx(50)
 
 
 def test_positive_depth_walks_both_ladders_while_the_edge_is_positive():

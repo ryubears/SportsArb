@@ -29,8 +29,11 @@ venues, trading/ makes the trades, and money/ keeps the cash.
   still flattens and settles every trade it holds. With --live-in-play
   live also trades the games, matches, races, and windows under way that
   pay within MAX_PAYOUT_HOURS, of every sport, Polymarket US's order
-  first. When paper runs too it trades the same games, given back what
-  our live orders took from the books, see trading/footprints.py.
+  first, an edge of LIVE_IN_PLAY_MIN_EDGE or more at once, but only as
+  Polymarket US's book for its leg changes, at most LIVE_IN_PLAY_CONTRACTS
+  a trade, for LIVE_IN_PLAY_TRADES trades. When paper runs too it trades
+  the same games, given back what our live orders took from the books, see
+  trading/footprints.py.
   - Paper: trading/paper.py fills against the same books with the paper
     money of money/paper.py.
   - Live: trading/live.py sends real orders with the money the venues
@@ -158,13 +161,24 @@ def paper_settings():
             f"{c.PAPER_START_BALANCE:,.0f}$")
 
 
+def in_play_settings(taken):
+    """
+    What edge live trades on a game under way, when, how many contracts, and for how many trades, taken of them so far, in words.
+    """
+    c = config
+    when = ("as Polymarket US's book for its leg changes" if not c.LIVE_IN_PLAY_PM_SECONDS
+            else f"while Polymarket US's book for its leg reached us within {c.LIVE_IN_PLAY_PM_SECONDS:g}s")
+    return (f"an edge of {c.LIVE_IN_PLAY_MIN_EDGE:g}$ or more at once, {when}, at most {c.LIVE_IN_PLAY_CONTRACTS} contracts a trade, "
+            f"for {c.LIVE_IN_PLAY_TRADES} trades, {taken} taken so far")
+
+
 def live_settings():
     """
     The settings that decide what the live trader does, in one line.
     """
     c = config
-    return (f"LIVE TRADING with real money: trades sized as paper ones, an edge once it has lasted {c.LIVE_MIN_EDGE_SECONDS:g}s at "
-            f"{c.MIN_EDGE:g}$ or more, balances read every "
+    return (f"LIVE TRADING with real money: an edge as soon as seen, a future's orders down to the levels returning "
+            f"{c.MIN_ANNUAL_PCT}% a year, balances read every "
             f"{c.LIVE_BALANCE_SECONDS}s, email under {c.LIVE_LOW_CASH:,.2f}$ on a venue or shard; halt at {c.LIVE_UNKNOWN_LIMIT} "
             f"unknown outcomes in {c.LIVE_ORDER_WINDOW} orders, {c.LIVE_REJECT_LIMIT} refusals in a row, or a loss over "
             f"{c.LIVE_MAX_LOSS_SHARE:.0%} in {c.LIVE_RESULT_HOURS}h")
@@ -263,7 +277,7 @@ class Session:
             self.desks.append(Desk(mode, conn, lambda: self.recorder.books, self.notifier, **rules[mode]))
         self.scanner = scan.Scanner(conn, sports, log, [d.signal for d in self.desks], books=lambda: self.recorder.books) if with_scanner else None
         for desk in self.desks:
-            desk.executor.recheck, desk.executor.edge_since = self.scanner.recheck, self.scanner.edge_since
+            desk.executor.recheck = self.scanner.recheck
         self.recorder = Recorder(conn, self.scanner, self.tapes)
         self.streams = Streams(self.recorder)
         self.last_status = self.last_summary = time.time()
@@ -280,9 +294,9 @@ class Session:
             log(f"live trades the futures of {', '.join(live) or 'no sport'}"
                 + (f", not of {', '.join(self.not_live)}" if self.not_live else ""))
             if self.live_in_play:
+                taken = next(d.executor.in_play_trades for d in self.desks if d.mode == "live")
                 log(f"live also trades the games, matches, races, and windows under way of every sport that pay within "
-                    f"{config.MAX_PAYOUT_HOURS}h, as many contracts as the books and the cash allow, Polymarket US's order first "
-                    f"and Kalshi's for what it filled")
+                    f"{config.MAX_PAYOUT_HOURS}h, {in_play_settings(taken)}, Polymarket US's order first and Kalshi's for what it filled")
             if not notify.EMAIL_FILE.exists():
                 log(f"no email settings in {notify.EMAIL_FILE}, alerts are only logged and stored")
         if any(d.mode == "paper" for d in self.desks):

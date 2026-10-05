@@ -146,3 +146,22 @@ def test_step_11_gives_older_orders_null_book_times(tmp_path):
     conn.execute("INSERT INTO orders (id, trade_id, book_at, book_ts) VALUES (2, 8, 'a', 't')")
     assert tuple(conn.execute("SELECT book_at, book_ts FROM orders WHERE id = 2").fetchone()) == ("a", "t")
     assert version(conn) == len(migrations.STEPS)
+
+
+def test_step_12_gives_older_trades_no_in_play_so_none_of_them_counts(tmp_path):
+    path = tmp_path / "t.sqlite"
+    old = sqlite3.connect(path)
+    old.execute("""CREATE TABLE trades (
+    id             INTEGER PRIMARY KEY,
+    mode           TEXT NOT NULL DEFAULT 'paper',
+    signal_ts      TEXT NOT NULL,
+    pays_at        TEXT NOT NULL    -- When the slower leg pays out.
+)""")
+    old.execute("INSERT INTO trades (id, mode, signal_ts, pays_at) VALUES (1, 'live', 's', 'p')")
+    old.execute("PRAGMA user_version = 11")
+    old.commit()
+    old.close()
+    conn = database.connect(path)
+    assert [tuple(r) for r in conn.execute("SELECT id, in_play FROM trades")] == [(1, None)]
+    assert database.count_in_play_trades(conn, "live") == 0
+    assert version(conn) == len(migrations.STEPS)

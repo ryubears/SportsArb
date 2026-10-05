@@ -227,9 +227,21 @@ def step_11_order_book_times(conn):
             conn.execute(f"ALTER TABLE orders ADD COLUMN {column} TEXT")
 
 
+def step_12_trades_in_play(conn):
+    """
+    Trades now say whether their game was under way at the signal, which
+    counts the live trades on games under way toward
+    config.LIVE_IN_PLAY_TRADES. Older trades did not, so theirs is null and
+    none of them counts.
+    """
+    if "in_play" not in [r[1] for r in conn.execute("PRAGMA table_info(trades)")]:
+        conn.execute("ALTER TABLE trades ADD COLUMN in_play INTEGER")
+
+
 # Step n brings a database from user_version n - 1 to n. Only ever add to the end.
 STEPS = [step_1_catch_up, step_2_settlements, step_3_opening_balances, step_4_modes, step_5_drop_quotes, step_6_pair_sports,
-         step_7_min_edge_stretch, step_8_drop_transfers, step_9_drop_trade_caps, step_10_twin_sequences, step_11_order_book_times]
+         step_7_min_edge_stretch, step_8_drop_transfers, step_9_drop_trade_caps, step_10_twin_sequences, step_11_order_book_times,
+         step_12_trades_in_play]
 
 
 def migrate(conn, fresh):

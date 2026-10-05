@@ -205,6 +205,7 @@ class Trade:
     hedge: str = "none"     # How the mismatch was flattened, in words.
     hedge_pnl: float = 0.0  # Dollars gained or lost by flattening, after fees.
     status: str = "sent"    # 'sent' while in flight, then 'filled', 'partial', or 'failed'.
+    in_play: int | None = None  # 1 for a trade on a game under way at the signal, else 0. None for trades before 2026-10-05, which lack it.
     label: str | None = None    # The pair's label for log lines, read from the pairs table rather than stored here.
     starts_at: str | None = None    # Kickoff of the game behind the trade, read from the contracts table, for the settler.
 

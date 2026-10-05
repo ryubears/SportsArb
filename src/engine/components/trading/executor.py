@@ -3,8 +3,9 @@ Trade the scanner's signals, the part paper and live trading share.
 
 When the scanner sees a pair with enough net edge, the executor sends one
 limit order per leg. Each leg's limit is the deepest level that still
-leaves config.MIN_EDGE when both ladders are walked together, so the order
-sweeps every level above the floor, not just the top one. How an order
+leaves the least edge the executor trades, see min_edge(), when both
+ladders are walked together, so the order sweeps every level above the
+floor, not just the top one. How an order
 reaches its venue and what comes back is the one thing that differs:
 paper.py fills it against the book the venue had when a live order would
 have reached it, live.py sends it to the venue. Everything else is here.
@@ -48,23 +49,24 @@ flatten it is in flight.
 
 Live trades a season's future, or a game before it starts, while its edge
 is config.MIN_EDGE or more, the bet pays out config.MIN_PAYOUT_HOURS or
-more away, and the edge returns config.MIN_ANNUAL_PCT a year or more
-until then, and with run.py --live-in-play a game under way too, paying
-within config.MAX_PAYOUT_HOURS, see live.py. Live takes an edge only once
-it has stayed at config.MIN_EDGE or more for
-config.LIVE_MIN_EDGE_SECONDS, as the scanner's episode times it, and the
-scanner offers it again then, through recheck, while paper takes it when
-first seen. Paper trades games before and while they are played, paying
-within config.MAX_PAYOUT_HOURS, see paper.py. Both legs are always on two
-venues, see pricing.best_trade(). Both venues must be trading, outside
-the weekly maintenance each publishes, see common/venues.py: while one
-has stopped, its feed may still show prices no order can trade at. A
-trade asks for config.FILL_SHARE of what the books show at that edge, the
-share we expect to get, as far as the cash free on each venue pays for,
-live as on paper. Every trade is stored in the trades table as soon as it
-is sent and updated when it is done, and every dollar moved goes through
-the cash the executor was given. Settling what was bought is
-money/settle.py's job.
+more away, and the edge returns config.MIN_ANNUAL_PCT a year or more until
+then, and with run.py --live-in-play a game under way too, paying within
+config.MAX_PAYOUT_HOURS, see live.py. Live's orders on a future sweep only
+the levels that return config.MIN_ANNUAL_PCT a year. On a game under way
+live takes an edge of config.LIVE_IN_PLAY_MIN_EDGE or more at once, but
+only as Polymarket US's book for its leg changes, at most
+config.LIVE_IN_PLAY_CONTRACTS a trade, for config.LIVE_IN_PLAY_TRADES
+trades, see min_edge(), just_quoted(), and most(). Paper trades games
+before and while they are played, paying within config.MAX_PAYOUT_HOURS,
+see paper.py. Both legs are always on two venues, see
+pricing.best_trade(). Both venues must be trading, outside the weekly
+maintenance each publishes, see common/venues.py: while one has stopped,
+its feed may still show prices no order can trade at. A trade asks for
+config.FILL_SHARE of what the books show at that edge, the share we expect
+to get, as far as the cash free on each venue pays for, live as on paper.
+Every trade is stored in the trades table as soon as it is sent and
+updated when it is done, and every dollar moved goes through the cash the
+executor was given. Settling what was bought is money/settle.py's job.
 """
 
 import asyncio
@@ -138,9 +140,7 @@ class Executor:
         self.set_aside = {}         # Trade id maps to why no more orders are sent for it, which only live trading does.
         self.leads = {}             # Trade id maps to the venue whose leg goes first, for a trade whose legs are not sent at once.
         self.waiting = set()        # Pairs whose edge waited for a book to catch up since the last summary, see confirm_wait().
-        self.held = set()           # Pairs whose edge was held until it had lasted since the last summary, see hold().
         self.recheck = None         # Called with (pair id, seconds) when an edge waits, to price the pair again once the wait ends.
-        self.edge_since = None      # Called with a pair id, returns when its edge at config.MIN_EDGE or more began, see Scanner.edge_since().
         self.retrying = None        # The task flattening exposed trades while one runs.
         self.totals = {"trades": 0, "profit": 0.0, "hedge": 0.0}
         self.reload_exposed()
@@ -407,11 +407,8 @@ class Executor:
         self.done = []
         counts = {s: sum(1 for t in recent if t.status == s) for s in ("filled", "partial", "failed")}
         waiting = ""
-        if self.held:
-            waiting += f"; {len(self.held)} pairs' edges held until they lasted"
-            self.held = set()
         if self.waiting:
-            waiting += f"; {len(self.waiting)} pairs' edges waited for a book to catch up"
+            waiting = f"; {len(self.waiting)} pairs' edges waited for a book to catch up"
             self.waiting = set()
         return (f"{self.mode}: {len(recent)} trades ({counts['filled']} filled, {counts['partial']} partial, {counts['failed']} failed), "
                 f"locked in {sum(t.profit for t in recent):.2f}$, hedges {sum(t.hedge_pnl for t in recent):+.2f}$; "
@@ -461,12 +458,26 @@ class Executor:
             return False
         return annual_pct(edge, game.days_until(now, pays_at)) >= config.MIN_ANNUAL_PCT
 
-    def hold(self, pair, now):
+    def min_edge(self, pair, yes, no, now):
         """
-        How many seconds the pair's edge must still last before this executor trades it, 0 when it may now: paper
-        takes an edge the moment it is seen, live waits, see LiveExecutor.hold().
+        The least edge this executor trades on the pair at now, and the floor for the deeper levels its orders sweep:
+        config.MIN_EDGE, and live's own on a game under way, see LiveExecutor.min_edge().
         """
-        return 0.0
+        return config.MIN_EDGE
+
+    def most(self, pair, yes, no, now):
+        """
+        The most contracts this executor asks for on the pair at now, or None for as many as the books and the cash
+        allow: live's on a game under way, see LiveExecutor.most().
+        """
+        return None
+
+    def just_quoted(self, pair, yes, no, now):
+        """
+        Whether the signal at now is on prices this executor trades: any here, while live, on a game under way, trades
+        only Polymarket US's just as they reach us, see LiveExecutor.just_quoted().
+        """
+        return True
 
     def confirm_wait(self, yes, no, now):
         """
@@ -490,15 +501,17 @@ class Executor:
                 wait = max(wait, other + config.CONFIRM_SECONDS.get(member["venue"], 0) - clock)
         return wait
 
-    def quantity_for(self, legs):
+    def quantity_for(self, legs, least, most=None):
         """
         Set each leg's limit and return how many contracts to ask for. The
-        two ladders are walked together through the levels that keep
-        config.MIN_EDGE, each limit set at the deepest level reached. The
-        quantity is config.FILL_SHARE of what those levels show, the share we
-        expect to get, so an unchanged book fills in full, and no more than
-        the cash free pays for, both legs' at once where they share a venue's
-        cash.
+        two ladders are walked together through the levels that keep an
+        edge of least, see min_edge(), each limit set at the deepest level
+        reached. The quantity is config.FILL_SHARE of what those levels
+        show, the share we expect to get, so an unchanged book fills in
+        full, and no more than the cash free pays for, both legs' at once
+        where they share a venue's cash. Given most, it is no more than
+        that, and the walk stops at the levels that hold it, so no limit
+        goes deeper than those.
         """
         yes_leg, no_leg = legs
         yes_book, no_book = self.book(yes_leg.key), self.book(no_leg.key)
@@ -507,40 +520,39 @@ class Executor:
         yes_ladder = ladder(yes_book, yes_leg.polarity, "yes")
         no_ladder = ladder(no_book, no_leg.polarity, "no")
         yes_leg.limit, no_leg.limit, available = depth(yes_ladder, no_ladder, (yes_leg.venue, yes_leg.fee_info),
-                                                       (no_leg.venue, no_leg.fee_info), config.MIN_EDGE)
+                                                       (no_leg.venue, no_leg.fee_info), least,
+                                                       None if most is None else most / config.FILL_SHARE)
         if not available:
             return 0
         per_contract = {}           # What one contract of both legs costs from each venue's cash, its shard's where it has them.
         for leg in legs:
             per_contract[(leg.venue, shard(leg))] = per_contract.get((leg.venue, shard(leg)), 0.0) + leg.limit
         affordable = min(self.cash.spendable(venue, part) // cost for (venue, part), cost in per_contract.items())
-        return int(min(available * config.FILL_SHARE, affordable))
+        quantity = min(available * config.FILL_SHARE, affordable)
+        return int(quantity if most is None else min(quantity, most))
 
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """
         Called by the scanner when a pair shows an edge. Sends the two legs
-        when the edge, whether its game has started, see plays(), the time
-        until the bet pays, its return a year, how long the edge has lasted,
-        see hold(), both venues trading, and the balances allow, Polymarket
-        US's leg first on a game under way. Returns
+        when the edge, see min_edge(), whether its game has started, see
+        plays(), the time until the bet pays, its return a year, the prices
+        it is on, see just_quoted(), both venues trading, and the balances
+        allow, Polymarket US's leg first on a game under way. Returns
         True when orders were sent, so the scanner sends no more for this
         episode. The scanner's size counts every level with a positive edge,
-        while the legs are sized from the levels that keep config.MIN_EDGE,
+        while the legs are sized from the levels that keep the least edge,
         see quantity_for(). The cost is reserved here, before anything is
         awaited, so a second signal in the same moment sees what is left.
         """
-        if edge < config.MIN_EDGE:
+        least = self.min_edge(pair, yes, no, now)
+        if edge < least:
             return False
         if not self.plays(pair, yes, no, now):
             return False
         pays_at = game.pays_at((yes, no), pair["sport"])
         if not self.pays_enough(edge, now, pays_at, pair):
             return False
-        hold = self.hold(pair, now)
-        if hold > 0:
-            self.held.add(pair["id"])
-            if self.recheck:
-                self.recheck(pair["id"], hold)
+        if not self.just_quoted(pair, yes, no, now):
             return False
         wait = self.confirm_wait(yes, no, now)
         if wait is None or wait > 0:
@@ -552,20 +564,21 @@ class Executor:
                 for side, m in (("yes", yes), ("no", no))]
         if any(self.is_maintenance(leg.venue, now) for leg in legs):
             return False
-        quantity = self.quantity_for(legs)
+        quantity = self.quantity_for(legs, least, self.most(pair, yes, no, now))
         if quantity < 1:
             return False
         for leg in legs:
             leg.quantity = quantity
             self.cash.reserve(leg.venue, quantity * leg.limit, shard(leg))
         yes_leg, no_leg = legs
+        under_way = self.under_way(pair, yes, no, now)
         trade = Trade(mode=self.mode, pair_id=pair["id"], label=pair["label"], trade=trade_words(yes, no), signal_ts=now, edge=edge,
-                      quantity=quantity, pays_at=pays_at,
+                      quantity=quantity, pays_at=pays_at, in_play=int(under_way),
                       yes_venue=yes["venue"], yes_contract=yes["contract_id"], yes_polarity=yes["polarity"], yes_limit=yes_leg.limit,
                       no_venue=no["venue"], no_contract=no["contract_id"], no_polarity=no["polarity"], no_limit=no_leg.limit)
         database.insert_trade(self.conn, trade)
         self.games[trade.id] = (pair.get("game_date"), (yes, no))
-        if self.under_way(pair, yes, no, now) and any(leg.venue == "polymarket_us" for leg in legs):
+        if under_way and any(leg.venue == "polymarket_us" for leg in legs):
             self.leads[trade.id] = "polymarket_us"
         self.spawn(self.run_trade(trade, legs))
         return True

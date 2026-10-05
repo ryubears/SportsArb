@@ -124,7 +124,8 @@ CREATE TABLE IF NOT EXISTS trades (
     hedge          TEXT NOT NULL,   -- How a mismatch was flattened, in words.
     hedge_pnl      REAL NOT NULL,   -- Dollars gained or lost by flattening, after fees.
     status         TEXT NOT NULL,   -- 'sent' while in flight, then 'filled', 'partial', or 'failed'.
-    pays_at        TEXT NOT NULL    -- When the slower leg pays out.
+    pays_at        TEXT NOT NULL,   -- When the slower leg pays out.
+    in_play        INTEGER          -- 1 for a trade on a game under way at the signal, else 0. Null before 2026-10-05.
 );
 
 -- The same for the trades of a recent window.
