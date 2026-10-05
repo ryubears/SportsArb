@@ -173,7 +173,7 @@ class PaperExecutor(Executor):
         (contracts, dollars).
         """
         ours = self.taken.setdefault(leg.key, {})
-        for price, contracts in takes(levels, quantity, config.FILL_SHARE, limit):
+        for price, contracts in takes(levels, quantity, config.FILL_SHARE, limit, selling=selling):
             level = book_level(leg.polarity, leg.side, price, selling)
             ours[level] = ours.get(level, 0) + contracts
         return sweep(levels, quantity, leg.venue, leg.fee_info, config.FILL_SHARE, limit=limit, selling=selling)

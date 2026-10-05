@@ -20,6 +20,16 @@ LEDGER_START_BALANCE = 10000.0      # What each venue started with when ledgers 
 SETTLEMENT_COLUMNS = ["yes_result", "yes_payout", "yes_settled_at", "no_result", "no_payout", "no_settled_at", "settled_at"]
 
 
+def add_columns(conn, table, columns, kind):
+    """
+    Add each of the columns the table lacks, all of one kind, a type and any constraint.
+    """
+    have = schema.table_columns(conn, table)
+    for column in columns:
+        if column not in have:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+
+
 def copy_settlements(conn, table):
     """
     Copy the settlement columns of a trades table in the older shape into the settlements table.
@@ -37,25 +47,25 @@ def migrate_pair_ids(conn):
     and trades of pairs that had already left the catalog get a bare pair
     row, so their id resolves.
     """
-    if "id" not in [r[1] for r in conn.execute("PRAGMA table_info(pairs)")]:
+    if "id" not in schema.table_columns(conn, "pairs"):
         conn.execute("ALTER TABLE pairs RENAME TO pairs_old")
         schema.create(conn)
         conn.execute("""INSERT INTO pairs (label, kind, season, game_date, team_a, team_b, subject, line, venues, contracts, flags, matched_at)
                         SELECT label, kind, season, game_date, team_a, team_b, subject, line, venues, contracts, flags, matched_at FROM pairs_old""")
         conn.execute("DROP TABLE pairs_old")
-    if "pair_label" in [r[1] for r in conn.execute("PRAGMA table_info(bets)")]:
+    if "pair_label" in schema.table_columns(conn, "bets"):
         conn.execute("ALTER TABLE bets ADD COLUMN pair_id INTEGER")
         conn.execute("UPDATE bets SET pair_id = (SELECT id FROM pairs WHERE label = bets.pair_label)")
         conn.execute("ALTER TABLE bets DROP COLUMN pair_label")
     for table, first_ts in (("opportunities", "start_ts"), ("trades", "signal_ts")):
-        old_columns = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+        old_columns = schema.table_columns(conn, table)
         if "label" not in old_columns:
             continue
         conn.execute(f"""INSERT OR IGNORE INTO pairs (label, kind, venues, contracts, flags, matched_at)
                          SELECT label, kind, '', 0, '[]', MIN({first_ts}) FROM {table} GROUP BY label""")
         conn.execute(f"ALTER TABLE {table} RENAME TO {table}_old")
         schema.create(conn)
-        shared = [c for c, in conn.execute(f"SELECT name FROM pragma_table_info('{table}')") if c in old_columns]
+        shared = [c for c in schema.table_columns(conn, table) if c in old_columns]
         conn.execute(f"""INSERT INTO {table} ({', '.join(shared)}, pair_id)
                          SELECT {', '.join('o.' + c for c in shared)}, p.id FROM {table}_old o JOIN pairs p ON p.label = o.label""")
         if table == "trades" and "settled_at" in old_columns:
@@ -70,14 +80,14 @@ def step_1_catch_up(conn):
     when the database still shows the old shape. Derived tables are dropped
     when their columns changed, since a match rebuilds them.
     """
-    if "group_label" in [r[1] for r in conn.execute("PRAGMA table_info(bets)")]:
+    if "group_label" in schema.table_columns(conn, "bets"):
         conn.execute("ALTER TABLE bets RENAME COLUMN group_label TO pair_label")     # Turned into pair_id below.
     conn.execute("DROP TABLE IF EXISTS bet_groups")
     conn.execute("DROP TABLE IF EXISTS fee_history")
     if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'stream_gaps'").fetchone():
         conn.execute("INSERT OR REPLACE INTO gaps (venue, start_ts, end_ts) SELECT venue, start_ts, end_ts FROM stream_gaps")
         conn.execute("DROP TABLE stream_gaps")
-    ledger_columns = [r[1] for r in conn.execute("PRAGMA table_info(ledger)")]
+    ledger_columns = schema.table_columns(conn, "ledger")
     if ledger_columns and "balance" not in ledger_columns:
         # Older ledgers only held the movements. Replay them from the starting balance to fill in the running balance.
         conn.execute("ALTER TABLE ledger ADD COLUMN balance REAL NOT NULL DEFAULT 0")
@@ -85,21 +95,21 @@ def step_1_catch_up(conn):
         for row_id, venue, amount in conn.execute("SELECT id, venue, amount FROM ledger ORDER BY id").fetchall():
             running[venue] = running.get(venue, LEDGER_START_BALANCE) + amount
             conn.execute("UPDATE ledger SET balance = ? WHERE id = ?", (running[venue], row_id))
-    trade_columns = [r[1] for r in conn.execute("PRAGMA table_info(trades)")]
+    trade_columns = schema.table_columns(conn, "trades")
     if trade_columns and "cap" not in trade_columns:
         conn.execute("ALTER TABLE trades ADD COLUMN cap INTEGER")
     if trade_columns and "yes_result" not in trade_columns:
         for column, kind in (("yes_result", "TEXT"), ("yes_payout", "REAL"), ("yes_settled_at", "TEXT"),
                              ("no_result", "TEXT"), ("no_payout", "REAL"), ("no_settled_at", "TEXT")):
             conn.execute(f"ALTER TABLE trades ADD COLUMN {column} {kind}")
-    if "side" in [r[1] for r in conn.execute("PRAGMA table_info(settlements)")]:
+    if "side" in schema.table_columns(conn, "settlements"):
         # Settlements used to be a table of legs. Fold each leg into its trade's columns, which step 2 moves to today's settlements.
         for trade_id, side, result, payout, settled_at in conn.execute(
                 "SELECT trade_id, side, result, payout, settled_at FROM settlements").fetchall():
             conn.execute(f"UPDATE trades SET {side}_result = ?, {side}_payout = ?, {side}_settled_at = ? WHERE id = ?",
                          (result, payout, settled_at, trade_id))
         conn.execute("DROP TABLE settlements")
-    columns = [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]
+    columns = schema.table_columns(conn, "opportunities")
     if "scope" in columns:
         conn.execute("DROP TABLE opportunities")
     if "source" in columns:
@@ -114,7 +124,7 @@ def step_2_settlements(conn):
     Trades used to carry how they settled in seven columns. Move those to
     the settlements table, one row per settled trade, and drop them.
     """
-    columns = [r[1] for r in conn.execute("PRAGMA table_info(trades)")]
+    columns = schema.table_columns(conn, "trades")
     if "settled_at" not in columns:
         return
     copy_settlements(conn, "trades")
@@ -147,8 +157,7 @@ def step_4_modes(conn):
     'live'. Every row before live trading came from the paper executor.
     """
     for table in ("trades", "settlements"):
-        if "mode" not in [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN mode TEXT NOT NULL DEFAULT 'paper'")
+        add_columns(conn, table, ["mode"], "TEXT NOT NULL DEFAULT 'paper'")
 
 
 def step_5_drop_quotes(conn):
@@ -171,8 +180,7 @@ def step_6_pair_sports(conn):
     pair before this is an NFL one. An older database whose pairs table was
     rebuilt by an earlier step already has the column, but not the labels.
     """
-    if "sport" not in [r[1] for r in conn.execute("PRAGMA table_info(pairs)")]:
-        conn.execute("ALTER TABLE pairs ADD COLUMN sport TEXT NOT NULL DEFAULT 'nfl'")
+    add_columns(conn, "pairs", ["sport"], "TEXT NOT NULL DEFAULT 'nfl'")
     conn.execute("UPDATE pairs SET label = 'nfl ' || label WHERE label NOT LIKE 'nfl %'")
 
 
@@ -182,10 +190,7 @@ def step_7_min_edge_stretch(conn):
     the contracts that stayed fillable through it. Older episodes did not
     record them, so theirs are null.
     """
-    columns = [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]
-    for column in ("min_edge_seconds", "min_edge_size", "min_edge_profit"):
-        if column not in columns:
-            conn.execute(f"ALTER TABLE opportunities ADD COLUMN {column} REAL")
+    add_columns(conn, "opportunities", ["min_edge_seconds", "min_edge_size", "min_edge_profit"], "REAL")
 
 
 def step_8_drop_transfers(conn):
@@ -199,7 +204,7 @@ def step_9_drop_trade_caps(conn):
     """
     Live trades are no longer capped, so trades lose the cap column that held a live trade's.
     """
-    if "cap" in [r[1] for r in conn.execute("PRAGMA table_info(trades)")]:
+    if "cap" in schema.table_columns(conn, "trades"):
         conn.execute("ALTER TABLE trades DROP COLUMN cap")
 
 
@@ -208,8 +213,7 @@ def step_10_twin_sequences(conn):
     The in-play test's trades with a leg on each venue now say in what order
     their two orders went out. Every one before this sent both at once.
     """
-    if "sequence" not in [r[1] for r in conn.execute("PRAGMA table_info(twins)")]:
-        conn.execute("ALTER TABLE twins ADD COLUMN sequence TEXT")
+    add_columns(conn, "twins", ["sequence"], "TEXT")
     if conn.execute("SELECT 1 FROM twins LIMIT 1").fetchone():     # Only a database that ran the test has trades with venues.
         conn.execute("""UPDATE twins SET sequence = 'together' WHERE sequence IS NULL AND live_trade_id IN
                         (SELECT id FROM trades WHERE yes_venue != no_venue)""")
@@ -221,10 +225,7 @@ def step_11_order_book_times(conn):
     miss can be told apart from a market that had gone quiet. Older orders
     did not, so theirs are null.
     """
-    columns = [r[1] for r in conn.execute("PRAGMA table_info(orders)")]
-    for column in ("book_at", "book_ts"):
-        if column not in columns:
-            conn.execute(f"ALTER TABLE orders ADD COLUMN {column} TEXT")
+    add_columns(conn, "orders", ["book_at", "book_ts"], "TEXT")
 
 
 def step_12_trades_in_play(conn):
@@ -234,8 +235,7 @@ def step_12_trades_in_play(conn):
     config.LIVE_IN_PLAY_TRADES. Older trades did not, so theirs is null and
     none of them counts.
     """
-    if "in_play" not in [r[1] for r in conn.execute("PRAGMA table_info(trades)")]:
-        conn.execute("ALTER TABLE trades ADD COLUMN in_play INTEGER")
+    add_columns(conn, "trades", ["in_play"], "INTEGER")
 
 
 def step_13_opportunities_take(conn):
@@ -244,10 +244,7 @@ def step_13_opportunities_take(conn):
     live takes it, which the summary shows them by. Older episodes did not,
     so theirs is null and the summary leaves them out.
     """
-    columns = [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]
-    for column in ("take_size", "take_profit"):
-        if column not in columns:
-            conn.execute(f"ALTER TABLE opportunities ADD COLUMN {column} REAL")
+    add_columns(conn, "opportunities", ["take_size", "take_profit"], "REAL")
 
 
 def step_14_opportunities_pm_changed(conn):
@@ -257,8 +254,7 @@ def step_14_opportunities_pm_changed(conn):
     by. Older episodes did not, so theirs is null and the summary leaves
     those in play out.
     """
-    if "pm_changed" not in [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]:
-        conn.execute("ALTER TABLE opportunities ADD COLUMN pm_changed INTEGER")
+    add_columns(conn, "opportunities", ["pm_changed"], "INTEGER")
 
 
 # Step n brings a database from user_version n - 1 to n. Only ever add to the end.

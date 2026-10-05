@@ -184,21 +184,6 @@ class LiveExecutor(Executor):
 
     # SIGNALS
 
-    def signal(self, pair, yes, no, edge, size, fee_infos, now):
-        """
-        Take the signal by the shared rules and live's own, unless live
-        trading has halted. Count a trade on a game under way, and log when
-        the last of config.LIVE_IN_PLAY_TRADES is taken.
-        """
-        if self.halted:
-            return False
-        sent = super().signal(pair, yes, no, edge, size, fee_infos, now)
-        if sent and self.in_game(pair, yes, no, now):
-            self.in_play_trades += 1
-            if self.in_play_trades == config.LIVE_IN_PLAY_TRADES:
-                self.log(f"live has made {self.in_play_trades} trades on games under way, so it makes no more; futures go on")
-        return sent
-
     def in_game(self, pair, yes, no, now):
         """
         Whether live trades the pair now as a game under way, which it does only with in_play, see plays().
@@ -215,7 +200,7 @@ class LiveExecutor(Executor):
         pricing.live_min_edge(), which the scanner uses too.
         """
         pays_at = game.pays_at((yes, no), pair["sport"])
-        return live_min_edge(self.in_game(pair, yes, no, now), game.days_until(now, pays_at) if pays_at else None)
+        return live_min_edge(self.in_game(pair, yes, no, now), game.days_until(now, pays_at))
 
     def most(self, pair, yes, no, now):
         """
@@ -252,6 +237,21 @@ class LiveExecutor(Executor):
         if not self.in_play or pair.get("game_date") is None:
             return super().pays_in_time(hours, pair)
         return hours <= config.MAX_PAYOUT_HOURS
+
+    def signal(self, pair, yes, no, edge, size, fee_infos, now):
+        """
+        Take the signal by the shared rules and live's own, unless live
+        trading has halted. Count a trade on a game under way, and log when
+        the last of config.LIVE_IN_PLAY_TRADES is taken.
+        """
+        if self.halted:
+            return False
+        sent = super().signal(pair, yes, no, edge, size, fee_infos, now)
+        if sent and self.in_game(pair, yes, no, now):
+            self.in_play_trades += 1
+            if self.in_play_trades == config.LIVE_IN_PLAY_TRADES:
+                self.log(f"live has made {self.in_play_trades} trades on games under way, so it makes no more; futures go on")
+        return sent
 
     # ORDERS
 

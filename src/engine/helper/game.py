@@ -72,9 +72,10 @@ def started(game_date, members, now):
 
 def days_until(now, pays_at):
     """
-    Days from now until a bet paying at pays_at pays, at least an hour, for its return a year.
+    Days from now until a bet paying at pays_at pays, at least an hour, for its return a year, or None for a bet that
+    gives no payout time.
     """
-    return max(days_between(now, pays_at), 1 / 24)
+    return max(days_between(now, pays_at), 1 / 24) if pays_at else None
 
 
 def pays_at(members, sport):

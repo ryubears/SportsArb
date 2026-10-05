@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))     # src, so th
 from common.stats import quantile
 from common.venues import VENUES
 from db.database import read_only
+from db.schema import table_columns
 from tools.summary import print_table, short_time
 
 TRADES = 200        # The live trades the test took, 100 when it began.
@@ -53,7 +54,8 @@ def load_pairs(conn):
     'settled', its result once both legs have paid out, paper None when it had no twin, and sequence as the twins
     table says, null in a database from before it did.
     """
-    if not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'twins'").fetchone():
+    twins = table_columns(conn, "twins")
+    if not twins:
         return []
     picked = ", ".join(f"t.{c}" for c in COLUMNS)
 
@@ -66,7 +68,7 @@ def load_pairs(conn):
         payout = row[-1]
         t["settled"] = None if payout is None else payout - t["yes_cost"] - t["no_cost"] + t["hedge_pnl"]
         return t
-    sequence = "w.sequence" if "sequence" in [r[1] for r in conn.execute("PRAGMA table_info(twins)")] else "NULL"
+    sequence = "w.sequence" if "sequence" in twins else "NULL"
     rows = conn.execute(f"""SELECT w.live_trade_id, w.paper_trade_id, p.label, {sequence} FROM twins w
                             JOIN trades t ON t.id = w.live_trade_id JOIN pairs p ON p.id = t.pair_id ORDER BY w.live_trade_id""")
     return [(label, trade(live_id), trade(paper_id), order) for live_id, paper_id, label, order in rows.fetchall()]
@@ -83,11 +85,12 @@ def outcome(t):
     return "one leg" if t["yes_filled"] or t["no_filled"] else "neither"
 
 
-def sent(t, side):
+def sent_legs(trades, venue):
     """
-    Whether a trade's leg had an order sent: one that was not, as Kalshi's when Polymarket US first filled nothing, took no time.
+    The legs of the trades on a venue that had an order sent, as (trade, side): one that was not, as Kalshi's when
+    Polymarket US first filled nothing, took no time.
     """
-    return bool(t[f"{side}_latency_ms"])
+    return [(t, side) for t in trades for side in ("yes", "no") if t[f"{side}_venue"] == venue and t[f"{side}_latency_ms"]]
 
 
 def side_by_side(trades):
@@ -99,12 +102,12 @@ def side_by_side(trades):
     cells = [len(trades)] + [sum(1 for t in trades if outcome(t) == o) for o in ("in full", "in part", "one leg", "neither")]
     cells += [f"{asked:g}", f"{matched:g} ({100 * matched / asked:.0f}%)" if asked else "0"]
     for venue in VENUES:
-        legs = [t[f"{side}_filled"] for t in trades for side in ("yes", "no") if t[f"{side}_venue"] == venue and sent(t, side)]
-        cells.append(f"{sum(1 for filled in legs if filled)} of {len(legs)}")
+        legs = sent_legs(trades, venue)
+        cells.append(f"{sum(1 for t, side in legs if t[f'{side}_filled'])} of {len(legs)}")
     cells += [f"{sum(t['profit'] for t in trades):,.2f}", f"{sum(t['hedge_pnl'] for t in trades):+,.2f}",
               f"{sum(settled):+,.2f} ({len(settled)})" if settled else "-"]
     for venue in VENUES:
-        ms = [t[f"{side}_latency_ms"] for t in trades for side in ("yes", "no") if t[f"{side}_venue"] == venue and sent(t, side)]
+        ms = [t[f"{side}_latency_ms"] for t, side in sent_legs(trades, venue)]
         cells.append(f"{quantile(ms, 0.5):,.0f} / {quantile(ms, 0.9):,.0f}" if ms else "-")
     return cells
 

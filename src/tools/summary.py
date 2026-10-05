@@ -52,6 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))     # src, so th
 from common.stats import quantile
 from common.timeutil import at_seconds, days_between, epoch, now_iso, shift
 from db.database import DB_PATH, read_only
+from db.schema import table_columns
 from engine.helper import config
 
 MODES = {"live": ("live",), "paper": ("paper",), "all": ("paper", "live")}     # What --mode shows, in order.
@@ -237,18 +238,17 @@ def print_market_opportunities(conn, since, hours, sports, market):
     Episodes from before the scanner kept what the peak could have had have
     none and are left out, as are ones still open, which are stored only
     once they end. On a database the live process has not yet brought up to
-    it, the market says so.
-    Capital is what buying those contracts would have cost with fees, and
-    profit what they lock in. The annual rates weight each episode by its
-    capital, over the days until it pays. How long the edge stayed at
-    config.MIN_EDGE or more is the longest unbroken stretch of each episode,
-    in seconds to the thousandth.
+    it, the market says so. Capital is what buying those contracts would
+    have cost with fees, and profit what they lock in. The annual rates
+    weight each episode by its capital, over the days until it pays. How
+    long the edge stayed at config.MIN_EDGE or more is the longest unbroken
+    stretch of each episode, in seconds to the thousandth.
     """
     cents = f"{100 * config.MIN_EDGE:.0f}c"
     where, params = in_sports(sports)
     rule, rule_params, levels = opportunity_rules(market)
     print(f"\n{market} opportunities ({MIN_CONTRACTS}+ contracts at the peak on {levels}), last {hours} hours")
-    if not {"take_size", "pm_changed"} <= {r[1] for r in conn.execute("PRAGMA table_info(opportunities)")}:
+    if not {"take_size", "pm_changed"} <= set(table_columns(conn, "opportunities")):
         print("  not kept yet, until the live process restarts on this code")
         return
     rows = query_rows(conn, f"""
@@ -346,6 +346,60 @@ def print_open_trades(conn, since, hours, mode, market, sports, now):
                 [r[1:] for r in body], left=3)
 
 
+def print_live_orders(conn, since, hours, market, sports):
+    """
+    The real orders sent in the window for the trades of one market, by venue, purpose, and what came back.
+    """
+    where, params = in_sports(sports)
+    body = query_rows(conn, f"""
+        SELECT o.venue, purpose, o.status, COUNT(*), SUM(o.quantity), SUM(filled), ROUND(SUM(dollars), 2), ROUND(SUM(fees), 2), ROUND(AVG(latency_ms))
+        FROM orders o JOIN trades t ON t.id = o.trade_id JOIN pairs p ON p.id = t.pair_id WHERE sent_at >= ?{in_market(market)}{where}
+        GROUP BY o.venue, purpose, o.status""", (since,) + params)
+    body.sort(key=lambda r: (r[0], r[1], by_status(r[2])))
+    if body:
+        print_table(f"live {market} orders, last {hours} hours", ("venue", "purpose", "status", "orders", "asked", "filled", "dollars $", "fees $", "avg ms"),
+                    [(v, p, s, n, contracts(q), contracts(f), *rest) for v, p, s, n, q, f, *rest in body])
+
+
+def book_age(seconds):
+    """
+    The BOOK_AGES label for how many seconds a venue had sent nothing for a market.
+    """
+    return next(label for bound, label in BOOK_AGES if bound is None or seconds < bound)
+
+
+def print_book_ages(conn, since, hours, market, sports):
+    """
+    The real orders to open sent in the window for the trades of one market,
+    by venue, the side they bought, and how long the venue had sent nothing
+    for the market when they went out, see Order.book_ts, and how many of
+    them took something. A market that had gone quiet may have stopped
+    trading with its book still up. Orders from before the book times were
+    recorded, 2026-10-05, are left out, and so is the table on a database
+    the live process has not yet brought up to them.
+    """
+    if "book_ts" not in table_columns(conn, "orders"):
+        return
+    where, params = in_sports(sports)
+    rows = query_rows(conn, f"""
+        SELECT o.venue, o.outcome, o.sent_at, o.book_ts, o.quantity, o.filled
+        FROM orders o JOIN trades t ON t.id = o.trade_id JOIN pairs p ON p.id = t.pair_id
+        WHERE o.sent_at >= ? AND o.purpose = 'open' AND o.book_ts IS NOT NULL{in_market(market)}{where}""", (since,) + params)
+    groups = {}
+    for venue, outcome, sent_at, book_ts, quantity, filled in rows:
+        group = groups.setdefault((venue, outcome, book_age(epoch(sent_at) - epoch(book_ts))), [0, 0, 0.0, 0.0])
+        group[0] += 1
+        group[1] += filled > 0
+        group[2] += quantity
+        group[3] += filled
+    ages = [label for _, label in BOOK_AGES]
+    body = [(venue, outcome, age, n, took, f"{100 * took / n:.0f}", contracts(asked), contracts(filled))
+            for (venue, outcome, age), (n, took, asked, filled) in sorted(groups.items(), key=lambda kv: (kv[0][:2], ages.index(kv[0][2])))]
+    if body:
+        print_table(f"live {market} orders to open by how long the book had sent nothing, last {hours} hours",
+                    ("venue", "buying", "quiet", "orders", "took some", "%", "asked", "filled"), body, left=3)
+
+
 def print_market_trades(conn, since, hours, mode, market, sports, now):
     """
     One mode's trades in one market: how many, by outcome and by kind in the window, the largest, the legs settled in
@@ -354,27 +408,25 @@ def print_market_trades(conn, since, hours, mode, market, sports, now):
     where, params = in_sports(sports)
     where = in_market(market) + where
     total = first_value(conn, f"SELECT COUNT(*) FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ?{where}", (mode,) + params)
-    recent = first_value(conn, f"SELECT COUNT(*) FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ? AND signal_ts >= ?{where}",
-                         (mode, since) + params)
+    window = f"FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ? AND signal_ts >= ?{where}"     # The trades of the window.
+    args = (mode, since) + params
+    recent = first_value(conn, f"SELECT COUNT(*) {window}", args)
     print(f"\n{mode} {market} trades: {total:,} in all, {recent:,} in the last {hours} hours")
     if recent:
         body = query_rows(conn, f"""
             SELECT status, COUNT(*), SUM(quantity), SUM(matched), ROUND(SUM(profit), 2), ROUND(SUM(hedge_pnl), 2), ROUND(SUM(profit + hedge_pnl), 2)
-            FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ? AND signal_ts >= ?{where} GROUP BY status""",
-            (mode, since) + params)
+            {window} GROUP BY status""", args)
         body.sort(key=lambda r: by_status(r[0]))
         print_table(f"{mode} {market} by outcome, last {hours} hours", ("status", "trades", "wanted", "matched", "locked in $", "hedges $", "net $"),
                     [(s, n, contracts(q), contracts(m), *rest) for s, n, q, m, *rest in body])
         body = query_rows(conn, f"""
             SELECT p.sport, p.kind, COUNT(*), ROUND(AVG(100 * edge), 1), ROUND(100.0 * SUM(matched) / SUM(quantity), 0),
                    ROUND(SUM(profit + hedge_pnl), 2), ROUND(AVG(julianday(pays_at) - julianday(signal_ts)), 1)
-            FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ? AND signal_ts >= ?{where} GROUP BY p.sport, p.kind
-            ORDER BY p.sport, p.kind""", (mode, since) + params)
+            {window} GROUP BY p.sport, p.kind ORDER BY p.sport, p.kind""", args)
         print_table(f"{mode} {market} by kind, last {hours} hours", ("sport", "kind", "trades", "avg edge c", "fill %", "net $", "avg days held"), body)
         body = query_rows(conn, f"""
             SELECT t.id, p.label, t.signal_ts, t.status, t.matched, t.quantity, t.yes_cost + t.no_cost, t.profit, t.profit + t.hedge_pnl, t.pays_at
-            FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ? AND signal_ts >= ?{where}
-            ORDER BY t.yes_cost + t.no_cost DESC, t.id LIMIT ?""", (mode, since) + params + (LARGEST,))
+            {window} ORDER BY t.yes_cost + t.no_cost DESC, t.id LIMIT ?""", args + (LARGEST,))
         print_table(f"{mode} {market} largest trades, last {hours} hours",
                     ("trade", "bet", "opened UTC", "status", "matched", "wanted", "capital $", "locked in $", "net $", "pays"),
                     [(i, label[:44], short_time(signal)[:16], status, contracts(m), contracts(q), f"{cap:,.2f}", f"{pr:,.2f}", f"{net:,.2f}",
@@ -409,60 +461,6 @@ def print_paper_money(conn):
         print("\npaper money from the ledger")
         for venue, amount in balances:
             print(f"  {venue} {amount:,.2f}$")
-
-
-def print_live_orders(conn, since, hours, market, sports):
-    """
-    The real orders sent in the window for the trades of one market, by venue, purpose, and what came back.
-    """
-    where, params = in_sports(sports)
-    body = query_rows(conn, f"""
-        SELECT o.venue, purpose, o.status, COUNT(*), SUM(o.quantity), SUM(filled), ROUND(SUM(dollars), 2), ROUND(SUM(fees), 2), ROUND(AVG(latency_ms))
-        FROM orders o JOIN trades t ON t.id = o.trade_id JOIN pairs p ON p.id = t.pair_id WHERE sent_at >= ?{in_market(market)}{where}
-        GROUP BY o.venue, purpose, o.status""", (since,) + params)
-    body.sort(key=lambda r: (r[0], r[1], by_status(r[2])))
-    if body:
-        print_table(f"live {market} orders, last {hours} hours", ("venue", "purpose", "status", "orders", "asked", "filled", "dollars $", "fees $", "avg ms"),
-                    [(v, p, s, n, contracts(q), contracts(f), *rest) for v, p, s, n, q, f, *rest in body])
-
-
-def book_age(seconds):
-    """
-    The BOOK_AGES label for how many seconds a venue had sent nothing for a market.
-    """
-    return next(label for bound, label in BOOK_AGES if bound is None or seconds < bound)
-
-
-def print_book_ages(conn, since, hours, market, sports):
-    """
-    The real orders to open sent in the window for the trades of one market,
-    by venue, the side they bought, and how long the venue had sent nothing
-    for the market when they went out, see Order.book_ts, and how many of
-    them took something. A market that had gone quiet may have stopped
-    trading with its book still up. Orders from before the book times were
-    recorded, 2026-10-05, are left out, and so is the table on a database
-    the live process has not yet brought up to them.
-    """
-    if "book_ts" not in [r[1] for r in conn.execute("PRAGMA table_info(orders)")]:
-        return
-    where, params = in_sports(sports)
-    rows = query_rows(conn, f"""
-        SELECT o.venue, o.outcome, o.sent_at, o.book_ts, o.quantity, o.filled
-        FROM orders o JOIN trades t ON t.id = o.trade_id JOIN pairs p ON p.id = t.pair_id
-        WHERE o.sent_at >= ? AND o.purpose = 'open' AND o.book_ts IS NOT NULL{in_market(market)}{where}""", (since,) + params)
-    groups = {}
-    for venue, outcome, sent_at, book_ts, quantity, filled in rows:
-        group = groups.setdefault((venue, outcome, book_age(epoch(sent_at) - epoch(book_ts))), [0, 0, 0.0, 0.0])
-        group[0] += 1
-        group[1] += filled > 0
-        group[2] += quantity
-        group[3] += filled
-    ages = [label for _, label in BOOK_AGES]
-    body = [(venue, outcome, age, n, took, f"{100 * took / n:.0f}", contracts(asked), contracts(filled))
-            for (venue, outcome, age), (n, took, asked, filled) in sorted(groups.items(), key=lambda kv: (kv[0][:2], ages.index(kv[0][2])))]
-    if body:
-        print_table(f"live {market} orders to open by how long the book had sent nothing, last {hours} hours",
-                    ("venue", "buying", "quiet", "orders", "took some", "%", "asked", "filled"), body, left=3)
 
 
 def print_market(conn, since, hours, sports, market, modes=("live",), now=None):
