@@ -19,14 +19,16 @@ than the other leg's last change, or wait until that change is old enough
 that any reaction to it would have reached us. The scanner offers the edge
 again at the next change, or as soon as the wait ends, through recheck,
 so one that is real is taken then. Once it is taken, both legs' orders go
-out at once, on a future or a game not yet started. On a game under way
-Polymarket US's goes first, and Kalshi's only once it has answered, for no
-more than it filled, see fill_legs(). In play faster traders often take
-the Polymarket US quote before our order lands, and a leg that misses
-first leaves nothing to sell back. In the in-play test of 2026-10-04 live
-trades sent that way made 3.84$ on 69 trades, and those sending both at
-once lost 3.84$ on 78: they matched about as many contracts, but 52 of
-them were left on one leg to sell back, against 12.
+out at once, on a game not yet started, on a future on paper, and with
+both legs on one venue, see pricing.best_trade(). On a game under way,
+and on live's futures, see LiveExecutor.lead(), Polymarket US's goes
+first, and Kalshi's only once it has answered, for no more than it filled,
+see fill_legs(). Faster traders often take the Polymarket US quote before
+our order lands, while Kalshi's fills, and a leg that misses first leaves
+nothing to sell back. In the in-play test of 2026-10-04 live trades sent
+that way made 3.84$ on 69 trades, and those sending both at once lost
+3.84$ on 78: they matched about as many contracts, but 52 of them were
+left on one leg to sell back, against 12.
 
 When the two legs fill unevenly the executor goes flat at once by selling
 the excess back on its own venue, and records the result with fees. A
@@ -59,7 +61,8 @@ book for its leg changes, at most config.LIVE_IN_PLAY_CONTRACTS a trade,
 for config.LIVE_IN_PLAY_TRADES trades, see min_edge(), just_quoted(), and
 most(). Paper trades an edge of config.MIN_EDGE or more on games before and
 while they are played, paying within config.MAX_PAYOUT_HOURS, see paper.py.
-Both legs are always on two venues, see pricing.best_trade(). Both venues
+The legs are on two venues, or on a future two contracts of one venue
+with the same rules, see pricing.best_trade(). Both venues
 must be trading, outside the weekly maintenance each publishes, see
 common/venues.py: while one has stopped, its feed may still show prices no
 order can trade at. A trade asks for config.FILL_SHARE of what the books
@@ -73,7 +76,7 @@ bought is money/settle.py's job.
 import asyncio
 import dataclasses
 from dataclasses import dataclass
-from api.orders import exact
+from api.orders import exact, size as order_size
 from common.log import on_failure
 from common.timeutil import epoch, hours_between, now_iso
 from common.venues import is_maintenance
@@ -296,7 +299,7 @@ class Executor:
         first = next(leg for leg in legs if leg.venue == lead)
         second = next(leg for leg in legs if leg is not first)
         led = await self.fill(trade, first)
-        second.quantity = exact(min(second.quantity, led.filled))
+        second.quantity = order_size(min(second.quantity, led.filled))
         if second.quantity < self.step:
             follow = Fill(ts=led.ts, note=f"not sent, as {lead} filled nothing first")
         else:
@@ -462,6 +465,16 @@ class Executor:
             return False
         return under_way or annual_pct(edge, game.days_until(now, pays_at)) >= config.MIN_ANNUAL_PCT
 
+    def lead(self, yes, no, under_way):
+        """
+        The venue whose leg goes first, see fill_legs(), or None to send
+        both at once: Polymarket US, with a leg on each venue, on a game
+        under way. Live sends it first on a future too, see
+        LiveExecutor.lead().
+        """
+        both = yes["venue"] != no["venue"] and "polymarket_us" in (yes["venue"], no["venue"])
+        return "polymarket_us" if both and under_way else None
+
     def min_edge(self, pair, yes, no, now):
         """
         The least edge this executor trades on the pair at now, and the floor for the deeper levels its orders sweep:
@@ -541,7 +554,7 @@ class Executor:
         when the edge, see min_edge(), whether its game has started, see
         plays(), the time until the bet pays, its return a year, the prices
         it is on, see just_quoted(), both venues trading, and the balances
-        allow, Polymarket US's leg first on a game under way. Returns
+        allow, the leg on lead()'s venue first when it names one. Returns
         True when orders were sent, so the scanner sends no more for this
         episode. The scanner's size counts every level with a positive edge,
         while the legs are sized from the levels that keep the least edge,
@@ -582,8 +595,9 @@ class Executor:
                       no_venue=no["venue"], no_contract=no["contract_id"], no_polarity=no["polarity"], no_limit=no_leg.limit)
         database.insert_trade(self.conn, trade)
         self.games[trade.id] = (pair.get("game_date"), (yes, no))
-        if under_way and any(leg.venue == "polymarket_us" for leg in legs):
-            self.leads[trade.id] = "polymarket_us"
+        lead = self.lead(yes, no, under_way)
+        if lead:
+            self.leads[trade.id] = lead
         self.spawn(self.run_trade(trade, legs))
         return True
 

@@ -240,30 +240,55 @@ def fillable(yes, no, books, fee_infos, min_edge):
     return positive_depth(*ladders(yes, no, books, fee_infos), min_edge)[3:]
 
 
-def best_trade(members, books, fee_infos):
+def same_rules(a, b):
+    """
+    Whether two members are two contracts that settle alike: different
+    contracts, paying on the same side, with the same rules word for word.
+    Polymarket US lists each college and pro football win total twice, in
+    one market of every team's and in the team's own, under the same rules.
+    """
+    return (a["contract_id"] != b["contract_id"] and a["polarity"] == b["polarity"]
+            and a.get("rules_digest") is not None and a.get("rules_digest") == b.get("rules_digest"))
+
+
+def may_pair(a, b, one_venue):
+    """
+    Whether members a and b may hold a trade's two legs: on two venues, or, given one_venue, two contracts of one venue
+    that settle alike, see same_rules().
+    """
+    return a["venue"] != b["venue"] or (one_venue and same_rules(a, b))
+
+
+def best_trade(members, books, fee_infos, one_venue=False):
     """
     The cheapest yes leg and the cheapest no leg across a pair's members,
-    on two different venues, priced together. Both legs are never on one
-    venue: buying both sides of one book is not a trade, a crossed book would
-    look like free money, and two contracts on one venue, such as a game's
-    two teams on Kalshi, are priced by the same traders, so a gap between
-    them is one that moved before the other and is gone before both orders
-    land. In the in-play test of 2026-10-04 52 trades with both legs on
-    Kalshi matched 5 of the 247 contracts they asked for, live and paper
-    alike. Returns a Priced, or None when no two venues quote a side each.
+    on two different venues, priced together. Both legs are on one venue
+    only given one_venue, as on a future, and then only on two contracts
+    with the same rules, see same_rules(). Otherwise: buying both sides of
+    one book is not a trade, a crossed book would look like free money,
+    and two contracts on one venue, such as a game's two teams on Kalshi,
+    are priced by the same traders, so a gap between them is one that moved
+    before the other and is gone before both orders land. In the in-play
+    test of 2026-10-04 52 trades with both legs on Kalshi matched 5 of the
+    247 contracts they asked for, live and paper alike. Polymarket US's
+    two listings of a season's win total are another matter: from
+    2026-09-30 to 10-05 live traded 255 of them, locking in 103$ on 978$
+    of capital, until both legs were kept off one venue that day, which
+    held for every pair to 2026-10-06. Returns a Priced, or None when no
+    two members that may pair quote a side each.
     """
     yes, _ = cheapest(members, books, "yes", fee_infos)
     no, _ = cheapest(members, books, "no", fee_infos)
     if yes is None or no is None:
         return None
-    if yes["venue"] != no["venue"]:
+    if may_pair(yes, no, one_venue):
         return price_pair(yes, no, books, fee_infos)
-    # One venue is cheapest on both sides. Try the best partner on another venue for each side and keep the better pair.
+    # These two may not pair. Try the best partner each side may have and keep the better pair.
     candidates = []
-    other_no, _ = cheapest([m for m in members if m["venue"] != yes["venue"]], books, "no", fee_infos)
+    other_no, _ = cheapest([m for m in members if may_pair(yes, m, one_venue)], books, "no", fee_infos)
     if other_no is not None:
         candidates.append(price_pair(yes, other_no, books, fee_infos))
-    other_yes, _ = cheapest([m for m in members if m["venue"] != no["venue"]], books, "yes", fee_infos)
+    other_yes, _ = cheapest([m for m in members if may_pair(m, no, one_venue)], books, "yes", fee_infos)
     if other_yes is not None:
         candidates.append(price_pair(other_yes, no, books, fee_infos))
     return max(candidates, key=lambda c: c.edge) if candidates else None

@@ -144,8 +144,8 @@ def trading_settings():
     """
     c = config
     return (f"settings: min edge {c.MIN_EDGE:.2f}$ and {c.MIN_ANNUAL_PCT}% a year, live paying {c.MIN_PAYOUT_HOURS}h or more out "
-            f"before a game and on a future, a game paying within {c.MAX_PAYOUT_HOURS}h, legs on two venues, Polymarket US's first "
-            f"on a game under way, fill share {c.FILL_SHARE}, expected game "
+            f"before a game and on a future, a game paying within {c.MAX_PAYOUT_HOURS}h, legs on two venues, Polymarket US's first, "
+            f"or on a future two of one venue with the same rules, fill share {c.FILL_SHARE}, expected game "
             f"{', '.join(f'{sport} {hours}h' for sport, hours in c.GAME_HOURS.items())} + settle {c.SETTLE_HOURS}h; {book_waits()}")
 
 

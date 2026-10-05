@@ -32,7 +32,9 @@ traded every sport's futures and the elections live, with paper on every
 event beside it, and the in-play test below. From October 5 it is set to
 trade live alone: every sport's futures, Bitcoin's and the elections'
 included, and every game under way
-(`--execute live --live-in-play --not-live none`).
+(`--execute live --live-in-play --not-live none`). From October 6 live
+trades the futures alone, the games in play switched off
+(`--execute live --not-live none`).
 
 ## How it works
 
@@ -147,8 +149,9 @@ Follow one Kalshi order book change from the wire to a trade.
 5. **Price** (`Scanner.on_book` and `update` in `market/scan.py`, with
    `pricing.best_trade`). For every pair the contract belongs to, the
    scanner finds the cheapest way to hold yes and the cheapest way to
-   hold no across the pair's members, on two different venues. Then it
-   works out the edge of buying both.
+   hold no across the pair's members, on two different venues, or on a
+   future two contracts of one venue with the same rules. Then it works
+   out the edge of buying both.
 6. **Follow the episode**. A positive edge opens an `Episode` or extends
    it and keeps its peak. When the edge ends, the episode is stored as an
    Opportunity. While it lasts, each desk's executor is offered it, until
@@ -188,10 +191,11 @@ checks before it trades, below.
    those levels show, but no more than the cash each venue can spend, on
    Kalshi the cash on the market's shard, live as on paper. The cash is
    reserved and the trade is stored before any order goes out.
-2. **Fill** (`run_trade`). Both legs go out at once, but on a game under
-   way Polymarket US's goes first and Kalshi's only once that has
-   answered, for what it filled, and not at all when it filled nothing
-   (`fill_legs`).
+2. **Fill** (`run_trade`). With a leg on each venue, live's Polymarket US
+   order goes first and its Kalshi order only once that has answered, for
+   what it filled, and not at all when it filled nothing (`fill_legs`,
+   `lead`). Paper does so on a game under way, and sends both at once
+   before one, as either does with both legs on one venue.
    - Paper (`trading/paper.py`): each order takes a trip there and back
      drawn from what the live orders took, and fills against the book the
      venue had when it would have arrived, by the venue's own clock, from
@@ -247,7 +251,7 @@ place (see the top of `db/database.py`):
 |---|---|
 | contracts, bets, pairs | the catalog |
 | gaps | the recorder, when a feed connection drops |
-| opportunities | the scanner, one row per episode, with what an order at its peak could have had as live takes it (`take_size`) and whether the peak came with a change of Polymarket US's book (`pm_changed`) |
+| opportunities | the scanner, one row per episode, with what one order could have had as live takes it (`take_size`) and whether that moment came with a change of Polymarket US's book (`pm_changed`) |
 | trades | the executors, paper and live, with whether the game was under way (`in_play`) |
 | orders | the live executor, one row per real order, with the times of the book it went out on |
 | settlements | the settler |
@@ -519,27 +523,39 @@ venues, including the venue's taker fee from **fees.py**. Two contracts on
 one venue, such as a game's two teams on Kalshi, are priced by the same
 traders, and a gap between them is gone before both orders land: in the
 in-play test 52 trades with both legs on Kalshi matched 5 of the 247
-contracts they asked for, live and paper alike. An episode is a stretch
-where the net edge stays positive. When it ends it is stored as an
-`Opportunity` with its legs, duration, peak edge, how many contracts the
-recorded depth would have filled at the peak, and the return on the capital
-tied up, annualized as if held until the bet pays out. While an episode is
-open the scanner offers it to each executor on every update until that
-executor takes a trade, and then not again, so one mispricing makes one
-trade. The live executor is offered it first. The edge coming back after it
-has gone is a new episode. An episode also keeps its longest stretch at
-`MIN_EDGE` or more, and the contracts that stayed fillable through all of
-it, which is what an order sent any time in the stretch could have had.
-From 2026-10-05 it keeps too what an order sent at its peak could have had
+contracts they asked for, live and paper alike. A future's two legs may
+still be two contracts of one venue with the same rules word for word
+(`pricing.same_rules`, from a digest of each contract's rules kept with the
+pairs): Polymarket US lists each college and pro football win total twice,
+once in a market of every team's and once in the team's own, and from
+2026-09-30 to 10-05 live traded 255 such pairs, locking in $103 on $978,
+until the legs were kept off one venue altogether, to 2026-10-06. An
+episode is a stretch where the net edge stays positive. When it ends it is
+stored as an `Opportunity` with its legs, duration, peak edge, how many
+contracts the recorded depth would have filled at the peak, and the return
+on the capital tied up, annualized as if held until the bet pays out. While
+an episode is open the scanner offers it to each executor on every update
+until that executor takes a trade, and then not again, so one mispricing
+makes one trade. The live executor is offered it first. The edge coming
+back after it has gone is a new episode. An episode also keeps its longest
+stretch at `MIN_EDGE` or more, and the contracts that stayed fillable
+through all of it, which is what an order sent any time in the stretch
+could have had. From 2026-10-05 it keeps too what one order could have had
 as live takes it, at once: the contracts on the levels at live's least edge
-or more, `pricing.live_min_edge()`, 5 cents on a game under way and 50% a
-year on a future, and what they lock in, and whether the peak came with a
-change of the Polymarket US leg's book (`pm_changed`), the only moment live
-trades a game under way. The summary counts opportunities by that, since
-live's own fill empties the levels it takes. A book goes stale after a
-minute only once its game may have started: a future's markets, and a
-game's before kickoff, can rest unchanged for hours while they are open, so
-their books are priced however old they are.
+or more, `pricing.live_min_edge()`, 5 cents on a game under way and 100% a
+year on a future, and what they lock in, and whether that moment came with
+a change of the Polymarket US leg's book (`pm_changed`), the only moment
+live trades a game under way. The summary counts opportunities by that,
+since live's own fill empties the levels it takes. It is the best of the
+moments at the peak's edge, and of every moment while none of those had
+offered a whole contract (`Scanner.weigh_take`): a peak's first moment can
+offer a sliver of a contract, and live, which opens whole ones, trades a
+moment later at the same edge or a little less. Until 2026-10-06 only the
+peak's first moment counted, and 21 of the 55 live futures trades that
+evening came from episodes kept with under a contract, one of them filling
+30. A book goes stale after a minute only once its game may have started: a
+future's markets, and a game's before kickoff, can rest unchanged for hours
+while they are open, so their books are priced however old they are.
 
 **trading/** trades the signal. **executor.py** holds what paper and live
 share, which is everything but how an order is filled. Live trades the
@@ -551,27 +567,28 @@ games, matches, races, and windows once under way that pay within 24 hours
 of at least two cents per contract (`MIN_EDGE`, five until 2026-10-04 16:03
 UTC; live on a game under way five cents, `LIVE_IN_PLAY_MIN_EDGE`, from
 2026-10-05), for live a payout at least 24 hours away (`MIN_PAYOUT_HOURS`),
-and a return of at least 50% a year on the money it ties up until then
-(`MIN_ANNUAL_PCT`), which is what weighs an edge against the time it ties
-the money up; the two cents only keep out the noise of a cent or so. From
-2026-10-05 a game under way is asked no return a year: it pays within a
-day, where five cents returns over 1,900% a year, so the rate never turned
-one down. Two cents clears 50% a year for a bet paying within 14 days, five
-cents within 38, ten within 81, twenty within 182. One limit order is sent
-per leg, both at once, but in play Polymarket US's first, below. Both
-ladders are walked together and each leg's limit is set at the deepest
-level that still leaves the minimum edge, so an order sweeps every level
-above the floor rather than only the top one. A trade asks for all of what
-those levels show (`FILL_SHARE`, half until 2026-10-04), as far as the cash
-free on each venue pays for, both legs from one venue's cash when they
-share it, live as on paper, with no cap on contracts but live's in play,
-below. No cash is held back: trades may spend all that is free. Since
-2026-10-05 live's orders on a future sweep only the levels that themselves
-return `MIN_ANNUAL_PCT` a year until it pays, as the top must, not every
-level down to `MIN_EDGE`: for a future four months out that stops at about
-14 cents (`LiveExecutor.min_edge`, `pricing.edge_for_annual`). The two
-cents never decided whether a future was traded, since every one pays 27
-days or more out, where 50% a year already needs 3.6 cents.
+and a return of at least 100% a year on the money it ties up until then
+(`MIN_ANNUAL_PCT`, 50% until 2026-10-06), which is what weighs an edge
+against the time it ties the money up; the two cents only keep out the
+noise of a cent or so. From 2026-10-05 a game under way is asked no return
+a year: it pays within a day, where five cents returns over 1,900% a year,
+so the rate never turned one down. Two cents clears 100% a year for a bet
+paying within 7 days, five cents within 19, ten within 40, twenty within
+91. One limit order is sent per leg, live's Polymarket US order first with
+a leg on each venue, below. Both ladders are walked together and each leg's
+limit is set at the deepest level that still leaves the minimum edge, so an
+order sweeps every level above the floor rather than only the top one. A
+trade asks for all of what those levels show (`FILL_SHARE`, half until
+2026-10-04), as far as the cash free on each venue pays for, both legs from
+one venue's cash when they share it, live as on paper, with no cap on
+contracts but live's in play, below. No cash is held back: trades may spend
+all that is free. Since 2026-10-05 live's orders on a future sweep only the
+levels that themselves return `MIN_ANNUAL_PCT` a year until it pays, as the
+top must, not every level down to `MIN_EDGE`: for a future four months out
+that stops at about 14 cents (`LiveExecutor.min_edge`,
+`pricing.edge_for_annual`). The two cents never decided whether a future
+was traded, since every one pays 27 days or more out, where 100% a year
+needs 6.9 cents, and 50% needed 3.6.
 
 In **paper.py** each order goes the way a live one does. It takes a trip
 to its venue and a trip back, each drawn from a lognormal with the median
@@ -680,8 +697,12 @@ paper does the same in play. Sent at once the Kalshi leg lands first, in
 some 12 ms against Polymarket US's 59, and another trader may take the
 Polymarket US quote away once ours trades, leaving the Kalshi leg to sell
 back at a loss. Sent first, a Polymarket US leg that misses leaves nothing
-to sell back, at the cost of Kalshi's going out some 80 ms later. Futures,
-and games before they start, still send both at once. With paper running
+to sell back, at the cost of Kalshi's going out some 80 ms later. From
+2026-10-06 live sends a future's Polymarket US order first too: sent at
+once, Kalshi's futures orders had taken something 99.4% of the time and
+Polymarket US's 94%, and of 82 trades left on one leg 79 held Kalshi's,
+which cost $12.85 to sell back or stayed exposed. Paper still sends both
+at once on a game before it starts. With paper running
 too, both take the same signals, and since our live orders are real and
 take from the books paper's orders meet, each leaves a footprint
 (**footprints.py**): from the venue's time on its answer and the book on
@@ -702,7 +723,8 @@ optimistic in play, most of all on the NFL. Live's 69 sent Polymarket US
 first made $3.84, matching about as many contracts as the 78 sent at once,
 which lost $3.84 with 52 of them left on one leg to sell back, against 12.
 The 52 trades with both legs on Kalshi lost $7.21, which is why the legs
-are now always on two venues. The `twins` table holds the test, and
+are now on two venues, but for a future's two contracts of one venue with
+the same rules, above. The `twins` table holds the test, and
 `tools/in_play_test.py` reports it.
 
 In play live's Polymarket US orders miss most when they buy No, selling
@@ -821,12 +843,13 @@ and the pairs of each sport in one line, and feed drops. Then everything on
 the futures under a heading of its own, then everything on the games in
 play, or one of them with `--market futures` or `--market in-play`. Each
 market starts with its opportunities as live takes them, at once: an
-episode counts when an order sent at its peak could have had a whole
-contract or more on the levels at live's least edge or more, the levels
+episode counts when one order could have had a whole contract or more on
+the levels at live's least edge or more, the levels
 returning `MIN_ANNUAL_PCT` a year on a future paying `MIN_PAYOUT_HOURS` or
 more out, and those at `LIVE_IN_PLAY_MIN_EDGE` or more on a game, match,
-race, or window under way paying within `MAX_PAYOUT_HOURS`, when the peak
-came with a change of the Polymarket US leg's book, as live needs: a book
+race, or window under way paying within `MAX_PAYOUT_HOURS`, when that
+moment came with a change of the Polymarket US leg's book, as live needs,
+the moment being the scanner's (`Scanner.weigh_take`): a book
 standing still there in play may be on a market no longer trading, as two
 episodes of one Bitcoin window on 2026-10-05 seemed to be, showing $5,304
 to be locked in at 18.7 and 51.8 cents though both venues settle it on the
@@ -841,7 +864,7 @@ through all of its longest stretch at `MIN_EDGE`, which left out the very
 episodes live traded, since its own fill empties the levels it takes: of
 the two futures it traded in the hour after the 15:14 UTC restart, one
 stretch kept 0.29 contracts and the other 0.01. Episodes from before the
-scanner kept what the peak could have had, and ones still open, which are
+scanner kept what one order could have had, and ones still open, which are
 stored only once they end, are left out. The market then shows, for paper
 and then live, or one of them with `--mode paper` or `--mode live`, the
 trades by outcome, filled, partial, then failed, and by sport and kind in
@@ -1147,6 +1170,25 @@ nor `summary.py` reads, 447 of them still open, and a `transfer_in` on
 each venue's ledger, 869.54 dollars on Kalshi and 1,744.29 on Polymarket
 US, brought its cash back to 10,000. To undo it, set those rows' mode back
 to `paper` and remove the two ledger rows.
+
+**Live short of cash.** By October 5 at 23:20 UTC live had made 747
+futures trades, locking in $377.71 on what matched and losing $16.58 to
+selling back legs that filled alone, nothing paid out yet: $3,016 held
+until November to June, returning 12.3% on it, some 60% a year. Its 218
+trades on games under way, the in-play test's among them, had lost $36.31,
+all settled, and from the five cent rules on a Polymarket US book change
+none was made: of 10,276 episodes in play in seven hours only one peaked
+on such a change with a contract at five cents, the rest mostly Bitcoin
+windows in their last minute and minor tennis, on Kalshi's changes. The
+day before had spent $772 and $753 was left, Polymarket US's $324 to go
+first, its legs costing about two thirds of the money. So on October 6,
+at the user's asking, the games in play were switched off, the return a
+year went from 50% to 100%, keeping the money for the better trades (47%
+of what was held was in trades returning under 50%, opened under the
+older rules, and the 9% returning 100% or more made 22% of the profit),
+a future's Polymarket US order goes first, a future's legs may again be
+Polymarket US's two listings of a win total, and the scanner counts what
+one order could have had at more than the peak's first moment, all above.
 
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.

@@ -111,9 +111,9 @@ def test_a_trading_session_logs_its_settings_when_it_starts(tmp_path, monkeypatc
         await s.close()
     asyncio.run(scenario())
     out = [line[9:] for line in capsys.readouterr().out.splitlines()]                       # Past the timestamp.
-    assert out[0].startswith("settings: min edge 0.02$ and 50% a year, live paying 24h or more out before a game and on a future, "
-                             "a game paying within 24h, legs on two venues, Polymarket US's first on a game under way, fill share 1.0, "
-                             "expected game nfl 3.25h")
+    assert out[0].startswith("settings: min edge 0.02$ and 100% a year, live paying 24h or more out before a game and on a future, "
+                             "a game paying within 24h, legs on two venues, Polymarket US's first, or on a future two of one venue "
+                             "with the same rules, fill share 1.0, expected game nfl 3.25h")
     assert out[1] == ("paper rejects 0% of orders, which take kalshi 12ms there (12 to flatten) and 8 back, polymarket_us 59ms there "
                       "(24 to flatten) and 31 back, filling at the venue's book then, waiting up to kalshi 0.1s, polymarket_us 0.3s "
                       "for it to reach us, start balance 10,000$")
@@ -142,7 +142,7 @@ def test_a_session_trading_both_modes_keeps_a_desk_for_each_and_offers_live_the_
     assert s.desks[1].cash.amounts == {"kalshi": 10000.0, "polymarket_us": 10000.0}         # Paper money is its own.
     out = [line[9:] for line in capsys.readouterr().out.splitlines()]                       # Past the timestamp.
     assert out[0].startswith("settings: min edge") and out[1].startswith(
-        "LIVE TRADING with real money: an edge as soon as seen, a future's orders down to the levels returning 50% a year, balances read")
+        "LIVE TRADING with real money: an edge as soon as seen, a future's orders down to the levels returning 100% a year, balances read")
     assert out[2:6] == ["live trades the futures of nfl", f"no email settings in {tmp_path / 'email.json'}, alerts are only logged and stored",
                         out[4], "paper trades the games, matches, races, and windows of every sport that pay within 24h, in play too"]
     assert out[4].startswith("paper rejects 0% of orders")

@@ -28,7 +28,7 @@ def make_db(tmp_path, members, future=False):
     """
     conn = database.connect(tmp_path / "t.sqlite")
     contracts = [Contract(venue=m["venue"], contract_id=m["contract_id"], market_id=m["contract_id"], event_id="e", series_id=None,
-                          sport="nfl", event_title=None, title="t", outcome="Yes", market_type=None, line=None, rules=None,
+                          sport="nfl", event_title=None, title="t", outcome="Yes", market_type=None, line=None, rules=m.get("rules"),
                           start_time=m["start_time"], close_time=m["close_time"], fee_info=m["fee_info"]) for m in members]
     database.upsert_contracts(conn, contracts, "2026-09-19T00:00:00+00:00")
     if future:
@@ -138,7 +138,7 @@ def test_an_episode_never_at_the_minimum_edge_has_no_stretch(tmp_path):
 
 def test_an_episode_keeps_what_an_order_at_its_peak_could_have_had_on_the_levels_live_takes(tmp_path):
     # Yes costs 0.40 on Polymarket US. At the peak no costs 0.47 on Kalshi for 40, 13 cents, 0.57 for 60 more, 3 cents,
-    # and 0.59 for 50 more, 1 cent. A future paying in 10 days takes the levels at 1.35 cents or more, 50% a year, and a
+    # and 0.59 for 50 more, 1 cent. A future paying in 10 days takes the levels at 2.7 cents or more, 100% a year, and a
     # game under way those at 5 cents or more.
     at = "2026-09-19T12:00:%02d+00:00"
     for kickoff, take in ((None, (100, 7.0)), ("2026-09-19T11:00:00+00:00", (40, 5.2))):
@@ -149,6 +149,35 @@ def test_an_episode_keeps_what_an_order_at_its_peak_could_have_had_on_the_levels
                       Book("kalshi", "k", at % 2, [[0.50, 500]], [[0.99, 1]]),    # 10 cents on 500 after the peak counts for nothing.
                       Book("kalshi", "k", at % 3, [[0.40, 100]], [[0.99, 1]])])
         assert takes(conn) == [pytest.approx(take)], kickoff
+
+
+def test_an_episode_keeps_what_one_order_could_have_had_once_its_peak_offered_a_whole_contract(tmp_path):
+    # Yes costs 0.40 on Polymarket US. The peak, 13 cents, first offers half a contract, which live, opening whole ones,
+    # cannot trade. A moment at the same edge, or, while no moment has offered a whole contract, at less, counts instead.
+    at = "2026-09-19T12:00:%02d+00:00"
+    for later, take in (([[0.53, 40]], (40, 5.2)), ([[0.50, 40]], (40, 4.0))):
+        conn = make_db(tmp_path / str(later[0][0]), [member("kalshi", "k"), member("polymarket_us", "pm")], future=True)
+        replay(conn, [Book("polymarket_us", "pm", at % 0, [[0.39, 500]], [[0.40, 500]]),
+                      Book("kalshi", "k", at % 1, [[0.53, 0.5]], [[0.99, 1]]),
+                      Book("kalshi", "k", at % 2, later, [[0.99, 1]]),
+                      Book("kalshi", "k", at % 3, [[0.50, 500]], [[0.99, 1]]),     # 10 cents on 500 counts for nothing now.
+                      Book("kalshi", "k", at % 4, [[0.40, 100]], [[0.99, 1]])])
+        assert takes(conn) == [pytest.approx(take)], later
+        assert [(o.peak_ts, o.peak_edge) for o in stored(conn)] == [(at % 1, pytest.approx(0.13))]
+
+
+def test_a_futures_legs_may_be_two_contracts_of_one_venue_with_the_same_rules(tmp_path):
+    rules = "Settles Yes if Atlanta finishes the regular season with over 10.5 wins."
+    members = [member("kalshi", "k"), dict(member("polymarket_us", "pm"), rules=rules), dict(member("polymarket_us", "pm2"), rules=rules)]
+    at = "2026-09-19T12:00:%02d+00:00"
+    books = [Book("kalshi", "k", at % 0, [[0.45, 100]], [[0.62, 100]]),
+             Book("polymarket_us", "pm", at % 0, [[0.39, 100]], [[0.40, 100]]),
+             Book("polymarket_us", "pm2", at % 1, [[0.53, 100]], [[0.54, 100]]),    # No at 0.47 on the second listing.
+             Book("polymarket_us", "pm2", at % 2, [[0.40, 100]], [[0.41, 100]])]
+    for future, legs in ((True, ("pm", "pm2")), (False, ("pm", "k"))):
+        conn = make_db(tmp_path / str(future), members, future=future)
+        o = replay(conn, books)[0]
+        assert (o.yes_contract, o.no_contract) == legs, future
 
 
 def test_an_episode_says_whether_its_peak_came_with_a_change_of_polymarket_us_book(tmp_path):

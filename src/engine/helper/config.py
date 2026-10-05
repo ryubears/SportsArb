@@ -25,8 +25,9 @@ MIN_PAYOUT_HOURS = 24       # The soonest a future, or a bet on a game before it
                             # under way live trades only with run.py --live-in-play, by MAX_PAYOUT_HOURS.
 MAX_PAYOUT_HOURS = 24       # The latest a bet on a game, match, race, or window may pay out for paper to trade it, before it and while
                             # it is played, and for live to trade it once under way, so both trade the ones on the day.
-MIN_ANNUAL_PCT = 50         # The least an edge must return a year on the capital it ties up until the bet pays, before a game or on
-                            # a future. A 5 cent edge clears it if it pays within 38 days, 10 cents within 81, and 20 within 182.
+MIN_ANNUAL_PCT = 100        # The least an edge must return a year on the capital it ties up until the bet pays, before a game or on
+                            # a future. A 5 cent edge clears it if it pays within 19 days, 10 cents within 40, and 20 within 91. 50
+                            # to 2026-10-06, when live's cash ran short and the money was kept for the better trades.
                             # Live's future orders sweep only the levels that clear it too, see LiveExecutor.min_edge(). A game under
                             # way is asked none from 2026-10-05, see Executor.pays_enough().
 FILL_SHARE = 1.0            # The share of visible size at a level a trade asks for. At 0.5 to 2026-10-03, 222 of 231 live trades were

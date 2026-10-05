@@ -6,13 +6,14 @@ Everything is shown for the futures, then for the games, matches, races,
 and windows in play, each under a heading of its own, see MARKETS: its
 opportunities, then its trades for each mode, paper then live, or one
 with --mode. Opportunities are shown as live takes them, at once: an
-episode counts when an order sent at its peak could have had a whole
-contract or more, since a trade opens no fewer, on the levels at live's
-least edge or more, see pricing.live_min_edge(): on a future paying
-config.MIN_PAYOUT_HOURS or more out, the levels returning
-config.MIN_ANNUAL_PCT a year, and on a game under way paying within
-config.MAX_PAYOUT_HOURS, those at config.LIVE_IN_PLAY_MIN_EDGE or more,
-when the peak came with a change of Polymarket US's book, as live needs.
+episode counts when one order could have had a whole contract or more,
+since a trade opens no fewer, on the levels at live's least edge or more,
+see pricing.live_min_edge(): on a future paying config.MIN_PAYOUT_HOURS
+or more out, the levels returning config.MIN_ANNUAL_PCT a year, and on a
+game under way paying within config.MAX_PAYOUT_HOURS, those at
+config.LIVE_IN_PLAY_MIN_EDGE or more, when that moment came with a change
+of Polymarket US's book, as live needs. Which moment is the scanner's,
+see Opportunity.take_size.
 Each market shows what those orders could have taken at full size and
 what that locks in, overall, by sport and kind, and the largest, and how
 long the edge stayed at config.MIN_EDGE or more, in seconds to the
@@ -209,13 +210,13 @@ def opportunity_rules(market):
     a year at the peak, on the levels returning that, and the games,
     matches, races, and windows under way at the peak paying within
     config.MAX_PAYOUT_HOURS, on the levels at config.LIVE_IN_PLAY_MIN_EDGE
-    or more, of which no return a year is asked, and whose peak came with a
-    change of the Polymarket US leg's book, the only moment live trades
+    or more, of which no return a year is asked, and whose order came with
+    a change of the Polymarket US leg's book, the only moment live trades
     one, see Opportunity.pm_changed. A book that stands still there in
     play may be on a market no longer trading: two episodes of one
     Bitcoin window on 2026-10-05 showed 5,304$ to be locked in at 18.7 and
     51.8 cents, unlikely to be real when both venues settle it on the same
-    index. Which levels count at the peak is the scanner's, see
+    index. Which levels count, and at which moment, is the scanner's, see
     Opportunity.take_size.
     """
     if market == "futures":
@@ -228,15 +229,15 @@ def opportunity_rules(market):
 
 def print_market_opportunities(conn, since, hours, sports, market):
     """
-    The episodes of one market within live's rules in the window: an order
-    sent at the peak could have had MIN_CONTRACTS or more on the levels at
-    live's least edge or more, see opportunity_rules(). An edge on less, a
+    The episodes of one market within live's rules in the window: one order
+    could have had MIN_CONTRACTS or more on the levels at live's least edge
+    or more, see opportunity_rules(). An edge on less, a
     sliver of a level, is one no trade could take. Live takes an edge at
     once, and its own fill empties the levels it takes, so what stayed
     fillable through the stretch at config.MIN_EDGE, which these were
     counted by until 2026-10-05, left out the very episodes it traded.
-    Episodes from before the scanner kept what the peak could have had have
-    none and are left out, as are ones still open, which are stored only
+    Episodes from before the scanner kept what one order could have had
+    have none and are left out, as are ones still open, which are stored only
     once they end. On a database the live process has not yet brought up to
     it, the market says so. Capital is what buying those contracts would
     have cost with fees, and profit what they lock in. The annual rates
@@ -247,7 +248,7 @@ def print_market_opportunities(conn, since, hours, sports, market):
     cents = f"{100 * config.MIN_EDGE:.0f}c"
     where, params = in_sports(sports)
     rule, rule_params, levels = opportunity_rules(market)
-    print(f"\n{market} opportunities ({MIN_CONTRACTS}+ contracts at the peak on {levels}), last {hours} hours")
+    print(f"\n{market} opportunities ({MIN_CONTRACTS}+ contracts in one order on {levels}), last {hours} hours")
     if not {"take_size", "pm_changed"} <= set(table_columns(conn, "opportunities")):
         print("  not kept yet, until the live process restarts on this code")
         return
@@ -270,7 +271,7 @@ def print_market_opportunities(conn, since, hours, sports, market):
         return capital, profit, 100 * profit / capital, 100 * yearly / capital, days
 
     capital, profit, ret, annual, days = totals(rows)
-    print(f"  {len(rows):,} episodes could have taken {capital:,.0f}$ at their peaks and locked in {profit:,.2f}$")
+    print(f"  {len(rows):,} episodes could have taken {capital:,.0f}$ in one order each and locked in {profit:,.2f}$")
     print(f"  {percent(ret)}% on capital, {percent(annual)}% a year, held {days or 0:,.1f} days on average")
     print(f"  at {cents} or more for {seconds(quantile([r[5] for r in rows], 0.5))} at the median, "
           f"{seconds(quantile([r[5] for r in rows], 0.9))} at the 90th percentile, {seconds(max(r[5] for r in rows))} at the longest")

@@ -25,9 +25,9 @@ the records are wrong, see check_positions().
 
 Live trades the futures, see executor.py, and with run.py --live-in-play
 also the games, matches, races, and windows under way that pay within
-config.MAX_PAYOUT_HOURS, by its own rules below, with Polymarket US's
-order first and Kalshi's only once that has answered, for what it filled,
-see Executor.fill_legs(). From 2026-10-04 to 10-05 the in-play test traded
+config.MAX_PAYOUT_HOURS, by its own rules below. With its legs on two
+venues, Polymarket US's order goes first and Kalshi's only once that has
+answered, for what it filled, see Executor.fill_legs(). From 2026-10-04 to 10-05 the in-play test traded
 200 of them at no more than 5 contracts, each beside a paper twin on the
 same signal, see tools/in_play_test.py. When paper trades the same games,
 each live order leaves a footprint of what it took, which paper adds back,
@@ -237,6 +237,16 @@ class LiveExecutor(Executor):
         if not self.in_play or pair.get("game_date") is None:
             return super().pays_in_time(hours, pair)
         return hours <= config.MAX_PAYOUT_HOURS
+
+    def lead(self, yes, no, under_way):
+        """
+        Polymarket US, with a leg on each venue, on a future as on a game
+        under way, from 2026-10-06. Futures sent both legs at once until
+        then: Kalshi's orders took something 99.4% of the time and Polymarket
+        US's 94%, and of 82 trades left on one leg, 79 held Kalshi's, which
+        cost 12.85$ to sell back or stayed exposed.
+        """
+        return super().lead(yes, no, True)
 
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """

@@ -39,6 +39,7 @@ def test_bets_pairs_and_targets(tmp_path):
     assert (pairs[1]["label"], pairs[1]["venues"]) == ("champion 2027 BUF", "kalshi,polymarket_us")
     assert sorted(m["contract_id"] for m in pairs[1]["members"]) == ["k", "pm"]
     assert pairs[1]["members"][0]["close_time"] == "2027-01-01T00:00:00+00:00"
+    assert [m["rules_digest"] for m in pairs[1]["members"]] == [None, None] and "rules" not in pairs[1]["members"][0]
     database.replace_pairs(conn, "nfl", [g], "2026-01-02T00:00:00+00:00")
     assert g.id == 1 and tuple(conn.execute("SELECT COUNT(*), MAX(matched_at) FROM pairs").fetchone()) == (1, "2026-01-02T00:00:00+00:00")   # The same pair keeps its id.
 

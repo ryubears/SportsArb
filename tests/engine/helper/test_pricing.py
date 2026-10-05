@@ -54,7 +54,7 @@ def test_the_edge_for_a_return_a_year_returns_just_that():
 
 def test_live_takes_five_cents_on_a_game_under_way_and_on_a_future_the_edge_returning_its_rate_a_year():
     assert pricing.live_min_edge(True, 0.1) == config.LIVE_IN_PLAY_MIN_EDGE
-    assert pricing.live_min_edge(False, 27.25) == pytest.approx(0.036, abs=0.0001)     # 3.6 cents returns 50% a year over 27 days.
+    assert pricing.live_min_edge(False, 27.25) == pytest.approx(0.0695, abs=0.0001)    # 6.95 cents returns 100% a year over 27 days.
     assert pricing.annual_pct(pricing.live_min_edge(False, 27.25), 27.25) == pytest.approx(config.MIN_ANNUAL_PCT)
     assert pricing.live_min_edge(False, None) == config.MIN_EDGE          # A bet that gives no payout.
 
@@ -178,6 +178,33 @@ def test_best_trade_never_puts_both_legs_on_one_venue():
     assert edge == pytest.approx(1 - 0.45 - 0.62)
     # Without a member on another venue there is no trade at all.
     assert pricing.best_trade(members[:2], books, fee_infos) is None
+
+
+def test_on_a_future_both_legs_may_be_two_contracts_of_one_venue_with_the_same_rules():
+    # Polymarket US lists a win total twice, under the same rules: yes at 0.40 on one and no at 1 - 0.53 on the other, 13 cents.
+    members = [dict(member("polymarket_us", "pm"), rules_digest="r"), dict(member("polymarket_us", "pm2"), rules_digest="r"),
+               member("kalshi", "k")]
+    books = {("polymarket_us", "pm"): Book("polymarket_us", "pm", "t", [[0.39, 100]], [[0.40, 100]]),
+             ("polymarket_us", "pm2"): Book("polymarket_us", "pm2", "t", [[0.53, 100]], [[0.54, 100]]),
+             ("kalshi", "k"): Book("kalshi", "k", "t", [[0.45, 100]], [[0.62, 100]])}
+    fee_infos = {("polymarket_us", "pm"): NO_PM_FEES, ("polymarket_us", "pm2"): NO_PM_FEES, ("kalshi", "k"): NO_K_FEES}
+    yes, no, edge, *_ = pricing.best_trade(members, books, fee_infos, one_venue=True)
+    assert (yes["contract_id"], no["contract_id"], edge) == ("pm", "pm2", pytest.approx(0.13))
+    # Without one_venue, as on a game, the no leg goes to Kalshi, at 1 - 0.45.
+    yes, no, edge, *_ = pricing.best_trade(members, books, fee_infos)
+    assert (yes["contract_id"], no["contract_id"], edge) == ("pm", "k", pytest.approx(0.05))
+    # Rules that differ, or none, keep the legs on two venues.
+    for other in ("other rules", None):
+        members[1]["rules_digest"] = other
+        assert pricing.best_trade(members, books, fee_infos, one_venue=True)[1]["contract_id"] == "k"
+
+
+def test_same_rules_needs_two_contracts_paying_on_one_side_with_rules():
+    a, b = dict(member("polymarket_us", "pm"), rules_digest="r"), dict(member("polymarket_us", "pm2"), rules_digest="r")
+    assert pricing.same_rules(a, b)
+    assert not pricing.same_rules(a, a)                                         # One contract is no pair.
+    assert not pricing.same_rules(a, dict(b, polarity="no"))                    # Paying on opposite sides.
+    assert not pricing.same_rules(dict(a, rules_digest=None), dict(b, rules_digest=None))
 
 
 def test_best_trade_ignores_a_crossed_book_with_no_partner():

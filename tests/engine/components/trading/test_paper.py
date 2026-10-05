@@ -306,8 +306,8 @@ def test_edges_before_kickoff_and_on_futures_that_pay_enough_are_traded(tmp_path
     conn, cash, ex = executor(tmp_path, books())
     as_live(ex)
     assert at(ex, PAIR, YES, NO, 0.08, "2026-09-21T20:00:00+00:00") is True      # The day before, paying 24.75 hours on.
-    ex.books = lambda: books(pm_bid=0.34, pm_ask=0.35, k_bid=0.55, k_ask=0.56)   # 20 cents: 25% until February, 62% a year.
-    assert at(ex, FUTURE, FUTURE_YES, FUTURE_NO, 0.20, NOW) is True
+    ex.books = lambda: books(pm_bid=0.24, pm_ask=0.25, k_bid=0.60, k_ask=0.61)   # 35 cents: 54% until February, 134% a year.
+    assert at(ex, FUTURE, FUTURE_YES, FUTURE_NO, 0.35, NOW) is True
     before_game, future = stored(conn)
     assert (before_game["status"], before_game["quantity"], before_game["pays_at"]) == ("filled", 50, PAYS_AT)
     assert (future["status"], future["quantity"], future["pays_at"]) == ("filled", 50, SEASON_END)

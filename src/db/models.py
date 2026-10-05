@@ -123,10 +123,11 @@ class Opportunity:
     min_edge_seconds: float | None = None   # The longest unbroken stretch of the episode at config.MIN_EDGE or more.
     min_edge_size: float | None = None      # Contracts fillable at that edge through all of that stretch.
     min_edge_profit: float | None = None    # Net dollars from filling them, at the stretch's thinnest moment.
-    take_size: float | None = None      # Contracts fillable at the peak on the levels at live's least edge or more, see
-                                        # pricing.live_min_edge(): what an order sent then could have had. Null before 2026-10-05.
+    take_size: float | None = None      # Contracts fillable on the levels at live's least edge or more, see
+                                        # pricing.live_min_edge(): what one order could have had at the best moment the scanner
+                                        # weighed, see Scanner.weigh_take(), at the peak alone to 2026-10-06. Null before 2026-10-05.
     take_profit: float | None = None    # Net dollars from filling them.
-    pm_changed: int | None = None       # 1 when the peak came with a change of the Polymarket US leg's book, which live needs
+    pm_changed: int | None = None       # 1 when that moment came with a change of the Polymarket US leg's book, which live needs
                                         # to trade a game under way, see pricing.polymarket_us_just_changed(), 0 otherwise.
                                         # Null before 2026-10-05.
 

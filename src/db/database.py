@@ -22,6 +22,7 @@ The tables themselves are in schema.sql, and the steps that bring older
 databases up to them in migrations.py. This file holds the reads and writes.
 """
 
+import hashlib
 import sqlite3
 from dataclasses import asdict, fields
 from common import jsonutil
@@ -261,12 +262,18 @@ def load_pairs(conn, sport):
     """
     Return {id: pair row dict with a 'members' list of bet row dicts} for
     the current pairs of one sport, the ones with bets pointing at them.
+    Each member carries a digest of its contract's rules, or None without
+    any, so two contracts that settle alike can be told apart from two
+    that do not without holding every rule's text, see pricing.same_rules().
     """
     members = {}
     for r in conn.execute("""
-        SELECT b.*, c.event_id, c.start_time, c.close_time FROM bets b JOIN contracts c USING (venue, contract_id)
+        SELECT b.*, c.event_id, c.start_time, c.close_time, c.rules FROM bets b JOIN contracts c USING (venue, contract_id)
         WHERE c.sport = ? AND b.pair_id IS NOT NULL""", (sport,)):
-        members.setdefault(r["pair_id"], []).append(dict(r))
+        member = dict(r)
+        rules = member.pop("rules")
+        member["rules_digest"] = hashlib.sha256(rules.encode()).hexdigest() if rules else None
+        members.setdefault(r["pair_id"], []).append(member)
     return {r["id"]: dict(r, members=members[r["id"]]) for r in conn.execute("SELECT * FROM pairs") if r["id"] in members}
 
 
