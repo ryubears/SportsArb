@@ -459,6 +459,12 @@ def test_an_edge_that_waits_asks_to_be_priced_again_when_the_wait_ends(tmp_path,
     assert asked == [(PAIR["id"], round(config.CONFIRM_SECONDS["polymarket_us"] - 0.1, 3))]
 
 
+def test_paper_takes_an_edge_when_first_seen_where_live_waits_for_it_to_last(tmp_path, quick):
+    conn, cash, ex = executor(tmp_path, books())
+    ex.edge_since = lambda pair_id: NOW                     # The edge reached 2c just now.
+    assert run(ex) == [True]
+
+
 def test_an_edge_trades_once_the_other_venues_move_is_older_than_the_wait_or_when_only_kalshi_is_behind(tmp_path, quick):
     latest = books()
     moved(latest, "kalshi", config.CONFIRM_SECONDS["polymarket_us"] + 0.01)     # Long enough ago that a reaction would have come.

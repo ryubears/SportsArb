@@ -586,3 +586,27 @@ def test_polymarket_us_first_sends_kalshi_only_what_it_filled_and_nothing_when_i
     assert (t["yes_filled"], t["no_filled"], t["yes_held"], t["no_held"], t["status"]) == (0, 0, 0, 0, "failed")
     assert t["hedge"] == "no leg not sent, as polymarket_us filled nothing first"
     assert ex.cash.reserved == {} or not any(ex.cash.reserved.values())
+
+
+# LASTING EDGES, live trading an edge only once it has lasted config.LIVE_MIN_EDGE_SECONDS
+
+def test_live_trades_an_edge_only_once_it_has_lasted_and_asks_to_be_offered_it_again_then(tmp_path):
+    venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
+    conn, ex = in_play(tmp_path, venues, books())
+    since, asked = {}, []
+    ex.edge_since = since.get
+    ex.recheck = lambda pair_id, seconds: asked.append((pair_id, round(seconds, 3)))
+    since[GAME["id"]] = "2026-09-22T17:59:59.800000+00:00"             # At 2c or more for two tenths of a second.
+    assert not signal(ex) and venues.orders == [] and stored(conn) == []
+    assert asked == [(GAME["id"], 0.3)]                                # Offered again once it has lasted half a second.
+    assert "; 1 pairs' edges held until they lasted" in ex.summary()
+    since[GAME["id"]] = "2026-09-22T17:59:59.500000+00:00"             # Half a second.
+    assert signal(ex) and len(venues.orders) == 2 and asked == [(GAME["id"], 0.3)]
+
+
+def test_live_trades_an_edge_at_once_when_no_scanner_says_when_it_began(tmp_path):
+    venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
+    conn, ex = in_play(tmp_path, venues, books())
+    assert ex.edge_since is None and signal(ex)
+    ex.edge_since = lambda pair_id: None
+    assert signal(ex, {**GAME, "id": 2})

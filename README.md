@@ -165,20 +165,23 @@ checks before it trades, below.
 
 1. **Decide** (`Executor.signal` in `trading/executor.py`). The executor
    takes the signal when the edge is at least `MIN_EDGE`, for live the pair
-   is a future, or with `--live-in-play` a game under way (`plays`), the bet
-   pays when the desk trades it (`pays_in_time`), a future
-   `MIN_PAYOUT_HOURS` or more away and a game within `MAX_PAYOUT_HOURS`, and the edge returns
-   `MIN_ANNUAL_PCT` a year or more until then (`pays_enough`), and a
-   Polymarket US leg's book is current (`confirm_wait`): newer than the
-   Kalshi leg's last change, by the venues' own clocks, or else that change
-   is `CONFIRM_SECONDS` old. Otherwise the edge waits, and the scanner
-   offers it again at the next change, or the moment the wait ends
-   (`recheck`), not at the next tick up to a second later. `quantity_for`
-   walks both ladders together through the levels that keep that edge and
-   sets each leg's limit at the deepest one. It then asks for `FILL_SHARE`
-   of what those levels show, but no more than the cash each venue can
-   spend, on Kalshi the cash on the market's shard, live as on paper. The
-   cash is reserved and the trade is stored before any order goes out.
+   is a future, or with `--live-in-play` a game under way (`plays`), the
+   bet pays when the desk trades it (`pays_in_time`), a future
+   `MIN_PAYOUT_HOURS` or more away and a game within `MAX_PAYOUT_HOURS`,
+   and the edge returns `MIN_ANNUAL_PCT` a year or more until then
+   (`pays_enough`), for live the edge has stayed at `MIN_EDGE` or more for
+   `LIVE_MIN_EDGE_SECONDS`, half a second, unbroken, as the scanner's
+   episode times it (`hold`, `Scanner.edge_since`), and a Polymarket US
+   leg's book is current (`confirm_wait`): newer than the Kalshi leg's last
+   change, by the venues' own clocks, or else that change is
+   `CONFIRM_SECONDS` old. Otherwise the edge waits, and the scanner offers
+   it again at the next change, or the moment the wait ends (`recheck`),
+   not at the next tick up to a second later. `quantity_for` walks both
+   ladders together through the levels that keep that edge and sets each
+   leg's limit at the deepest one. It then asks for `FILL_SHARE` of what
+   those levels show, but no more than the cash each venue can spend, on
+   Kalshi the cash on the market's shard, live as on paper. The cash is
+   reserved and the trade is stored before any order goes out.
 2. **Fill** (`run_trade`). Both legs go out at once, but on a game under
    way Polymarket US's goes first and Kalshi's only once that has
    answered, for what it filled, and not at all when it filled nothing
@@ -630,6 +633,17 @@ shard 0, where the football futures with the long-lasting edges are, and
 10% to shard 3 (`LIVE_SHARDS`). The live executor emails once when either
 shard, or Polymarket US, falls under $5 (`LIVE_LOW_CASH`), and again only
 after it has been back over.
+
+**Edges that last.** Since 2026-10-05 live trades an edge, on a future or
+a game, only once it has stayed at `MIN_EDGE` or more for half a second
+(`LIVE_MIN_EDGE_SECONDS`), unbroken, timed from when the scanner's
+episode last reached it (`Scanner.edge_since`, the stretch the
+opportunities table keeps as `min_edge_seconds`). An edge that ends
+sooner is never traded, and one still there is priced again the moment
+the half second is up (`recheck`) and traded on the books then, sized and
+checked as any other. The executor's summary line counts the pairs held
+this way. Paper takes an edge when it first sees it, so with both running
+they no longer trade the same signals.
 
 **Games in play.** With `--live-in-play` live also trades the games,
 matches, races, and windows under way, of every sport, Bitcoin's windows

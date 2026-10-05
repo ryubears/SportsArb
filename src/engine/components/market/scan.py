@@ -20,9 +20,10 @@ the Scanner stores every episode as it ends, so the opportunities table
 is the log of everything it saw. The summary script reads it. The
 pricing itself lives in pricing.py.
 
-A desk that turns an edge down only to wait for a book to catch up asks
-for the pair again once the wait ends, through recheck(), so the edge is
-offered then rather than at the next change or tick, up to a second later.
+A desk that turns an edge down only to wait for a book to catch up, or
+for the edge to last, see edge_since(), asks for the pair again once the
+wait ends, through recheck(), so the edge is offered then rather than at
+the next change or tick, up to a second later.
 """
 
 import asyncio
@@ -196,6 +197,15 @@ class Scanner:
         elif episode is not None:
             self.close(pair_id, now)
 
+    def edge_since(self, pair_id):
+        """
+        When the pair's open episode last reached config.MIN_EDGE, by our
+        clock, if it has stayed there since, or None. A desk that trades an
+        edge only once it has lasted asks, see Executor.hold().
+        """
+        episode = self.episodes.get(pair_id)
+        return episode.worth_since if episode else None
+
     def reprice(self, pair_id):
         """
         A recheck come due: price the pair again if its episode is still open.
@@ -207,9 +217,10 @@ class Scanner:
     def recheck(self, pair_id, seconds):
         """
         Price a pair again in seconds, when a desk waits that long for a
-        book to catch up, see Executor.confirm_wait(). A pair keeps one timer,
-        the soonest asked for. Outside a running loop, and without books,
-        the next change or tick prices it instead.
+        book to catch up, see Executor.confirm_wait(), or for its edge to
+        last, see Executor.hold(). A pair keeps one timer, the soonest asked
+        for. Outside a running loop, and without books, the next change or
+        tick prices it instead.
         """
         try:
             loop = asyncio.get_running_loop()

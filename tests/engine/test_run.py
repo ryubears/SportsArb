@@ -137,10 +137,11 @@ def test_a_session_trading_both_modes_keeps_a_desk_for_each_and_offers_live_the_
     s = asyncio.run(scenario())
     assert [d.mode for d in s.desks] == ["live", "paper"]
     assert s.scanner.on_signals == [s.desks[0].signal, s.desks[1].signal]
+    assert all(d.executor.edge_since == s.scanner.edge_since and d.executor.recheck == s.scanner.recheck for d in s.desks)
     assert s.desks[0].cash.amounts == {"kalshi": 800.0, "polymarket_us": 600.0}
     assert s.desks[1].cash.amounts == {"kalshi": 10000.0, "polymarket_us": 10000.0}         # Paper money is its own.
     out = [line[9:] for line in capsys.readouterr().out.splitlines()]                       # Past the timestamp.
-    assert out[0].startswith("settings: min edge") and out[1].startswith("LIVE TRADING with real money: trades sized as paper ones")
+    assert out[0].startswith("settings: min edge") and out[1].startswith("LIVE TRADING with real money: trades sized as paper ones, an edge once it has lasted 0.5s at 0.02$ or more")
     assert out[2:6] == ["live trades the futures of nfl", f"no email settings in {tmp_path / 'email.json'}, alerts are only logged and stored",
                         out[4], "paper trades the games, matches, races, and windows of every sport that pay within 24h, in play too"]
     assert out[4].startswith("paper rejects 0% of orders")

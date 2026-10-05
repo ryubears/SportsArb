@@ -163,7 +163,8 @@ def live_settings():
     The settings that decide what the live trader does, in one line.
     """
     c = config
-    return (f"LIVE TRADING with real money: trades sized as paper ones, balances read every "
+    return (f"LIVE TRADING with real money: trades sized as paper ones, an edge once it has lasted {c.LIVE_MIN_EDGE_SECONDS:g}s at "
+            f"{c.MIN_EDGE:g}$ or more, balances read every "
             f"{c.LIVE_BALANCE_SECONDS}s, email under {c.LIVE_LOW_CASH:,.2f}$ on a venue or shard; halt at {c.LIVE_UNKNOWN_LIMIT} "
             f"unknown outcomes in {c.LIVE_ORDER_WINDOW} orders, {c.LIVE_REJECT_LIMIT} refusals in a row, or a loss over "
             f"{c.LIVE_MAX_LOSS_SHARE:.0%} in {c.LIVE_RESULT_HOURS}h")
@@ -262,7 +263,7 @@ class Session:
             self.desks.append(Desk(mode, conn, lambda: self.recorder.books, self.notifier, **rules[mode]))
         self.scanner = scan.Scanner(conn, sports, log, [d.signal for d in self.desks], books=lambda: self.recorder.books) if with_scanner else None
         for desk in self.desks:
-            desk.executor.recheck = self.scanner.recheck
+            desk.executor.recheck, desk.executor.edge_since = self.scanner.recheck, self.scanner.edge_since
         self.recorder = Recorder(conn, self.scanner, self.tapes)
         self.streams = Streams(self.recorder)
         self.last_status = self.last_summary = time.time()

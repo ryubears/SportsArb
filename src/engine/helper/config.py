@@ -61,6 +61,8 @@ PAPER_START_BALANCE = 10000.0   # Paper dollars per venue at the start.
 # LIVE, trading/live.py, trading/brakes.py, and money/live.py. A live trade is sized as a paper one is, by the books and the cash
 # alone. The brakes are sized for a test with about 100 dollars on each venue.
 
+LIVE_MIN_EDGE_SECONDS = 0.5 # How long a pair's edge must have stayed at MIN_EDGE or more, unbroken, as the scanner times it,
+                            # before live trades it, from 2026-10-05 at the user's asking. Paper takes an edge when first seen.
 LIVE_BALANCE_SECONDS = 15   # Between readings of the venues' balances. Under http.IDLE_SECONDS, so each reading also keeps the
                             # venue's kept connection open for the next order: one opened afresh took Polymarket US 11 ms longer.
 LIVE_LOW_CASH = 5.0         # Dollars on a live venue, or on one of its shards in LIVE_SHARDS, under which a human is emailed, once until

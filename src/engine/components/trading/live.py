@@ -31,6 +31,13 @@ each beside a paper twin on the same signal, see tools/in_play_test.py.
 When paper trades the same games, each live order leaves a footprint of
 what it took, which paper adds back, see footprints.py.
 
+Since 2026-10-05 live trades an edge, future or game, only once it has
+stayed at config.MIN_EDGE or more for config.LIVE_MIN_EDGE_SECONDS, half
+a second, by the scanner's episode: one that ends sooner is never traded,
+and one still there when the time is up is priced again then and traded,
+see hold(). Paper takes an edge when first seen, so the two no longer trade
+the same signals.
+
 An order whose outcome cannot be known, because no answer came, the venue
 failed on its side, or its answer cannot be read, leaves what its trade
 holds unknown. That trade is set aside: no more orders are sent for it,
@@ -48,7 +55,7 @@ from concurrent.futures import ThreadPoolExecutor
 from api import kalshi, orders, polymarket_us
 from common import jsonutil
 from common.periodic import Periodic
-from common.timeutil import now_iso
+from common.timeutil import now_iso, seconds_between
 from common.venues import VENUES, is_maintenance
 from db import database
 from db.models import Order
@@ -173,6 +180,17 @@ class LiveExecutor(Executor):
         if self.halted:
             return False
         return super().signal(pair, yes, no, edge, size, fee_infos, now)
+
+    def hold(self, pair, now):
+        """
+        How many seconds until the pair's edge has stayed at config.MIN_EDGE
+        or more for config.LIVE_MIN_EDGE_SECONDS, by the scanner's episode, 0
+        once it has, or without a scanner to say when it began, as in tests.
+        """
+        since = self.edge_since(pair["id"]) if self.edge_since else None
+        if since is None:
+            return 0.0
+        return max(0.0, config.LIVE_MIN_EDGE_SECONDS - seconds_between(since, now))
 
     def plays(self, pair, yes, no, now):
         """

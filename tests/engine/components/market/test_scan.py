@@ -279,6 +279,21 @@ def test_recorder_prices_only_top_of_book_changes(tmp_path):
     assert calls == [("kalshi", "k"), ("kalshi", "k")]
 
 
+def test_edge_since_says_when_the_open_episode_last_reached_the_minimum_edge(tmp_path):
+    conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket_us", "pm")], future=True)
+    latest = {("kalshi", "k"): book("kalshi", "k", T0, 0.53, 0.54)}
+    s = scan.Scanner(conn, ("nfl",), lambda m: None)
+    times = ["2026-09-19T12:00:00+00:00", "2026-09-19T12:00:01+00:00", "2026-09-19T12:00:02+00:00", "2026-09-19T12:00:03+00:00",
+             "2026-09-19T12:00:04+00:00"]
+    seen = []
+    for ts, (bid, ask) in zip(times, [(0.40, 0.41), (0.40, 0.41), (0.51, 0.52), (0.40, 0.41), (0.45, 0.55)]):
+        latest[("polymarket_us", "pm")] = book("polymarket_us", "pm", ts, bid, ask)
+        s.on_book("polymarket_us", "pm", latest, ts)
+        seen.append(s.edge_since(next(iter(s.pairs))))
+    # 12c, still 12c, 1c (under the minimum, the episode goes on), 12c again, then no edge, so the episode ends.
+    assert seen == [times[0], times[0], None, times[3], None] and s.episodes == {}
+
+
 def test_a_pair_a_desk_waits_on_is_priced_again_once_the_wait_ends(tmp_path):
     conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket_us", "pm")], future=True)
     latest = {("kalshi", "k"): book("kalshi", "k", T0, 0.53, 0.54), ("polymarket_us", "pm"): book("polymarket_us", "pm", T0, 0.40, 0.41)}
