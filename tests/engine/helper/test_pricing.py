@@ -59,6 +59,17 @@ def test_live_takes_five_cents_on_a_game_under_way_and_on_a_future_the_edge_retu
     assert pricing.live_min_edge(False, None) == config.MIN_EDGE          # A bet that gives no payout.
 
 
+def test_polymarket_us_just_changed_only_when_its_book_reached_us_at_the_pricing():
+    k, pm = member("kalshi", "k"), member("polymarket_us", "us")
+    now = "2026-09-22T18:00:00+00:00"
+    books = {("kalshi", "k"): Book("kalshi", "k", now, [[0.53, 10]], [[0.54, 10]]),
+             ("polymarket_us", "us"): Book("polymarket_us", "us", "2026-09-22T17:59:59.900000+00:00", [[0.44, 10]], [[0.45, 10]])}
+    assert not pricing.polymarket_us_just_changed(pm, k, books, now)     # Kalshi's change brought this pricing.
+    assert pricing.polymarket_us_just_changed(k, pm, books, "2026-09-22T17:59:59.900000+00:00")
+    assert not pricing.polymarket_us_just_changed(pm, k, {}, now)        # No book at all.
+    assert pricing.polymarket_us_just_changed(k, member("kalshi", "k2"), books, now)     # No leg there.
+
+
 def test_fillable_counts_the_contracts_and_profit_on_the_levels_at_the_floor_or_more():
     members = [member("kalshi", "k"), member("polymarket_us", "us")]
     # Yes costs 0.40 on Polymarket US. No costs 0.47 on Kalshi for 40, 13 cents, 0.57 for 60 more, 3 cents, and 0.59 for

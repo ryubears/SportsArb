@@ -48,16 +48,18 @@ def table(out, title):
     return rows
 
 
-def episode(start, days, edge, size, live=0, pair_id=1, lasted=600.0, take=None):
+def episode(start, days, edge, size, live=0, pair_id=1, lasted=600.0, take=None, pm_changed=1):
     """
     An episode of the pair at start, paying days out, edge at its peak, and size fillable at the minimum edge or more for
-    lasted seconds, ten minutes unless given. An order at the peak could have had take on live's levels, size unless given.
+    lasted seconds, ten minutes unless given. An order at the peak could have had take on live's levels, size unless given,
+    and the peak came with a change of Polymarket US's book unless pm_changed is 0.
     """
     take = size if take is None else take
     return Opportunity(pair_id=pair_id, trade="t", yes_venue="kalshi", yes_contract="k", no_venue="polymarket_us", no_contract="pm",
                        start_ts=start, end_ts=start, seconds=600, peak_ts=start, peak_edge=edge, peak_size=size, peak_profit=size * edge,
                        live=live, days_held=days, return_pct=100 * edge / (1 - edge), annual_pct=100 * edge / (1 - edge) * 365 / days,
-                       min_edge_seconds=lasted, min_edge_size=size, min_edge_profit=size * edge, take_size=take, take_profit=take * edge)
+                       min_edge_seconds=lasted, min_edge_size=size, min_edge_profit=size * edge, take_size=take, take_profit=take * edge,
+                       pm_changed=pm_changed)
 
 
 def test_only_episodes_within_the_rules_are_shown(tmp_path, monkeypatch, capsys):
@@ -78,7 +80,7 @@ def test_only_episodes_within_the_rules_are_shown(tmp_path, monkeypatch, capsys)
     assert [r[:3] for r in table(out, "futures opportunities by kind")] == [["nfl", "winner", "4"]]
     assert [r[2:4] + r[5:7] for r in table(out, "futures largest opportunities")] == [
         ["6.0", "600.000s", "94", "6.00"], ["3.0", "0.004s", "97", "3.00"], ["1.5", "600.000s", "98", "1.50"], ["14.0", "600.000s", "1", "0.14"]]
-    assert ("\nin-play opportunities (1+ contracts at the peak on levels at 5c+, games, matches, races, and windows under way, "
+    assert ("\nin-play opportunities (1+ contracts at the peak on levels at 5c+ as Polymarket US's book changed, games, matches, races, and windows under way, "
             "paying within 24h), last 12 hours\n  none\n") in out
 
 
@@ -89,11 +91,12 @@ def test_in_play_opportunities_are_the_games_under_way_paying_within_a_day(tmp_p
         database.insert_opportunities(conn, [
             episode("2026-09-27T13:00:00+00:00", 0.1, 0.06, 100, live=1, pair_id=3, lasted=0.25),   # In play, paying in hours.
             episode("2026-09-27T13:10:00+00:00", 0.2, 0.08, 50, live=1, pair_id=3, lasted=1.5),     # In play too, paying in 5 hours.
+            episode("2026-09-27T13:20:00+00:00", 0.2, 0.50, 900, live=1, pair_id=3, pm_changed=0),  # Its peak on Kalshi's change.
             episode("2026-09-27T13:30:00+00:00", 0.9, 0.06, 100, pair_id=3, lasted=1.5),            # Before it, paying in 22 hours.
             episode("2026-09-27T14:00:00+00:00", 2, 0.10, 100, pair_id=3),                          # Paying in two days.
             episode("2026-09-27T15:00:00+00:00", 0.5, 0.10, 100, live=1, pair_id=1)])    # A future that pays too soon.
     out = report(tmp_path, monkeypatch, capsys, fill, modes=summary.MODES["all"])
-    assert ("\nin-play opportunities (1+ contracts at the peak on levels at 5c+, games, matches, races, and windows under way, "
+    assert ("\nin-play opportunities (1+ contracts at the peak on levels at 5c+ as Polymarket US's book changed, games, matches, races, and windows under way, "
             "paying within 24h), last 12 hours\n") in out
     assert "  at 2c or more for 1.500s at the median, 1.500s at the 90th percentile, 1.500s at the longest\n" in out
     assert [r[:5] for r in table(out, "in-play opportunities by kind")] == [["nfl", "spread", "2", "1.500s", "1.500s"]]
@@ -146,7 +149,7 @@ def test_live_money_shows_each_venue_read_now_with_the_kalshi_shards(capsys):
     summary.print_live_money(balances)
     # The shards live trading uses, and any other holding money.
     assert capsys.readouterr().out.splitlines()[1:] == [
-        "live money on the venues, read now", "  kalshi 92.00$ (shard 0 0.00$, shard 3 92.00$)", "  polymarket_us not read (401 unauthorized)"]
+        "live money on the venues, read now", "  kalshi 92.00$ (shard 0 0.00$, shard 2 0.00$, shard 3 92.00$)", "  polymarket_us not read (401 unauthorized)"]
 
 
 def open_trades(conn, mode="live", pair_id=1):

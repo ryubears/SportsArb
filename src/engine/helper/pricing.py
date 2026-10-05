@@ -295,6 +295,23 @@ def edge_for_annual(pct, days):
     return ratio / (1 + ratio)
 
 
+def polymarket_us_just_changed(yes, no, books, now):
+    """
+    Whether the Polymarket US leg's book reached us no more than
+    config.LIVE_IN_PLAY_PM_SECONDS before now: at 0, whether the pricing at
+    now came with that book's own change, not Kalshi's, another member's, a
+    recheck, or the tick. True with no leg there. Live trades a game under
+    way only then, and the summary counts an episode in play only when its
+    peak was such a moment, since in play a price that stands still there
+    may be one no order can fill.
+    """
+    for member in (yes, no):
+        if member["venue"] == "polymarket_us":
+            book = books.get((member["venue"], member["contract_id"]))
+            return book is not None and seconds_between(book.ts, now) <= config.LIVE_IN_PLAY_PM_SECONDS
+    return True
+
+
 def live_min_edge(under_way, days):
     """
     The least edge live takes, and the floor of the deeper levels its orders

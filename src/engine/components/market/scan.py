@@ -17,7 +17,8 @@ so what an edge that lasts is worth. Live takes an edge at once, though,
 and its own fill empties the levels it takes, so the Opportunity keeps
 too what an order sent at the peak could have had as live takes it: the
 contracts fillable on the levels at live's least edge or more, see
-pricing.live_min_edge(), and what they lock in.
+pricing.live_min_edge(), and what they lock in, and whether the peak came
+with a change of the Polymarket US leg's book, which live needs in play.
 
 The recorder drives the Scanner with the books it holds in memory and
 the Scanner stores every episode as it ends, so the opportunities table
@@ -37,7 +38,8 @@ from db import database
 from db.models import Opportunity
 from engine.helper import config
 from engine.helper.game import days_until, pays_at as payout_time, started
-from engine.helper.pricing import Priced, annual_pct, best_trade, fillable, fresh, live_min_edge, return_pct, trade_words
+from engine.helper.pricing import (Priced, annual_pct, best_trade, fillable, fresh, live_min_edge, polymarket_us_just_changed, return_pct,
+                                   trade_words)
 
 RECHECK_MARGIN = 0.005      # Seconds past a wait's end that a recheck prices the pair, so the wait is surely over by our clock.
 
@@ -51,7 +53,8 @@ class Episode:
     start_ts: str           # When the edge went positive.
     peak: Priced            # The best moment so far.
     peak_ts: str            # When the best moment was.
-    take: tuple             # Contracts fillable at the peak at live's least edge or more, and their profit, see Scanner.take().
+    take: tuple             # Contracts fillable at the peak at live's least edge or more, and their profit, see Scanner.peak().
+    pm_changed: bool        # Whether the peak came with a change of the Polymarket US leg's book, see Scanner.peak().
     taken: set = field(default_factory=set)     # Which of the scanner's on_signals took a trade on it, by position.
     worth_since: str | None = None      # When the current stretch at config.MIN_EDGE or more began, or None outside one.
     worth_least: tuple = (0.0, 0.0)     # The fewest contracts fillable at that edge so far in the stretch, and their profit.
@@ -115,6 +118,7 @@ class Episode:
             min_edge_profit=worth_profit,
             take_size=self.take[0],
             take_profit=self.take[1],
+            pm_changed=int(self.pm_changed),
         )
 
 
@@ -184,17 +188,21 @@ class Scanner:
             return None
         return best_trade(members, books, self.fee_infos)
 
-    def take(self, pair, priced, books, now):
+    def peak(self, pair, priced, books, now):
         """
-        What an order sent at now could have had of the priced trade, as live
-        takes it: the contracts fillable on the levels at live's least edge on
-        the pair or more, see pricing.live_min_edge(), and the net dollars
-        they lock in. Worked out only when an episode opens or reaches a new
-        peak, not on every pricing.
+        An episode's new best moment, the priced trade at now, as (priced,
+        now, take, pm_changed). take is what an order sent then could have
+        had as live takes it: the contracts fillable on the levels at live's
+        least edge on the pair or more, see pricing.live_min_edge(), and the
+        net dollars they lock in. pm_changed is whether the pricing came with
+        a change of the Polymarket US leg's book, which live needs to trade a
+        game under way, see pricing.polymarket_us_just_changed(). Worked out
+        only when an episode opens or reaches a new peak, not on every pricing.
         """
         pays_at = payout_time((priced.yes, priced.no), pair["sport"])
         floor = live_min_edge(started(pair["game_date"], pair["members"], now), days_until(now, pays_at) if pays_at else None)
-        return fillable(priced.yes, priced.no, books, self.fee_infos, floor)
+        take = fillable(priced.yes, priced.no, books, self.fee_infos, floor)
+        return priced, now, take, polymarket_us_just_changed(priced.yes, priced.no, books, now)
 
     def update(self, pair_id, books, now):
         """
@@ -205,9 +213,9 @@ class Scanner:
         episode = self.episodes.get(pair_id)
         if priced is not None and priced.edge > 0:
             if episode is None:
-                episode = self.episodes[pair_id] = Episode(pair, now, priced, now, self.take(pair, priced, books, now))
+                episode = self.episodes[pair_id] = Episode(pair, now, *self.peak(pair, priced, books, now))
             elif priced.edge > episode.peak.edge:
-                episode.peak, episode.peak_ts, episode.take = priced, now, self.take(pair, priced, books, now)
+                episode.peak, episode.peak_ts, episode.take, episode.pm_changed = self.peak(pair, priced, books, now)
             episode.see(priced, now)
             for i, on_signal in enumerate(self.on_signals):
                 if i not in episode.taken and on_signal(pair, priced.yes, priced.no, priced.edge, priced.size, self.fee_infos, now):

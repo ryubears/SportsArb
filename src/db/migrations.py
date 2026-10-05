@@ -250,10 +250,21 @@ def step_13_opportunities_take(conn):
             conn.execute(f"ALTER TABLE opportunities ADD COLUMN {column} REAL")
 
 
+def step_14_opportunities_pm_changed(conn):
+    """
+    Episodes now say whether their peak came with a change of the
+    Polymarket US leg's book, which the summary counts an episode in play
+    by. Older episodes did not, so theirs is null and the summary leaves
+    those in play out.
+    """
+    if "pm_changed" not in [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]:
+        conn.execute("ALTER TABLE opportunities ADD COLUMN pm_changed INTEGER")
+
+
 # Step n brings a database from user_version n - 1 to n. Only ever add to the end.
 STEPS = [step_1_catch_up, step_2_settlements, step_3_opening_balances, step_4_modes, step_5_drop_quotes, step_6_pair_sports,
          step_7_min_edge_stretch, step_8_drop_transfers, step_9_drop_trade_caps, step_10_twin_sequences, step_11_order_book_times,
-         step_12_trades_in_play, step_13_opportunities_take]
+         step_12_trades_in_play, step_13_opportunities_take, step_14_opportunities_pm_changed]
 
 
 def migrate(conn, fresh):

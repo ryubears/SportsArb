@@ -11,7 +11,8 @@ contract or more, since a trade opens no fewer, on the levels at live's
 least edge or more, see pricing.live_min_edge(): on a future paying
 config.MIN_PAYOUT_HOURS or more out, the levels returning
 config.MIN_ANNUAL_PCT a year, and on a game under way paying within
-config.MAX_PAYOUT_HOURS, those at config.LIVE_IN_PLAY_MIN_EDGE or more.
+config.MAX_PAYOUT_HOURS, those at config.LIVE_IN_PLAY_MIN_EDGE or more,
+when the peak came with a change of Polymarket US's book, as live needs.
 Each market shows what those orders could have taken at full size and
 what that locks in, overall, by sport and kind, and the largest, and how
 long the edge stayed at config.MIN_EDGE or more, in seconds to the
@@ -207,15 +208,21 @@ def opportunity_rules(market):
     a year at the peak, on the levels returning that, and the games,
     matches, races, and windows under way at the peak paying within
     config.MAX_PAYOUT_HOURS, on the levels at config.LIVE_IN_PLAY_MIN_EDGE
-    or more, of which no return a year is asked. Which levels count at
-    the peak is the scanner's, see Opportunity.take_size.
+    or more, of which no return a year is asked, and whose peak came with a
+    change of the Polymarket US leg's book, the only moment live trades
+    one, see Opportunity.pm_changed. A book that stands still there in
+    play may be on a market no longer trading: two episodes of one
+    Bitcoin window on 2026-10-05 showed 5,304$ to be locked in at 18.7 and
+    51.8 cents, unlikely to be real when both venues settle it on the same
+    index. Which levels count at the peak is the scanner's, see
+    Opportunity.take_size.
     """
     if market == "futures":
         return ("live = 0 AND days_held * 24 >= ? AND annual_pct >= ?", (config.MIN_PAYOUT_HOURS, config.MIN_ANNUAL_PCT),
                 f"levels returning {config.MIN_ANNUAL_PCT}%+ a year, paying {config.MIN_PAYOUT_HOURS}h+ out")
-    return ("live = 1 AND days_held * 24 <= ?", (config.MAX_PAYOUT_HOURS,),
-            f"levels at {100 * config.LIVE_IN_PLAY_MIN_EDGE:.0f}c+, games, matches, races, and windows under way, "
-            f"paying within {config.MAX_PAYOUT_HOURS}h")
+    return ("live = 1 AND days_held * 24 <= ? AND pm_changed = 1", (config.MAX_PAYOUT_HOURS,),
+            f"levels at {100 * config.LIVE_IN_PLAY_MIN_EDGE:.0f}c+ as Polymarket US's book changed, games, matches, races, "
+            f"and windows under way, paying within {config.MAX_PAYOUT_HOURS}h")
 
 
 def print_market_opportunities(conn, since, hours, sports, market):
@@ -241,7 +248,7 @@ def print_market_opportunities(conn, since, hours, sports, market):
     where, params = in_sports(sports)
     rule, rule_params, levels = opportunity_rules(market)
     print(f"\n{market} opportunities ({MIN_CONTRACTS}+ contracts at the peak on {levels}), last {hours} hours")
-    if "take_size" not in [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]:
+    if not {"take_size", "pm_changed"} <= {r[1] for r in conn.execute("PRAGMA table_info(opportunities)")}:
         print("  not kept yet, until the live process restarts on this code")
         return
     rows = query_rows(conn, f"""

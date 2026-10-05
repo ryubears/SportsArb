@@ -64,14 +64,14 @@ from concurrent.futures import ThreadPoolExecutor
 from api import kalshi, orders, polymarket_us
 from common import jsonutil
 from common.periodic import Periodic
-from common.timeutil import at_seconds, now_iso, seconds_between
+from common.timeutil import at_seconds, now_iso
 from common.venues import VENUES, is_maintenance
 from db import database
 from db.models import Order
 from engine.components.trading.brakes import Brakes
 from engine.components.trading.executor import Executor, Fill
 from engine.helper import config, game
-from engine.helper.pricing import live_min_edge
+from engine.helper.pricing import live_min_edge, polymarket_us_just_changed
 
 PLACE = {"kalshi": kalshi.place_order, "polymarket_us": polymarket_us.place_order}   # How each venue takes an order.
 POSITIONS = {"kalshi": kalshi.positions, "polymarket_us": polymarket_us.positions}    # How each venue reports what the account holds.
@@ -230,13 +230,7 @@ class LiveExecutor(Executor):
         signal its own change brings is traded, not one brought by Kalshi's
         book, another member's, a recheck, or the tick. Any otherwise.
         """
-        if not self.in_game(pair, yes, no, now):
-            return True
-        for member in (yes, no):
-            if member["venue"] == "polymarket_us":
-                book = self.book((member["venue"], member["contract_id"]))
-                return book is not None and seconds_between(book.ts, now) <= config.LIVE_IN_PLAY_PM_SECONDS
-        return True
+        return not self.in_game(pair, yes, no, now) or polymarket_us_just_changed(yes, no, self.books(), now)
 
     def plays(self, pair, yes, no, now):
         """

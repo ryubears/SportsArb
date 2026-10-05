@@ -86,7 +86,7 @@ what.
   half an hour after its game's expected end, or a future's close.
 - **Shard**: Kalshi keeps each sport's markets on an exchange shard whose
   cash is its own, football and hockey on shard 0, baseball and basketball
-  on 3. An order spends only its market's shard's cash.
+  on 3, Bitcoin on 2. An order spends only its market's shard's cash.
 - **Mode**: `paper` or `live`. Paper fills are simulated against the real
   books, live ones are real orders. Every trade is stored with its mode.
 - **Desk**: everything one mode needs: its money, its executor, and its
@@ -246,7 +246,7 @@ place (see the top of `db/database.py`):
 |---|---|
 | contracts, bets, pairs | the catalog |
 | gaps | the recorder, when a feed connection drops |
-| opportunities | the scanner, one row per episode, with what an order at its peak could have had as live takes it (`take_size`) |
+| opportunities | the scanner, one row per episode, with what an order at its peak could have had as live takes it (`take_size`) and whether the peak came with a change of Polymarket US's book (`pm_changed`) |
 | trades | the executors, paper and live, with whether the game was under way (`in_play`) |
 | orders | the live executor, one row per real order, with the times of the book it went out on |
 | settlements | the settler |
@@ -271,25 +271,24 @@ Our sport keys are `nfl`, `ncaaf`, `mlb`, `nhl`, `nba`, `wnba`, `ncaab`,
 `uel`, `f1`, `nascar`, `ufc`, `tennis`, `darts`, `politics`, and `crypto`,
 which is Bitcoin, the one coin Polymarket US lists. Of the thousands of
 series Kalshi lists it takes only those classified, by ticker, each sport's
-futures listed in `SPORTS` and its event series added from the
-classifier's tables by their prefix, and for elections, which have a series
-per state or district, by the shapes the classifier reads, `SENATEGA` or
-`HOUSEAZ1`.
+futures listed in `SPORTS` and its event series added from the classifier's
+tables by their prefix, and for elections, which have a series per state or
+district, by the shapes the classifier reads, `SENATEGA` or `HOUSEAZ1`.
 Kalshi's list of series, every category of it, is read once and kept ten
 minutes, so a refresh of every sport reads it once. Kalshi is read through
 its public REST catalog, paged under the rate limit, and each series brings
 the exchange shard its markets trade on: shard 0 for football, hockey,
 soccer, motorsport, UFC, darts, and elections, shard 3 for baseball,
-basketball, and tennis. Polymarket US is read through its gateway, one
-call per tag, deduplicated across tags, baseball through the `mlb` tag,
-since `baseball` brings Korean and Japanese league games too, and Bitcoin
-through `crypto` and `up-or-down`. A game's contract starts at its event's
-kickoff: an event is a game when it has a game id, the venue's own or
-Sportradar's, and a futures market on one is a race's when the event runs
-two days or less, and otherwise an award's, which has no start. A Bitcoin
-window starts at its `windowStart`. Polymarket US marks a window closed
-until it opens, so the catalog of Bitcoin is refreshed just after each one
-opens, see the engine.
+basketball, and tennis, shard 2 for Bitcoin. Polymarket US is read through
+its gateway, one call per tag, deduplicated across tags, baseball through
+the `mlb` tag, since `baseball` brings Korean and Japanese league games
+too, and Bitcoin through `crypto` and `up-or-down`. A game's contract
+starts at its event's kickoff: an event is a game when it has a game id,
+the venue's own or Sportradar's, and a futures market on one is a race's
+when the event runs two days or less, and otherwise an award's, which has
+no start. A Bitcoin window starts at its `windowStart`. Polymarket US marks
+a window closed until it opens, so the catalog of Bitcoin is refreshed just
+after each one opens, see the engine.
 
 **classify/** turns each contract into a `Bet`, a venue neutral statement
 of what the contract is about: kind, season, the game's date and its two
@@ -513,12 +512,12 @@ feed runs in the main process instead.
 
 **scan.py** prices every pair whose member's book just changed. Using
 **pricing.py** it walks the ladders to find the cheapest way to hold yes
-and the cheapest way to hold no across the pair's members, on two
-different venues, including the venue's taker fee from **fees.py**. Two
-contracts on one venue, such as a game's two teams on Kalshi, are priced
-by the same traders, and a gap between them is gone before both orders
-land: in the in-play test 52 trades with both legs on Kalshi matched 5 of
-the 247 contracts they asked for, live and paper alike. An episode is a stretch
+and the cheapest way to hold no across the pair's members, on two different
+venues, including the venue's taker fee from **fees.py**. Two contracts on
+one venue, such as a game's two teams on Kalshi, are priced by the same
+traders, and a gap between them is gone before both orders land: in the
+in-play test 52 trades with both legs on Kalshi matched 5 of the 247
+contracts they asked for, live and paper alike. An episode is a stretch
 where the net edge stays positive. When it ends it is stored as an
 `Opportunity` with its legs, duration, peak edge, how many contracts the
 recorded depth would have filled at the peak, and the return on the capital
@@ -532,11 +531,13 @@ it, which is what an order sent any time in the stretch could have had.
 From 2026-10-05 it keeps too what an order sent at its peak could have had
 as live takes it, at once: the contracts on the levels at live's least edge
 or more, `pricing.live_min_edge()`, 5 cents on a game under way and 50% a
-year on a future, and what they lock in. The summary counts opportunities
-by that, since live's own fill empties the levels it takes. A
-book goes stale after a minute only once its game may have started: a
-future's markets, and a game's before kickoff, can rest unchanged for hours
-while they are open, so their books are priced however old they are.
+year on a future, and what they lock in, and whether the peak came with a
+change of the Polymarket US leg's book (`pm_changed`), the only moment live
+trades a game under way. The summary counts opportunities by that, since
+live's own fill empties the levels it takes. A book goes stale after a
+minute only once its game may have started: a future's markets, and a
+game's before kickoff, can rest unchanged for hours while they are open, so
+their books are priced however old they are.
 
 **trading/** trades the signal. **executor.py** holds what paper and live
 share, which is everything but how an order is filled. Live trades the
@@ -648,13 +649,16 @@ books, so no trade is opened, and no order sent to flatten one, with a leg
 on a venue in its window (`venues.is_maintenance`). A pause at any other
 time is met by the brakes: the venue refuses the orders, and three refusals
 in a row halt live trading. Live trading takes every sport the run does. A
-Kalshi leg spends only the cash on its market's shard, football's and
-hockey's on shard 0, baseball's and basketball's on 3, so
-`tools/kalshi_shards.py` splits the Kalshi cash between the two, 90% to
-shard 0, where the football futures with the long-lasting edges are, and
-10% to shard 3 (`LIVE_SHARDS`). The live executor emails once when either
-shard, or Polymarket US, falls under $5 (`LIVE_LOW_CASH`), and again only
-after it has been back over.
+Kalshi leg spends only the cash on its market's shard: football's,
+hockey's, soccer's, motorsport's, UFC's, darts', and politics' on shard 0,
+Bitcoin's on 2, and baseball's, basketball's, and tennis' on 3. So
+`tools/kalshi_shards.py` splits the Kalshi cash between them, 80% to shard
+0, where the football futures with the long-lasting edges are, and 10% each
+to shards 2 and 3 (`LIVE_SHARDS`). Until 2026-10-05 it was 90% to shard 0
+and 10% to shard 3, with nothing on 2, so every Bitcoin trade, future or
+window, came to no contracts and live had made none. The live executor
+emails once when any of the three shards, or Polymarket US, falls under $5
+(`LIVE_LOW_CASH`), and again only after it has been back over.
 
 **Edges that last.** From 2026-10-05 04:07 UTC live traded an edge only
 once it had stayed at `MIN_EDGE` or more for half a second, unbroken, as
@@ -819,40 +823,44 @@ episode counts when an order sent at its peak could have had a whole
 contract or more on the levels at live's least edge or more, the levels
 returning `MIN_ANNUAL_PCT` a year on a future paying `MIN_PAYOUT_HOURS` or
 more out, and those at `LIVE_IN_PLAY_MIN_EDGE` or more on a game, match,
-race, or window under way paying within `MAX_PAYOUT_HOURS`. It shows what
-those orders could have taken and locked in at full size, how long the edge
-stayed at `MIN_EDGE` or more, in seconds to the thousandth, at the median,
-the 90th percentile, and the longest, the same by sport and kind, and the
-largest five. An edge on less than a contract, a sliver of a Polymarket US
-level that can last minutes, is left out, since a trade opens a whole
-contract or more and so could never take it. Until 2026-10-05 an episode
-counted only with a whole contract fillable through all of its longest
-stretch at `MIN_EDGE`, which left out the very episodes live traded, since
-its own fill empties the levels it takes: of the two futures it traded in
-the hour after the 15:14 UTC restart, one stretch kept 0.29 contracts and
-the other 0.01. Episodes from before the scanner kept what the peak could
-have had, and ones still open, which are stored only once they end, are
-left out. The market then shows, for paper and then live, or one of them
-with `--mode paper` or `--mode live`, the trades by outcome, filled,
-partial, then failed, and by sport and kind in the window, the five holding
-the most capital, the legs settled in it by venue, and the open trades: in
-a few lines, how many, how many of them opened in the last hour, day, and
-week and the capital those still hold, the capital they all hold on each
-venue and the profit they are expected to return with its rate a year
-weighted by capital, and the first, average, and last dates they resolve,
-the first maybe past and waiting on a venue, the average weighted by
-capital; then a table of each open trade opened in the window, newest
-first, with what it holds, its capital, expected profit and rates, and when
-it pays. Live's trades end with its real orders sent by venue and what came
-back, then its orders to open by venue, the side they bought, and how long
-the venue had sent nothing for the market when each went out (0-1, 1-5,
-5-30, 30+ seconds), with how many took something. The paper money from the
-ledger and the live balances read from the venues now, with Kalshi's
-shards, come last. Each section is a title line with its details on
-indented lines under it, and a long list, such as the pairs of each sport,
-wraps at 100 characters. `--hours` sets the window, `--sport nfl,ncaaf`
-narrows everything to some sports, and `--no-live` leaves out the live
-balances.
+race, or window under way paying within `MAX_PAYOUT_HOURS`, when the peak
+came with a change of the Polymarket US leg's book, as live needs: a book
+standing still there in play may be on a market no longer trading, as two
+episodes of one Bitcoin window on 2026-10-05 seemed to be, showing $5,304
+to be locked in at 18.7 and 51.8 cents though both venues settle it on the
+same index. It shows what those orders could have taken and locked in at
+full size, how long the edge stayed at `MIN_EDGE` or more, in seconds to
+the thousandth, at the median, the 90th percentile, and the longest, the
+same by sport and kind, and the largest five. An edge on less than a
+contract, a sliver of a Polymarket US level that can last minutes, is left
+out, since a trade opens a whole contract or more and so could never take
+it. Until 2026-10-05 an episode counted only with a whole contract fillable
+through all of its longest stretch at `MIN_EDGE`, which left out the very
+episodes live traded, since its own fill empties the levels it takes: of
+the two futures it traded in the hour after the 15:14 UTC restart, one
+stretch kept 0.29 contracts and the other 0.01. Episodes from before the
+scanner kept what the peak could have had, and ones still open, which are
+stored only once they end, are left out. The market then shows, for paper
+and then live, or one of them with `--mode paper` or `--mode live`, the
+trades by outcome, filled, partial, then failed, and by sport and kind in
+the window, the five holding the most capital, the legs settled in it by
+venue, and the open trades: in a few lines, how many, how many of them
+opened in the last hour, day, and week and the capital those still hold,
+the capital they all hold on each venue and the profit they are expected to
+return with its rate a year weighted by capital, and the first, average,
+and last dates they resolve, the first maybe past and waiting on a venue,
+the average weighted by capital; then a table of each open trade opened in
+the window, newest first, with what it holds, its capital, expected profit
+and rates, and when it pays. Live's trades end with its real orders sent by
+venue and what came back, then its orders to open by venue, the side they
+bought, and how long the venue had sent nothing for the market when each
+went out (0-1, 1-5, 5-30, 30+ seconds), with how many took something. The
+paper money from the ledger and the live balances read from the venues now,
+with Kalshi's shards, come last. Each section is a title line with its
+details on indented lines under it, and a long list, such as the pairs of
+each sport, wraps at 100 characters. `--hours` sets the window, `--sport
+nfl,ncaaf` narrows everything to some sports, and `--no-live` leaves out
+the live balances.
 
 `src/tools/live_check.py` reads both venues' balances with the keys in
 `data/` and says when the Kalshi key's location attestation lapses, and
@@ -861,12 +869,13 @@ run.
 
 `src/tools/kalshi_shards.py` splits the live Kalshi cash between the
 exchange shards live trading uses by the percents `LIVE_SHARDS` gives them,
-90% to shard 0 and 10% to shard 3. It reads each shard's cash and says what
-it would move, and with `--apply` moves it, then sets Kalshi's own target
-split to the same shares, which Kalshi keeps every 10 seconds, payouts
-included. It does not refill a shard whose cash orders spend: at 50/50 on
-2026-10-01, shard 0 had spent down to $6.94 of $51.77. So run it again when
-one shard runs low. The money stays in the account, and nothing is traded.
+80% to shard 0 and 10% each to shards 2 and 3. It reads each shard's cash
+and says what it would move, and with `--apply` moves it, then sets
+Kalshi's own target split to the same shares, which Kalshi keeps every 10
+seconds, payouts included. It does not refill a shard whose cash orders
+spend: at 50/50 on 2026-10-01, shard 0 had spent down to $6.94 of $51.77.
+So run it again when one shard runs low. The money stays in the account,
+and nothing is traded.
 
 `src/tools/repair_fills.py` repairs the live trades recorded under an
 older reading of Polymarket US fills: before fills were added up, when an

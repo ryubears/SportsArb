@@ -89,7 +89,8 @@ CREATE TABLE IF NOT EXISTS opportunities (
     min_edge_size  REAL,            -- Contracts fillable at that edge through all of that stretch.
     min_edge_profit REAL,           -- Net dollars from filling them, at the stretch's thinnest moment.
     take_size      REAL,            -- Contracts fillable at the peak on the levels at live's least edge or more. Null before 2026-10-05.
-    take_profit    REAL             -- Net dollars from filling them.
+    take_profit    REAL,            -- Net dollars from filling them.
+    pm_changed     INTEGER          -- 1 when the peak came with a change of the Polymarket US leg's book, 0 otherwise. Null before 2026-10-05.
 );
 
 -- Reports read the episodes of a recent window, see tools/summary.py, and this spares them reading every one.

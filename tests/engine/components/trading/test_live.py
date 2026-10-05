@@ -302,7 +302,7 @@ def test_orders_the_latency_stopgap_turned_away_do_not_count_as_refusals(tmp_pat
 
 
 def test_trades_spend_all_the_cash_and_a_venue_or_kalshi_shard_running_low_emails_once(tmp_path):
-    shards = {0: 8.0, 3: 20.0}                          # Football's shard and baseball's.
+    shards = {0: 8.0, 2: 20.0, 3: 20.0}                 # Football's shard, Bitcoin's, and baseball's.
     cash = LiveBalances(lambda m: None, {"kalshi": lambda: (sum(shards.values()), dict(shards)), "polymarket_us": lambda: (8.0, {})})
     asyncio.run(cash.refresh(NOW))
     notifier, logs = FakeNotifier(), []
@@ -321,7 +321,8 @@ def test_trades_spend_all_the_cash_and_a_venue_or_kalshi_shard_running_low_email
     assert asyncio.run(scenario()) is True and stored(conn, "trades")[0]["quantity"] == 17
     ex.tick(NOW)
     ex.tick(NOW)
-    # Once each: Kalshi's shard 0, whose 8 dollars less the 7.99 bought is 0.01, and Polymarket US, 8 less 7.65. Shard 3 has plenty.
+    # Once each: Kalshi's shard 0, whose 8 dollars less the 7.99 bought is 0.01, and Polymarket US, 8 less 7.65. Shards 2 and 3
+    # have plenty.
     assert [(kind, subject) for kind, subject, _ in notifier.sent] == [("low_cash", "SportsArb live kalshi shard 0 cash low: 0.01$"),
                                                                         ("low_cash", "SportsArb live polymarket_us cash low: 0.35$")]
     assert "move some to the shard with python3 -m tools.kalshi_shards" in notifier.sent[0][2]

@@ -126,6 +126,9 @@ class Opportunity:
     take_size: float | None = None      # Contracts fillable at the peak on the levels at live's least edge or more, see
                                         # pricing.live_min_edge(): what an order sent then could have had. Null before 2026-10-05.
     take_profit: float | None = None    # Net dollars from filling them.
+    pm_changed: int | None = None       # 1 when the peak came with a change of the Polymarket US leg's book, which live needs
+                                        # to trade a game under way, see pricing.polymarket_us_just_changed(), 0 otherwise.
+                                        # Null before 2026-10-05.
 
 
 @dataclass

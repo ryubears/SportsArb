@@ -6,8 +6,8 @@ from engine.helper import config
 from tools import kalshi_shards
 
 
-def test_football_and_hockeys_shard_keeps_most_of_the_cash():
-    assert config.LIVE_SHARDS["kalshi"] == {0: 90, 3: 10}
+def test_football_and_hockeys_shard_keeps_most_of_the_cash_and_bitcoins_some():
+    assert config.LIVE_SHARDS["kalshi"] == {0: 80, 2: 10, 3: 10}
 
 
 def test_moves_bring_each_shard_to_its_share_to_the_hundredth_of_a_cent():
@@ -52,25 +52,26 @@ def split(kalshi, apply):
 
 
 def test_without_apply_it_only_says_what_it_would_do():
-    kalshi = Kalshi({0: 0.0, 3: 91.18})
+    kalshi = Kalshi({0: 0.0, 2: 0.0, 3: 91.18})
     assert split(kalshi, apply=False) == [
-        "kalshi 91.18$ available, by exchange shard: shard 0 0.00$, shard 3 91.18$",
-        "target split: shard 0 90%, shard 3 10%",
-        "to move: 82.0620$ from shard 3 to shard 0",
+        "kalshi 91.18$ available, by exchange shard: shard 0 0.00$, shard 2 0.00$, shard 3 91.18$",
+        "target split: shard 0 80%, shard 2 10%, shard 3 10%",
+        "to move: 72.9440$ from shard 3 to shard 0",
+        "to move: 9.1180$ from shard 3 to shard 2",
         "nothing done: run again with --apply to move the money and set Kalshi's target split"]
     assert kalshi.calls == []
 
 
 def test_with_apply_it_moves_the_money_before_setting_kalshis_target_split():
-    kalshi = Kalshi({0: 0.0, 3: 91.18})
+    kalshi = Kalshi({0: 0.0, 2: 0.0, 3: 91.18})
     lines = split(kalshi, apply=True)
     # Moved first, so Kalshi's own rebalancing, once set, finds nothing left to move.
-    assert kalshi.calls == [("move", 82.062, 3, 0), ("split", {0: 90, 3: 10})]
-    assert lines[-3:] == ["moved 82.0620$ from shard 3 to shard 0: {'transfer_id': 't1'}", "target split set: {}",
-                          "now kalshi 91.18$ available, by exchange shard: shard 0 82.06$, shard 3 9.12$"]
+    assert kalshi.calls == [("move", 72.944, 3, 0), ("move", 9.118, 3, 2), ("split", {0: 80, 2: 10, 3: 10})]
+    assert lines[-3:] == ["moved 9.1180$ from shard 3 to shard 2: {'transfer_id': 't1'}", "target split set: {}",
+                          "now kalshi 91.18$ available, by exchange shard: shard 0 72.94$, shard 2 9.12$, shard 3 9.12$"]
 
 
 def test_a_split_already_made_still_sets_kalshis_target_split():
-    kalshi = Kalshi({0: 72.0, 3: 8.0})
+    kalshi = Kalshi({0: 64.0, 2: 8.0, 3: 8.0})
     assert "already split, nothing to move" in split(kalshi, apply=True)
-    assert kalshi.calls == [("split", {0: 90, 3: 10})]
+    assert kalshi.calls == [("split", {0: 80, 2: 10, 3: 10})]

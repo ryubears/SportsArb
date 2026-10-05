@@ -183,3 +183,21 @@ def test_step_13_gives_older_episodes_no_take_so_the_summary_leaves_them_out(tmp
     conn = database.connect(path)
     assert [tuple(r) for r in conn.execute("SELECT id, min_edge_profit, take_size, take_profit FROM opportunities")] == [(1, 0.5, None, None)]
     assert version(conn) == len(migrations.STEPS)
+
+
+def test_step_14_gives_older_episodes_no_polymarket_us_change_so_the_summary_leaves_those_in_play_out(tmp_path):
+    path = tmp_path / "t.sqlite"
+    old = sqlite3.connect(path)
+    old.execute("""CREATE TABLE opportunities (
+    id             INTEGER PRIMARY KEY,
+    start_ts       TEXT NOT NULL,   -- When the net edge first went positive.
+    take_size      REAL,
+    take_profit    REAL
+)""")
+    old.execute("INSERT INTO opportunities (id, start_ts, take_size, take_profit) VALUES (1, 's', 5, 0.5)")
+    old.execute("PRAGMA user_version = 13")
+    old.commit()
+    old.close()
+    conn = database.connect(path)
+    assert [tuple(r) for r in conn.execute("SELECT id, take_size, pm_changed FROM opportunities")] == [(1, 5, None)]
+    assert version(conn) == len(migrations.STEPS)

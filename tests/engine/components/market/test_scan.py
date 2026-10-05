@@ -151,6 +151,18 @@ def test_an_episode_keeps_what_an_order_at_its_peak_could_have_had_on_the_levels
         assert takes(conn) == [pytest.approx(take)], kickoff
 
 
+def test_an_episode_says_whether_its_peak_came_with_a_change_of_polymarket_us_book(tmp_path):
+    conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket_us", "pm")])
+    at = "2026-09-19T12:00:%02d+00:00"
+    replay(conn, [Book("polymarket_us", "pm", at % 0, [[0.39, 100]], [[0.40, 100]]),
+                  Book("kalshi", "k", at % 1, [[0.53, 100]], [[0.99, 1]]),          # 13 cents, on Kalshi's change.
+                  Book("kalshi", "k", at % 2, [[0.40, 100]], [[0.99, 1]]),          # No edge: the episode ends.
+                  Book("kalshi", "k", at % 3, [[0.50, 100]], [[0.99, 1]]),          # 10 cents, on Kalshi's change.
+                  Book("polymarket_us", "pm", at % 4, [[0.37, 100]], [[0.38, 100]]),    # 12 cents, on Polymarket US's.
+                  Book("kalshi", "k", at % 5, [[0.40, 100]], [[0.99, 1]])])
+    assert [tuple(r) for r in conn.execute("SELECT start_ts, pm_changed FROM opportunities ORDER BY start_ts")] == [(at % 1, 0), (at % 3, 1)]
+
+
 def test_a_games_book_ages_only_once_the_game_may_have_started(tmp_path):
     books = {("polymarket_us", "pm"): Book("polymarket_us", "pm", T0, [[0.39, 100]], [[0.40, 100]]),
              ("kalshi", "k"): Book("kalshi", "k", T0, [[0.53, 100]], [[0.99, 1]])}
