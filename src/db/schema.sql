@@ -165,7 +165,10 @@ CREATE TABLE IF NOT EXISTS orders (
     dollars        REAL NOT NULL,      -- Paid for a buy or received for a sale, fees included.
     fees           REAL NOT NULL,
     note           TEXT,               -- Why the venue rejected the order, or the error.
-    response       TEXT                -- The venue's answer as JSON, for reconciling.
+    response       TEXT,               -- The venue's answer as JSON, for reconciling.
+    book_at        TEXT,               -- The venue's time for the contract's newest book when the order went out, null when it gave
+                                       -- none, as for the first book on a connection: when the venue last changed the market.
+    book_ts        TEXT                -- When that book reached us, by our clock. sent_at less it is how long the market had sent nothing.
 );
 -- The brakes and the reports join orders to their trades. Without this SQLite built a throwaway index over every order
 -- on each join: on 2026-10-03, with 116,000 orders, the brakes' check took some 150 ms on the instance and held up the

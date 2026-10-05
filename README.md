@@ -192,7 +192,9 @@ checks before it trades, below.
      the contract's tape.
    - Live (`trading/live.py`): each order is a real immediate or cancel
      limit order through the venue client's `place_order`. It is stored in
-     the orders table before it is sent and again with the answer.
+     the orders table before it is sent, with the times of the book it went
+     out on (`book_at`, the venue's for its last change, and `book_ts`, ours
+     for when that reached us), and again with the answer.
 3. **Flatten** (`flatten`). If the legs filled unevenly, `sell_excess`
    sells the excess back on its own venue. Buying the missing side on the
    other venue might cost less, but would tie the money up until the bet
@@ -241,7 +243,7 @@ place (see the top of `db/database.py`):
 | gaps | the recorder, when a feed connection drops |
 | opportunities | the scanner, one row per episode |
 | trades | the executors, paper and live |
-| orders | the live executor, one row per real order |
+| orders | the live executor, one row per real order, with the times of the book it went out on |
 | settlements | the settler |
 | ledger | paper money, every dollar in and out |
 | alerts | every email the live process sends: low cash, halts, and the Kalshi key's attestation |
@@ -681,6 +683,18 @@ The 52 trades with both legs on Kalshi lost $7.21, which is why the legs
 are now always on two venues. The `twins` table holds the test, and
 `tools/in_play_test.py` reports it.
 
+In play live's Polymarket US orders miss most when they buy No, selling
+into the Yes bids: from the test through 2026-10-05 04:07 UTC 14 of 62
+took something, against 57 of 103 buying Yes and 95% either way on the
+futures. Polymarket US took each order that missed and let it expire at
+once, nothing at its price, while its feed went on showing that price,
+once for 18.8 seconds through four orders, all of which paper filled. A
+market halted during a play with its last book still up would look like
+that, since a book counts as current in play for up to `MAX_BOOK_AGE`, 60
+seconds, without a change. Since 2026-10-05 every live order stores when
+its book last changed, and the summary shows how often orders took
+something by how long the book had been quiet, to tell.
+
 Live trading has brakes, in **brakes.py**, sized for a test with about $100
 on each venue. An order whose outcome cannot be known (a timeout, a dropped
 connection, a venue failing on its side, or an answer that cannot be read)
@@ -787,7 +801,10 @@ dates they resolve, the first maybe past and waiting on a venue, the
 average weighted by capital; then a table of each open trade opened in the
 window, newest first, with what it holds, its capital, expected profit and
 rates, and when it pays. Each live market ends with its real orders sent
-by venue and what came back, the paper section with the paper money from
+by venue and what came back, then its orders to open by venue, the side
+they bought, and how long the venue had sent nothing for the market when
+each went out (0-1, 1-5, 5-30, 30+ seconds), with how many took
+something, the paper section with the paper money from
 the ledger, and the live one with the live balances read from the venues now, with Kalshi's
 shards. Each section is a title line with its details on indented lines
 under it, and a long list, such as the pairs of each sport, wraps at 100

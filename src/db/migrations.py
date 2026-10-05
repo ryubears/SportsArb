@@ -215,9 +215,21 @@ def step_10_twin_sequences(conn):
                         (SELECT id FROM trades WHERE yes_venue != no_venue)""")
 
 
+def step_11_order_book_times(conn):
+    """
+    Live orders now record the times of the book they were sent on, so a
+    miss can be told apart from a market that had gone quiet. Older orders
+    did not, so theirs are null.
+    """
+    columns = [r[1] for r in conn.execute("PRAGMA table_info(orders)")]
+    for column in ("book_at", "book_ts"):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE orders ADD COLUMN {column} TEXT")
+
+
 # Step n brings a database from user_version n - 1 to n. Only ever add to the end.
 STEPS = [step_1_catch_up, step_2_settlements, step_3_opening_balances, step_4_modes, step_5_drop_quotes, step_6_pair_sports,
-         step_7_min_edge_stretch, step_8_drop_transfers, step_9_drop_trade_caps, step_10_twin_sequences]
+         step_7_min_edge_stretch, step_8_drop_transfers, step_9_drop_trade_caps, step_10_twin_sequences, step_11_order_book_times]
 
 
 def migrate(conn, fresh):

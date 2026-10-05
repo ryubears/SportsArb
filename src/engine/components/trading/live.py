@@ -10,9 +10,11 @@ waits behind a settlement lookup or a catalog refresh. A buy's limit is
 the leg's limit, and an order that flattens sells no lower than the
 deepest price the books said it would reach, so a book that moved leaves
 the rest exposed for the next tick rather than filling far from where it
-was priced. Every order is stored in the orders table before it is sent
-and updated with the venue's answer, and the money is the venues' own,
-through LiveBalances from money/live.py.
+was priced. Every order is stored in the orders table before it is sent,
+with the times of the book it went out on, the venue's for its last
+change and ours for when that reached us, and updated with the venue's
+answer, and the money is the venues' own, through LiveBalances from
+money/live.py.
 
 Both venues fill orders in hundredths of a contract, so fills, holdings,
 and the orders that flatten are all counted to the hundredth, while a
@@ -55,7 +57,7 @@ from concurrent.futures import ThreadPoolExecutor
 from api import kalshi, orders, polymarket_us
 from common import jsonutil
 from common.periodic import Periodic
-from common.timeutil import now_iso, seconds_between
+from common.timeutil import at_seconds, now_iso, seconds_between
 from common.venues import VENUES, is_maintenance
 from db import database
 from db.models import Order
@@ -230,14 +232,17 @@ class LiveExecutor(Executor):
 
     async def send(self, trade, leg, purpose, action, quantity, price):
         """
-        Store an order, send it, store the venue's answer, and return it as a Fill.
-        The order trades the outcome of the contract the leg holds, see Leg.outcome.
+        Store an order, with the times of the book it goes out on, send it,
+        store the venue's answer, and return it as a Fill. The order trades
+        the outcome of the contract the leg holds, see Leg.outcome.
         """
         if self.brakes.stopped or (purpose == "open" and self.halted):
             return Fill(ts=self.clock(), note="not sent, live trading halted")
         outcome = leg.outcome
+        book = self.book(leg.key)
         order = Order(trade_id=trade.id, venue=leg.venue, contract_id=leg.contract_id, purpose=purpose, action=action, outcome=outcome,
-                      quantity=quantity, limit_price=price, client_id=str(uuid.uuid4()), sent_at=self.clock())
+                      quantity=quantity, limit_price=price, client_id=str(uuid.uuid4()), sent_at=self.clock(),
+                      book_at=at_seconds(book.at) if book and book.at is not None else None, book_ts=book.ts if book else None)
         database.insert_order(self.conn, order)
         footprint = self.footprints.sent(leg, action == "sell", price) if self.footprints else None
         started = time.perf_counter()

@@ -6,6 +6,7 @@ import asyncio
 import threading
 import pytest
 from api import orders
+from common.timeutil import epoch
 from db import database
 from db.models import Book, Order
 from engine.components.money.live import LiveBalances
@@ -476,6 +477,20 @@ def test_a_venue_holding_other_than_the_trades_is_logged_once(tmp_path):
         "live polymarket_us holds -1 of other, the trades 0: the records differ from the venue, see tools/repair_fills.py",
         "live polymarket_us holds 10.42 of pm, the trades 10: the records differ from the venue, see tools/repair_fills.py"]
     assert len(venues.orders) == 2                                      # Only logged, nothing sent.
+
+
+def test_each_order_stores_the_times_of_the_book_it_went_out_on(tmp_path):
+    venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
+    latest = books()
+    pm, k = latest[("polymarket_us", "pm")], latest[("kalshi", "k")]
+    venue_time = epoch("2026-09-20T17:29:57.900000+00:00")             # By Polymarket US's clock, 0.1s before the book reached us.
+    latest[("polymarket_us", "pm")] = Book(pm.venue, pm.contract_id, "2026-09-20T17:29:58+00:00", pm.bids, pm.asks, venue_time)
+    latest[("kalshi", "k")] = Book(k.venue, k.contract_id, "2026-09-20T17:29:50+00:00", k.bids, k.asks)     # No venue time given.
+    conn, cash, ex = executor(tmp_path, venues, latest)
+    assert trade(ex) == [True]
+    assert {o["venue"]: (o["book_at"], o["book_ts"]) for o in stored(conn, "orders")} == {
+        "polymarket_us": ("2026-09-20T17:29:57.900000+00:00", "2026-09-20T17:29:58+00:00"),
+        "kalshi": (None, "2026-09-20T17:29:50+00:00")}
 
 
 def test_positions_are_not_compared_while_orders_go_out(tmp_path):

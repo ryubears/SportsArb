@@ -18,7 +18,9 @@ the legs settled in it, and the open trades: in a few lines, how many, how
 many of them opened in the last hour, day, and week and the capital those
 hold, the capital they all hold and the profit they are expected to
 return, its rate a year, and when they resolve, then each one opened in
-the window. Live's orders follow its trades in each market. --market
+the window. Live's orders follow its trades in each market, then its
+orders to open by how long the venue's book had sent nothing when each
+went out, and how many of those took something. --market
 narrows everything to the futures or the games in play, and --sport to
 some sports. Reads only, so it is safe to run while the live process is
 writing.
@@ -55,6 +57,8 @@ MARKET_CHOICES = {"futures": ("futures",), "in-play": ("in-play",), "all": MARKE
 LARGEST = 5         # The largest opportunities and trades listed.
 OPENED_HOURS = {"hour": 1, "day": 24, "week": 24 * 7}     # The windows the open trades are counted as opened in.
 WIDTH = 100         # The longest line a list of items wraps at.
+BOOK_AGES = ((1, "0-1s"), (5, "1-5s"), (30, "5-30s"), (None, "30s+"))    # How long a venue had sent nothing for a market
+                                                                            # when an order went out, by upper bound in seconds.
 MIN_CONTRACTS = 1   # The fewest contracts a trade opens, see Executor.quantity_for(), so the least an episode worth showing kept.
 # The order trade and order statuses are shown in, best first: a trade is filled, partial, or failed, and an order
 # filled, partial, or one of the ways it took nothing. One not listed comes last.
@@ -375,6 +379,7 @@ def print_market_trades(conn, since, hours, mode, market, sports, now):
     print_open_trades(conn, since, hours, mode, market, sports, now)
     if mode == "live":
         print_live_orders(conn, since, hours, market, sports)
+        print_book_ages(conn, since, hours, market, sports)
 
 
 def print_paper_money(conn):
@@ -401,6 +406,45 @@ def print_live_orders(conn, since, hours, market, sports):
     if body:
         print_table(f"live {market} orders, last {hours} hours", ("venue", "purpose", "status", "orders", "asked", "filled", "dollars $", "fees $", "avg ms"),
                     [(v, p, s, n, contracts(q), contracts(f), *rest) for v, p, s, n, q, f, *rest in body])
+
+
+def book_age(seconds):
+    """
+    The BOOK_AGES label for how many seconds a venue had sent nothing for a market.
+    """
+    return next(label for bound, label in BOOK_AGES if bound is None or seconds < bound)
+
+
+def print_book_ages(conn, since, hours, market, sports):
+    """
+    The real orders to open sent in the window for the trades of one market,
+    by venue, the side they bought, and how long the venue had sent nothing
+    for the market when they went out, see Order.book_ts, and how many of
+    them took something. A market that had gone quiet may have stopped
+    trading with its book still up. Orders from before the book times were
+    recorded, 2026-10-05, are left out, and so is the table on a database
+    the live process has not yet brought up to them.
+    """
+    if "book_ts" not in [r[1] for r in conn.execute("PRAGMA table_info(orders)")]:
+        return
+    where, params = in_sports(sports)
+    rows = query_rows(conn, f"""
+        SELECT o.venue, o.outcome, o.sent_at, o.book_ts, o.quantity, o.filled
+        FROM orders o JOIN trades t ON t.id = o.trade_id JOIN pairs p ON p.id = t.pair_id
+        WHERE o.sent_at >= ? AND o.purpose = 'open' AND o.book_ts IS NOT NULL{in_market(market)}{where}""", (since,) + params)
+    groups = {}
+    for venue, outcome, sent_at, book_ts, quantity, filled in rows:
+        group = groups.setdefault((venue, outcome, book_age(epoch(sent_at) - epoch(book_ts))), [0, 0, 0.0, 0.0])
+        group[0] += 1
+        group[1] += filled > 0
+        group[2] += quantity
+        group[3] += filled
+    ages = [label for _, label in BOOK_AGES]
+    body = [(venue, outcome, age, n, took, f"{100 * took / n:.0f}", contracts(asked), contracts(filled))
+            for (venue, outcome, age), (n, took, asked, filled) in sorted(groups.items(), key=lambda kv: (kv[0][:2], ages.index(kv[0][2])))]
+    if body:
+        print_table(f"live {market} orders to open by how long the book had sent nothing, last {hours} hours",
+                    ("venue", "buying", "quiet", "orders", "took some", "%", "asked", "filled"), body, left=3)
 
 
 def print_trades(conn, since, hours, modes=("live",), sports=(), now=None, markets=MARKETS):

@@ -126,3 +126,23 @@ def test_the_in_play_tests_trades_with_a_leg_on_each_venue_sent_both_orders_at_o
     conn = database.connect(path)
     assert [tuple(r) for r in conn.execute("SELECT live_trade_id, sequence FROM twins ORDER BY live_trade_id")] == [(1, "together"), (2, None)]
     assert version(conn) == len(migrations.STEPS)
+
+
+def test_step_11_gives_older_orders_null_book_times(tmp_path):
+    path = tmp_path / "t.sqlite"
+    old = sqlite3.connect(path)
+    # The orders table as it was, its last column's comment and all, which SQLite keeps in the table's definition.
+    old.execute("""CREATE TABLE orders (
+    id             INTEGER PRIMARY KEY,
+    trade_id       INTEGER NOT NULL,
+    response       TEXT                -- The venue's answer as JSON, for reconciling.
+)""")
+    old.execute("INSERT INTO orders (id, trade_id, response) VALUES (1, 7, '{}')")
+    old.execute("PRAGMA user_version = 10")
+    old.commit()
+    old.close()
+    conn = database.connect(path)
+    assert [tuple(r) for r in conn.execute("SELECT id, trade_id, response, book_at, book_ts FROM orders")] == [(1, 7, "{}", None, None)]
+    conn.execute("INSERT INTO orders (id, trade_id, book_at, book_ts) VALUES (2, 8, 'a', 't')")
+    assert tuple(conn.execute("SELECT book_at, book_ts FROM orders WHERE id = 2").fetchone()) == ("a", "t")
+    assert version(conn) == len(migrations.STEPS)

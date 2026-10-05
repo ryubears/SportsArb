@@ -272,6 +272,9 @@ class Order:
     fees: float = 0.0
     note: str | None = None             # Why the venue rejected the order, or the error.
     response: str | None = None         # The venue's answer as JSON, for reconciling.
+    book_at: str | None = None          # The venue's time for the contract's newest book when the order went out, or None when it gave
+                                        # none, as for the first book on a connection: when the venue last changed the market.
+    book_ts: str | None = None          # When that book reached us, by our clock. sent_at less it is how long the market had sent nothing.
 
 
 @dataclass

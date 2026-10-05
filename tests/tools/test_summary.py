@@ -266,6 +266,34 @@ def test_trades_and_orders_show_the_futures_and_the_games_in_play_apart_with_the
     assert out.index("\nlive futures orders") < out.index("\nlive in-play trades: ")
 
 
+def test_live_orders_to_open_are_shown_by_how_long_the_book_had_sent_nothing(tmp_path, monkeypatch, capsys):
+    def fill(conn):
+        conn.execute("INSERT INTO pairs (id, sport, label, kind, game_date, venues, contracts, flags, matched_at) "
+                     "VALUES (3, 'nfl', 'a game', 'spread', '2026-09-27', 'kalshi,polymarket_us', 2, '[]', ?)", (BEFORE,))
+        t = Trade(mode="live", pair_id=3, trade="t", signal_ts=INSIDE, edge=0.06, quantity=5, yes_venue="kalshi", yes_contract="k",
+                  yes_polarity="yes", yes_limit=0.5, no_venue="polymarket_us", no_contract="p", no_polarity="yes", no_limit=0.45,
+                  pays_at="2026-09-28T00:00:00+00:00")
+        database.insert_trade(conn, t)
+        for i, (venue, outcome, book_ts, purpose, filled) in enumerate([
+                ("polymarket_us", "no", "2026-09-27T19:59:59.800000+00:00", "open", 0),     # Quiet for 0.2s.
+                ("polymarket_us", "no", "2026-09-27T19:59:59.500000+00:00", "open", 5),     # 0.5s.
+                ("polymarket_us", "no", "2026-09-27T19:59:48+00:00", "open", 0),            # 12s.
+                ("polymarket_us", "yes", "2026-09-27T19:59:20+00:00", "open", 5),           # 40s.
+                ("kalshi", "yes", "2026-09-27T19:59:59.990000+00:00", "open", 5),
+                ("kalshi", "yes", None, "open", 5),                                         # From before the times were kept.
+                ("kalshi", "yes", "2026-09-27T19:59:59.990000+00:00", "flatten", 5)]):      # Not an order to open.
+            database.insert_order(conn, Order(trade_id=t.id, venue=venue, contract_id="c", purpose=purpose, action="buy", outcome=outcome,
+                                              quantity=5, limit_price=0.5, client_id=f"c{i}", sent_at=INSIDE, status="filled" if filled else "unfilled",
+                                              filled=filled, book_ts=book_ts))
+    out = report(tmp_path, monkeypatch, capsys, fill)
+    assert table(out, "live in-play orders to open by how long the book had sent nothing, last 12 hours") == [
+        ["kalshi", "yes", "0-1s", "1", "1", "100", "5", "5"],
+        ["polymarket_us", "no", "0-1s", "2", "1", "50", "10", "5"],
+        ["polymarket_us", "no", "5-30s", "1", "0", "0", "5", "0"],
+        ["polymarket_us", "yes", "30s+", "1", "1", "100", "5", "5"]]
+    assert "live futures orders to open" not in out
+
+
 def test_a_market_filter_shows_only_the_futures_or_only_the_games_in_play(tmp_path, monkeypatch, capsys):
     out = report(tmp_path, monkeypatch, capsys, lambda conn: None, markets=summary.MARKET_CHOICES["in-play"])
     assert "\nin-play opportunities" in out and "\nlive in-play trades: " in out and "futures" not in out
