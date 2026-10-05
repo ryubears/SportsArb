@@ -70,14 +70,14 @@ class FakeNotifier:
         self.sent.append((kind, subject, body))
 
 
-def executor(tmp_path, venues, latest=None, notifier=None, logs=None, read=True, balance=1000.0, positions=None):
+def executor(tmp_path, venues, latest=None, notifier=None, logs=None, read=True, balance=1000.0, positions=None, now=NOW, in_play=False):
     conn = database.connect(tmp_path / "t.sqlite")
     cash = LiveBalances(lambda m: None, {"kalshi": lambda: (balance, {}), "polymarket_us": lambda: (balance, {})})
     if read:
-        asyncio.run(cash.refresh(NOW))
+        asyncio.run(cash.refresh(now))
     latest = books() if latest is None else latest
-    ex = LiveExecutor(conn, cash, lambda: latest, (logs.append if logs is not None else lambda m: None), clock=lambda: NOW,
-                      place=venues.place(), notifier=notifier, positions=positions or {"polymarket_us": lambda: {}})
+    ex = LiveExecutor(conn, cash, lambda: latest, (logs.append if logs is not None else lambda m: None), clock=lambda: now,
+                      place=venues.place(), notifier=notifier, positions=positions or {"polymarket_us": lambda: {}}, in_play=in_play)
     return conn, cash, ex
 
 
@@ -527,13 +527,9 @@ def in_play(tmp_path, venues, latest, logs=None):
     """
     A live executor trading games under way, an hour into the game, with books of then.
     """
-    conn = database.connect(tmp_path / "t.sqlite")
-    cash = LiveBalances(lambda m: None, {"kalshi": lambda: (1000.0, {}), "polymarket_us": lambda: (1000.0, {})})
-    asyncio.run(cash.refresh(UNDER_WAY))
     for key, book in latest.items():
         latest[key] = Book(book.venue, book.contract_id, UNDER_WAY, book.bids, book.asks)
-    ex = LiveExecutor(conn, cash, lambda: latest, (logs.append if logs is not None else lambda m: None), clock=lambda: UNDER_WAY,
-                      place=venues.place(), positions={"polymarket_us": lambda: {}}, in_play=True)
+    conn, _, ex = executor(tmp_path, venues, latest, logs=logs, now=UNDER_WAY, in_play=True)
     return conn, ex
 
 

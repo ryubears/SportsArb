@@ -16,7 +16,8 @@ NOW = "2026-09-28T00:00:00+00:00"       # When the report runs, twelve hours int
 
 def report(tmp_path, monkeypatch, capsys, fill, modes=("live",), sports=(), markets=summary.MARKETS):
     """
-    What the report prints for the 12 hours from SINCE, on a database with one nfl pair and one nba pair that fill(conn) adds to.
+    What the report prints for the 12 hours from SINCE, on a database with an nfl future, an nba future, and an nfl game,
+    pairs 1 to 3, that fill(conn) adds to.
     """
     path = tmp_path / "t.sqlite"
     conn = database.connect(path)
@@ -24,6 +25,8 @@ def report(tmp_path, monkeypatch, capsys, fill, modes=("live",), sports=(), mark
                  "VALUES (1, 'nfl', 'the bet', 'winner', 'kalshi,polymarket_us', 2, '[]', ?)", (BEFORE,))
     conn.execute("INSERT INTO pairs (id, sport, label, kind, venues, contracts, flags, matched_at) "
                  "VALUES (2, 'nba', 'other bet', 'champion', 'kalshi,polymarket_us', 2, '[]', ?)", (BEFORE,))
+    conn.execute("INSERT INTO pairs (id, sport, label, kind, game_date, venues, contracts, flags, matched_at) "
+                 "VALUES (3, 'nfl', 'a game', 'spread', '2026-09-27', 'kalshi,polymarket_us', 2, '[]', ?)", (BEFORE,))
     fill(conn)
     conn.commit()
     monkeypatch.setattr(summary, "DB_PATH", path)
@@ -86,8 +89,6 @@ def test_only_episodes_within_the_rules_are_shown(tmp_path, monkeypatch, capsys)
 
 def test_in_play_opportunities_are_the_games_under_way_paying_within_a_day(tmp_path, monkeypatch, capsys):
     def fill(conn):
-        conn.execute("INSERT INTO pairs (id, sport, label, kind, game_date, venues, contracts, flags, matched_at) "
-                     "VALUES (3, 'nfl', 'a game', 'spread', '2026-09-27', 'kalshi,polymarket_us', 2, '[]', ?)", (BEFORE,))
         database.insert_opportunities(conn, [
             episode("2026-09-27T13:00:00+00:00", 0.1, 0.06, 100, live=1, pair_id=3, lasted=0.25),   # In play, paying in hours.
             episode("2026-09-27T13:10:00+00:00", 0.2, 0.08, 50, live=1, pair_id=3, lasted=1.5),     # In play too, paying in 5 hours.
@@ -252,8 +253,6 @@ def test_feed_drops_follow_the_pairs_after_a_blank_line(tmp_path, monkeypatch, c
 
 def test_trades_and_orders_show_the_futures_and_the_games_in_play_apart_with_the_largest_first(tmp_path, monkeypatch, capsys):
     def fill(conn):
-        conn.execute("INSERT INTO pairs (id, sport, label, kind, game_date, venues, contracts, flags, matched_at) "
-                     "VALUES (3, 'nfl', 'a game', 'spread', '2026-09-27', 'kalshi,polymarket_us', 2, '[]', ?)", (BEFORE,))
         for pair_id, held, cost in ((1, 5, 2.5), (3, 2, 1.0), (3, 8, 4.0)):     # A future, then two trades on a game under way.
             t = Trade(mode="live", pair_id=pair_id, trade="t", signal_ts=INSIDE, edge=0.06, quantity=10, yes_venue="kalshi",
                       yes_contract="k", yes_polarity="yes", yes_limit=0.5, no_venue="polymarket_us", no_contract="p",
@@ -276,8 +275,6 @@ def test_trades_and_orders_show_the_futures_and_the_games_in_play_apart_with_the
 
 def test_live_orders_to_open_are_shown_by_how_long_the_book_had_sent_nothing(tmp_path, monkeypatch, capsys):
     def fill(conn):
-        conn.execute("INSERT INTO pairs (id, sport, label, kind, game_date, venues, contracts, flags, matched_at) "
-                     "VALUES (3, 'nfl', 'a game', 'spread', '2026-09-27', 'kalshi,polymarket_us', 2, '[]', ?)", (BEFORE,))
         t = Trade(mode="live", pair_id=3, trade="t", signal_ts=INSIDE, edge=0.06, quantity=5, yes_venue="kalshi", yes_contract="k",
                   yes_polarity="yes", yes_limit=0.5, no_venue="polymarket_us", no_contract="p", no_polarity="yes", no_limit=0.45,
                   pays_at="2026-09-28T00:00:00+00:00")

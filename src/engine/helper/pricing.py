@@ -76,17 +76,24 @@ def book_level(polarity, side, price, selling=False):
     return "asks" if own != selling else "bids", round(price if own else 1 - price, 4)
 
 
-def takes(levels, quantity, share=1.0, limit=None, step=1):
+def book_sizes(book):
+    """
+    The size of each level of a contract's book, keyed (book side, book price) as book_level() gives them.
+    """
+    return {(side, round(price, 4)): size for side in ("bids", "asks") for price, size in getattr(book, side)}
+
+
+def takes(levels, quantity, share=1.0, limit=None, step=1, selling=False):
     """
     The contracts an order for quantity takes from each level of one ladder,
     best level first, as (price, contracts). Only share of each level's
     size is taken, in whole steps, whole contracts unless step says less, so
     a level too small for one step is skipped and the next may still fill.
-    A buy stops at levels priced above limit.
+    A buy stops at levels priced above limit, and a sale at those below it.
     """
     remaining = quantity
     for price, size in levels:
-        if limit is not None and price > limit + 1e-9:
+        if limit is not None and (price < limit - 1e-9 if selling else price > limit + 1e-9):
             break
         take = round(int(min(remaining, size * share) / step + 1e-9) * step, 2)
         if take < step:
@@ -106,7 +113,7 @@ def sweep(levels, quantity, venue, fee_info, share=1.0, limit=None, selling=Fals
     sale brings in.
     """
     filled, dollars = 0, 0.0
-    for price, take in takes(levels, quantity, share, limit, step):
+    for price, take in takes(levels, quantity, share, limit, step, selling):
         fee = fees.fee(venue, price, take, fee_info)      # Each level fills as one trade, with its fee rounded once.
         filled = round(filled + take, 2)
         dollars += take * price - fee if selling else take * price + fee

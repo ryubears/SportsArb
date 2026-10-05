@@ -3,7 +3,7 @@ Round trip every table through the database module.
 """
 
 import pytest
-from db import database
+from db import database, schema
 from db.models import Bet, Contract, Gap, Opportunity, Pair
 
 
@@ -117,7 +117,7 @@ def test_opportunities_append_and_an_old_source_column_is_dropped(tmp_path):
     conn.execute("PRAGMA user_version = 0")                             # before migrations were numbered.
     conn.commit()
     conn = database.connect(tmp_path / "t.sqlite")
-    assert "source" not in [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]
+    assert "source" not in schema.table_columns(conn, "opportunities")
     assert conn.execute("SELECT COUNT(*) FROM opportunities").fetchone()[0] == 2
 
 
@@ -154,7 +154,7 @@ def test_old_databases_are_migrated_to_pairs(tmp_path):
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert "pairs" in tables and "gaps" in tables
     assert not {"bet_groups", "fee_history", "stream_gaps"} & tables
-    assert "pair_label" not in [r[1] for r in conn.execute("PRAGMA table_info(bets)")]
+    assert "pair_label" not in schema.table_columns(conn, "bets")
     assert conn.execute("SELECT pair_id FROM bets").fetchone()[0] is None      # No pairs table yet, the next match sets it.
     assert [g.start_ts[11:19] for g in database.load_gaps(conn, "kalshi")] == ["19:39:39"]
     # Replayed from the start, then opened with the starting balance that the first entry implies.
@@ -192,8 +192,8 @@ def test_old_settlement_rows_are_folded_into_their_trades(tmp_path):
     old.commit(); old.close()
     conn = database.connect(path)
     # The legs were folded into the trade, then moved to the settlements table of today, one row for the trade.
-    assert "side" not in [r[1] for r in conn.execute("PRAGMA table_info(settlements)")]
-    assert "settled_at" not in [r[1] for r in conn.execute("PRAGMA table_info(trades)")]
+    assert "side" not in schema.table_columns(conn, "settlements")
+    assert "settled_at" not in schema.table_columns(conn, "trades")
     row = conn.execute("SELECT trade_id, yes_result, yes_payout, yes_settled_at, no_result, no_payout, no_settled_at, settled_at FROM settlements").fetchone()
     assert tuple(row) == (1, "yes", 5, "2026-09-20T20:10:00+00:00", "yes", 0, "2026-09-20T20:09:00+00:00", "2026-09-20T20:10:00+00:00")
     assert database.load_open_trades(conn, "paper") == []
@@ -210,9 +210,9 @@ def test_every_model_writes_only_columns_its_table_has():
     conn = database.connect(":memory:")
     for table, model in (("bets", Bet), ("gaps", Gap), ("opportunities", Opportunity), ("trades", Trade), ("settlements", Settlement),
                          ("orders", Order), ("ledger", Ledger), ("alerts", Alert)):
-        table_columns = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
-        assert set(database.columns(model)) <= set(table_columns), table
-        assert set(table_columns) - set(database.columns(model)) <= {"id"}, table      # Nothing in the table the model forgets.
+        columns = schema.table_columns(conn, table)
+        assert set(database.columns(model)) <= set(columns), table
+        assert set(columns) - set(database.columns(model)) <= {"id"}, table      # Nothing in the table the model forgets.
 
 
 def trade(mode, pair_id=1, **fields):

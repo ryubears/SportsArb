@@ -25,6 +25,12 @@ def test_payout_is_the_slowest_member_and_skips_members_without_times():
     assert game.kickoff([FUTURE]) is None
 
 
+def test_the_days_until_a_bet_pays_are_an_hour_at_least_and_none_without_a_payout():
+    assert game.days_until(KICKOFF, "2026-09-22T17:00:00+00:00") == 2
+    assert game.days_until(KICKOFF, KICKOFF) == 1 / 24
+    assert game.days_until(KICKOFF, game.pays_at([UNKNOWN], "nfl")) is None
+
+
 def test_a_game_starts_at_its_kickoff_or_at_once_when_no_member_gives_one_and_a_future_never_does():
     assert not game.started("2026-09-20", [GAME], "2026-09-20T16:59:59+00:00")
     assert game.started("2026-09-20", [GAME], KICKOFF)

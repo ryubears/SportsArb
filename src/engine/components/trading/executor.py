@@ -5,10 +5,10 @@ When the scanner sees a pair with enough net edge, the executor sends one
 limit order per leg. Each leg's limit is the deepest level that still
 leaves the least edge the executor trades, see min_edge(), when both
 ladders are walked together, so the order sweeps every level above the
-floor, not just the top one. How an order
-reaches its venue and what comes back is the one thing that differs:
-paper.py fills it against the book the venue had when a live order would
-have reached it, live.py sends it to the venue. Everything else is here.
+floor, not just the top one. How an order reaches its venue and what comes
+back is the one thing that differs: paper.py fills it against the book the
+venue had when a live order would have reached it, live.py sends it to the
+venue. Everything else is here.
 
 An edge is taken only while each leg's book is current. Polymarket US
 books reach us some 85 ms after the venue changes them, Kalshi's in 12, so
@@ -47,27 +47,27 @@ from the trades table when the process starts, so a restart does not
 leave a trade exposed. The settler leaves alone a trade while an order to
 flatten it is in flight.
 
-Live trades a season's future, or a game before it starts, while its edge
-is config.MIN_EDGE or more, the bet pays out config.MIN_PAYOUT_HOURS or
-more away, and the edge returns config.MIN_ANNUAL_PCT a year or more until
-then, and with run.py --live-in-play a game under way too, paying within
-config.MAX_PAYOUT_HOURS, of which no return a year is asked, see live.py
-and pays_enough(). Live's orders on a future sweep only the levels that
-return config.MIN_ANNUAL_PCT a year. On a game under way live takes an
-edge of config.LIVE_IN_PLAY_MIN_EDGE or more at once, but only as
-Polymarket US's book for its leg changes, at most
-config.LIVE_IN_PLAY_CONTRACTS a trade, for config.LIVE_IN_PLAY_TRADES
-trades, see min_edge(), just_quoted(), and most(). Paper trades games
-before and while they are played, paying within config.MAX_PAYOUT_HOURS,
-see paper.py. Both legs are always on two venues, see
-pricing.best_trade(). Both venues must be trading, outside the weekly
-maintenance each publishes, see common/venues.py: while one has stopped,
-its feed may still show prices no order can trade at. A trade asks for
-config.FILL_SHARE of what the books show at that edge, the share we expect
-to get, as far as the cash free on each venue pays for, live as on paper.
-Every trade is stored in the trades table as soon as it is sent and
-updated when it is done, and every dollar moved goes through the cash the
-executor was given. Settling what was bought is money/settle.py's job.
+Live trades a season's future, or a game before it starts, while the bet
+pays out config.MIN_PAYOUT_HOURS or more away and the edge returns
+config.MIN_ANNUAL_PCT a year or more until then, and with run.py
+--live-in-play a game under way too, paying within config.MAX_PAYOUT_HOURS,
+of which no return a year is asked, see live.py and pays_enough(). Live's
+orders on a future sweep only the levels that return config.MIN_ANNUAL_PCT
+a year. On a game under way live takes an edge of
+config.LIVE_IN_PLAY_MIN_EDGE or more at once, but only as Polymarket US's
+book for its leg changes, at most config.LIVE_IN_PLAY_CONTRACTS a trade,
+for config.LIVE_IN_PLAY_TRADES trades, see min_edge(), just_quoted(), and
+most(). Paper trades an edge of config.MIN_EDGE or more on games before and
+while they are played, paying within config.MAX_PAYOUT_HOURS, see paper.py.
+Both legs are always on two venues, see pricing.best_trade(). Both venues
+must be trading, outside the weekly maintenance each publishes, see
+common/venues.py: while one has stopped, its feed may still show prices no
+order can trade at. A trade asks for config.FILL_SHARE of what the books
+show at that edge, the share we expect to get, as far as the cash free on
+each venue pays for, live as on paper. Every trade is stored in the trades
+table as soon as it is sent and updated when it is done, and every dollar
+moved goes through the cash the executor was given. Settling what was
+bought is money/settle.py's job.
 """
 
 import asyncio
@@ -465,7 +465,7 @@ class Executor:
     def min_edge(self, pair, yes, no, now):
         """
         The least edge this executor trades on the pair at now, and the floor for the deeper levels its orders sweep:
-        config.MIN_EDGE, and live's own on a game under way, see LiveExecutor.min_edge().
+        config.MIN_EDGE, paper's, while live has its own, see LiveExecutor.min_edge().
         """
         return config.MIN_EDGE
 

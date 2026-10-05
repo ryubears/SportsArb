@@ -10,27 +10,28 @@ Bitcoin. It follows two kinds of bet: futures, titles, awards, a season's
 leaders, season totals, election races, and Bitcoin's price by a date,
 which live trades, and the bets on one event, games, matches, fights,
 races, and Bitcoin's 15 minute windows, which live trades once they are
-under way and paper before and while they are played. When the cheapest way to hold *yes* on one venue and
-the cheapest way to hold *no* on the other add up to less than a dollar
-after fees, buying both locks in the difference whatever happens.
+under way and paper before and while they are played. When the cheapest way
+to hold *yes* on one venue and the cheapest way to hold *no* on the other
+add up to less than a dollar after fees, buying both locks in the
+difference whatever happens.
 
 The whole thing runs on an EC2 instance in us-east-1, as one process with
 each venue's feed in a child process of its own: it follows every order
 book change for thousands of contracts, prices every cross-venue pair on
 every change, sends orders when a pair shows an edge worth the time its
 money is tied up, and settles the trades when the contracts resolve. Live
-trades futures, where an edge lasts long enough for our orders to reach
-it, and paper the bets on one event paying within a day, where faster
-traders may take the edges first, to see how they would do, its orders
-timed as live ones are. By default the orders are paper.
-With `--execute live` or `--execute both` it sends real ones, and with
-`--live-in-play` live trades the games under way too, Polymarket US's
-order first, an edge of five cents or more at once as Polymarket US's book
-changes, at most 5 contracts a trade, for 200 trades. From October 4 to 5
-the service on the instance traded every sport's futures and the elections
-live, with paper on every event beside it, and the in-play test below.
-From October 5 it is set to trade live alone: every sport's futures,
-Bitcoin's and the elections' included, and every game under way
+trades futures, where an edge lasts long enough for our orders to reach it,
+and paper the bets on one event paying within a day, where faster traders
+may take the edges first, to see how they would do, its orders timed as
+live ones are. By default the orders are paper. With `--execute live` or
+`--execute both` it sends real ones, and with `--live-in-play` live trades
+the games under way too, Polymarket US's order first, an edge of five cents
+or more at once as Polymarket US's book changes, at most 5 contracts a
+trade, for 200 trades. From October 4 to 5 the service on the instance
+traded every sport's futures and the elections live, with paper on every
+event beside it, and the in-play test below. From October 5 it is set to
+trade live alone: every sport's futures, Bitcoin's and the elections'
+included, and every game under way
 (`--execute live --live-in-play --not-live none`).
 
 ## How it works
@@ -198,8 +199,8 @@ checks before it trades, below.
    - Live (`trading/live.py`): each order is a real immediate or cancel
      limit order through the venue client's `place_order`. It is stored in
      the orders table before it is sent, with the times of the book it went
-     out on (`book_at`, the venue's for its last change, and `book_ts`, ours
-     for when that reached us), and again with the answer.
+     out on (`book_at`, the venue's for its last change, and `book_ts`,
+     ours for when that reached us), and again with the answer.
 3. **Flatten** (`flatten`). If the legs filled unevenly, `sell_excess`
    sells the excess back on its own venue. Buying the missing side on the
    other venue might cost less, but would tie the money up until the bet
@@ -475,20 +476,21 @@ desk's simulated ones look for. Each desk still flattens and settles every
 trade it holds. With `--live-in-play`, which needs `--execute live` or
 `both`, the live desk is offered the bets on one event too, and trades them
 once under way, see **trading/** below; with paper running too, both take
-those signals, and paper is given back what live's orders took. The same loop starts the hourly catalog refresh in a
-child process and applies the result to the live connections, and with
-Bitcoin followed it refreshes Bitcoin's catalog alone 20 seconds after each
-15 minute window opens, when both venues list it, so a window is traded for
-most of its 15 minutes. One run trades every sport given to `--sport`,
-comma separated as in `--sport nfl,ncaaf,mlb,nhl,nba`, or every one with
-`--sport all`, since the money is one pool and a second process would spend
-the same dollars. How long a game is expected to last is set for every
-sport in `GAME_HOURS`, measured for the first five and an allowance for the
-rest, a Bitcoin window's being its 15 minutes. The pieces it wires together
-are in `engine/components/`, in three folders by what they do: `market/`
-follows the venues, `trading/` makes the trades, and `money/` keeps the
-cash. What they share is in `engine/helper/`: the settings, game timing,
-pricing, and fees.
+those signals, and paper is given back what live's orders took. The same
+loop starts the hourly catalog refresh in a child process and applies the
+result to the live connections, and with Bitcoin followed it refreshes
+Bitcoin's catalog alone 20 seconds after each 15 minute window opens, when
+both venues list it, so a window is traded for most of its 15 minutes. One
+run trades every sport given to `--sport`, comma separated as in
+`--sport nfl,ncaaf,mlb,nhl,nba`, or every one with `--sport all`, since the
+money is one pool and a second process would spend the same dollars. How
+long a game is expected to last is set for every sport in `GAME_HOURS`,
+measured for the first five and an allowance for the rest, a Bitcoin
+window's being its 15 minutes. The pieces it wires together are in
+`engine/components/`, in three folders by what they do: `market/` follows
+the venues, `trading/` makes the trades, and `money/` keeps the cash. What
+they share is in `engine/helper/`: the settings, game timing, pricing, and
+fees.
 
 **market/** follows the venues: their books and the edges between them.
 **record.py** holds the newest book for every paired contract in memory,
@@ -894,13 +896,14 @@ nothing, so it also serves as a check that the live records match the
 venues. Stop the recorder before `--apply`.
 
 `src/tools/in_play_test.py` reports the in-play test of 2026-10-04 to
-10-05: the live trades in play beside their paper twins on the same signals, for those sending both
-orders at once and those sending Polymarket US's first apart, how many of
-each filled in full, in part, on one leg, or not at all, the contracts
-matched, how often each venue's leg filled of those sent, what was locked
-in and what the sales back made, the result of those settled, each venue's
-round trip, measured live and drawn on paper, how often the two matched
-the same contracts, and the newest pairs one by one, `--recent 20` of them.
+10-05: the live trades in play beside their paper twins on the same
+signals, for those sending both orders at once and those sending Polymarket
+US's first apart, how many of each filled in full, in part, on one leg, or
+not at all, the contracts matched, how often each venue's leg filled of
+those sent, what was locked in and what the sales back made, the result of
+those settled, each venue's round trip, measured live and drawn on paper,
+how often the two matched the same contracts, and the newest pairs one by
+one, `--recent 20` of them.
 
 `src/tools/latency_report.py` reports, over a stretch such as a game, how
 far behind the venues the books ran, minute by minute from the status
@@ -1171,17 +1174,18 @@ python3 -m engine.run --sport nfl
 `--sport ncaaf`, `--sport epl`, `--sport politics`, `--sport crypto`, and
 the rest build or run one sport's markets, `--sport nfl,ncaaf,mlb` several
 from one pool of money, and `--sport all` every one, as the instance does
-with `--sport all --execute live --live-in-play --not-live none`. `--no-trade` scans without trading,
-`--no-scan` only records, and `--seconds 120` runs a short test.
-`--execute live` trades the futures with real money and `--execute both`
-runs both desks, paper trading the bets on one event. `--not-live
-crypto,politics` holds sports' futures out of live trading, `crypto` alone
-by default, and `--not-live none` holds none. `--live-in-play`, with
-`--execute live` or `both`, has live trade the games under way too. The settings a run is tuned
-by, such as the minimum edge, the annual return, and the starting balance,
-are in `src/engine/helper/config.py`. Those only paper trading reads start
-with `PAPER_`, those only live trading reads with `LIVE_`, and the rest
-hold for both. `--set NAME=VALUE` overrides one for a run, for example
+with `--sport all --execute live --live-in-play --not-live none`.
+`--no-trade` scans without trading, `--no-scan` only records, and
+`--seconds 120` runs a short test. `--execute live` trades the futures with
+real money and `--execute both` runs both desks, paper trading the bets on
+one event. `--not-live crypto,politics` holds sports' futures out of live
+trading, `crypto` alone by default, and `--not-live none` holds none.
+`--live-in-play`, with `--execute live` or `both`, has live trade the games
+under way too. The settings a run is tuned by, such as the minimum edge,
+the annual return, and the starting balance, are in
+`src/engine/helper/config.py`. Those only paper trading reads start with
+`PAPER_`, those only live trading reads with `LIVE_`, and the rest hold for
+both. `--set NAME=VALUE` overrides one for a run, for example
 `python3 -m engine.run --sport nfl --set min_edge=0.03`. The run logs every
 setting when it starts. The streams need venue keys in `data/`:
 `kalshi_key_id.txt` and `kalshi_private_key.pem` for Kalshi,

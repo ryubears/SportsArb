@@ -2,12 +2,13 @@
 Find arbitrage episodes in pairs as the recorder's books change.
 
 Whenever a member's book changes, the scanner finds the cheapest way to
-hold yes and the cheapest way to hold no across the pair's members, on
-two different venues, and prices buying both. An episode is a stretch where that
-net edge stays above zero after fees. Each episode becomes an Opportunity
-with its two legs, its duration, its peak edge, how many contracts could
-have been filled at the peak by walking the books' depth, and the return
-on the capital tied up, annualized as if held until the bet pays out.
+hold yes and the cheapest way to hold no across the pair's members, on two
+different venues, and prices buying both. An episode is a stretch where
+that net edge stays above zero after fees. Each episode becomes an
+Opportunity with its two legs, its duration, its peak edge, how many
+contracts could have been filled at the peak by walking the books' depth,
+and the return on the capital tied up, annualized as if held until the bet
+pays out.
 
 Within an episode the edge worth trading, config.MIN_EDGE or more, may
 come and go. The Opportunity also keeps the longest unbroken stretch of it,
@@ -94,7 +95,7 @@ class Episode:
         live = 1 if start_time and self.peak_ts >= start_time else 0
         # Capital is locked until the slower of the two legs pays, so the later resolution counts.
         pays_at = payout_time((self.peak.yes, self.peak.no), self.pair["sport"])
-        days_held = days_until(self.peak_ts, pays_at) if pays_at else None
+        days_held = days_until(self.peak_ts, pays_at)
         return Opportunity(
             pair_id=self.pair["id"],
             trade=trade_words(self.peak.yes, self.peak.no),
@@ -200,7 +201,7 @@ class Scanner:
         only when an episode opens or reaches a new peak, not on every pricing.
         """
         pays_at = payout_time((priced.yes, priced.no), pair["sport"])
-        floor = live_min_edge(started(pair["game_date"], pair["members"], now), days_until(now, pays_at) if pays_at else None)
+        floor = live_min_edge(started(pair["game_date"], pair["members"], now), days_until(now, pays_at))
         take = fillable(priced.yes, priced.no, books, self.fee_infos, floor)
         return priced, now, take, polymarket_us_just_changed(priced.yes, priced.no, books, now)
 

@@ -6,17 +6,17 @@ same signals, see paper.py. The live orders are real: each takes contracts
 from the levels of its venue's book, and from the moment it reaches the
 venue the books on the tapes show those levels smaller. Paper must not see
 that, or it would be judged on what our own live order left it. So each
-live order leaves a Footprint, and paper adds what it
-took back to each level it took from, in every book the venue made from
-then on, until the level falls below what our order left of it, when other
-takers or cancels would have taken ours too, or KEEP_SECONDS have passed.
+live order leaves a Footprint, and paper adds what it took back to each
+level it took from, in every book the venue made from then on, until the
+level falls below what our order left of it, when other takers or cancels
+would have taken ours too, or KEEP_SECONDS have passed.
 
-What a live order took from each level is worked out as the venue fills
-it, by sweeping the book the venue had just before the order reached it,
-from a tape, up to what the venue said filled, no further than the order's
-limit. That needs a tape kept from before the order arrived, as a paper
-trade on the same signal keeps, see market/tape.py. Once worked out it is kept, so later books
-of the contract get it back too.
+What a live order took from each level is worked out as the venue fills it,
+by sweeping the book the venue had just before the order reached it, from a
+tape, up to what the venue said filled, no further than the order's limit.
+That needs a tape kept from before the order arrived, as a paper trade on
+the same signal keeps, see market/tape.py. Once worked out it is kept, so
+later books of the contract get it back too.
 """
 
 import asyncio
@@ -25,7 +25,7 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from api import orders
-from engine.helper.pricing import book_level, ladder, sell_ladder, takes
+from engine.helper.pricing import book_level, book_sizes, ladder, sell_ladder, takes
 
 KEEP_SECONDS = 10       # How long after a live order was sent paper still gives back what it took, at most.
 ANSWER_SECONDS = 2.0    # How long paper waits for the answer to a live order it may have to give back, at most.
@@ -63,11 +63,9 @@ class Footprint:
         if book is None:
             return False
         levels = sell_ladder(book, self.polarity, self.side) if self.selling else ladder(book, self.polarity, self.side)
-        if self.selling:
-            levels = [(price, size) for price, size in levels if price >= self.limit - 1e-9]
-        sizes = {(side, round(price, 4)): size for side in ("bids", "asks") for price, size in getattr(book, side)}
+        sizes = book_sizes(book)
         self.took, self.left = {}, {}
-        for price, contracts in takes(levels, self.filled, limit=None if self.selling else self.limit, step=orders.STEP):
+        for price, contracts in takes(levels, self.filled, limit=self.limit, step=orders.STEP, selling=self.selling):
             level = book_level(self.polarity, self.side, price, self.selling)
             self.took[level] = self.took.get(level, 0) + contracts
             self.left[level] = max(sizes.get(level, 0) - self.took[level], 0)
@@ -126,7 +124,7 @@ class Footprints:
         if book is None or key not in self.by_key:
             return book
         made = book.at
-        sizes = {(side, round(price, 4)): size for side in ("bids", "asks") for price, size in getattr(book, side)}
+        sizes = book_sizes(book)
         extra = defaultdict(float)
         for f in self.by_key[key]:
             if not f.filled or f.arrived is None or made is None or made < f.arrived or not f.measure(tape):
@@ -136,11 +134,8 @@ class Footprints:
                     extra[level] += contracts
         if not extra:
             return book
-        sides = {}
-        for side in ("bids", "asks"):
-            levels = {round(price, 4): size for price, size in getattr(book, side)}
-            for (level_side, price), contracts in extra.items():
-                if level_side == side:
-                    levels[price] = orders.exact(levels.get(price, 0) + contracts)
-            sides[side] = [[price, size] for price, size in sorted(levels.items(), reverse=side == "bids")]
+        for level, contracts in extra.items():
+            sizes[level] = orders.exact(sizes.get(level, 0) + contracts)
+        sides = {side: sorted(([price, size] for (on, price), size in sizes.items() if on == side), reverse=side == "bids")
+                 for side in ("bids", "asks")}
         return dataclasses.replace(book, **sides)
