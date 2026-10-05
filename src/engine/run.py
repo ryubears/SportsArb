@@ -166,7 +166,7 @@ def live_settings():
     return (f"LIVE TRADING with real money: trades sized as paper ones, balances read every "
             f"{c.LIVE_BALANCE_SECONDS}s, email under {c.LIVE_LOW_CASH:,.2f}$ on a venue or shard; halt at {c.LIVE_UNKNOWN_LIMIT} "
             f"unknown outcomes in {c.LIVE_ORDER_WINDOW} orders, {c.LIVE_REJECT_LIMIT} refusals in a row, or a loss over "
-            f"{c.LIVE_MAX_LOSS_SHARE:.0%} in {c.LIVE_RESULT_HOURS}h; {book_waits()}")
+            f"{c.LIVE_MAX_LOSS_SHARE:.0%} in {c.LIVE_RESULT_HOURS}h")
 
 
 class Desk:
