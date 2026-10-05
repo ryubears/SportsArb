@@ -2,28 +2,30 @@
 Print a short summary of the database: the pairs, the opportunities the
 executors' rules trade, and the trades.
 
-Everything is shown for the futures and for the games, matches, races,
-and windows in play apart, see MARKETS. Opportunities are shown only
-within the trading rules: an edge of config.MIN_EDGE or more at the peak,
-returning config.MIN_ANNUAL_PCT a year or more, a whole contract or more
-fillable at that edge through its longest stretch, since a trade opens no
-fewer, and a future paying config.MIN_PAYOUT_HOURS or more out, or a game
-under way paying within config.MAX_PAYOUT_HOURS. Each market shows what
-it could have taken at full size through its longest stretch at that
-edge, and what that locks in, overall, by sport and kind, and the largest,
-and how long the edge stayed at that, in seconds to the thousandth.
-Trades are shown for each mode, paper then live, or one with --mode, and
-in it for each market: by outcome and by kind for the window, the largest,
-the legs settled in it, and the open trades: in a few lines, how many, how
-many of them opened in the last hour, day, and week and the capital those
-hold, the capital they all hold and the profit they are expected to
-return, its rate a year, and when they resolve, then each one opened in
-the window. Live's orders follow its trades in each market, then its
-orders to open by how long the venue's book had sent nothing when each
-went out, and how many of those took something. --market
-narrows everything to the futures or the games in play, and --sport to
-some sports. Reads only, so it is safe to run while the live process is
-writing.
+Everything is shown for the futures, then for the games, matches, races,
+and windows in play, each under a heading of its own, see MARKETS: its
+opportunities, then its trades for each mode, paper then live, or one
+with --mode. Opportunities are shown as live takes them, at once: an
+episode counts when an order sent at its peak could have had a whole
+contract or more, since a trade opens no fewer, on the levels at live's
+least edge or more, see pricing.live_min_edge(): on a future paying
+config.MIN_PAYOUT_HOURS or more out, the levels returning
+config.MIN_ANNUAL_PCT a year, and on a game under way paying within
+config.MAX_PAYOUT_HOURS, those at config.LIVE_IN_PLAY_MIN_EDGE or more.
+Each market shows what those orders could have taken at full size and
+what that locks in, overall, by sport and kind, and the largest, and how
+long the edge stayed at config.MIN_EDGE or more, in seconds to the
+thousandth. A market's trades show by outcome and by kind for the window,
+the largest, the legs settled in it, and the open trades: in a few lines,
+how many, how many of them opened in the last hour, day, and week and the
+capital those hold, the capital they all hold and the profit they are
+expected to return, its rate a year, and when they resolve, then each one
+opened in the window. Live's orders follow its trades, then its orders to
+open by how long the venue's book had sent nothing when each went out,
+and how many of those took something. The paper money and the live money
+come last. --market narrows everything to the futures or the games in
+play, and --sport to some sports. Reads only, so it is safe to run while
+the live process is writing.
 
 The script sets its own import path, so it runs from any folder. The live
 money is not in the database but on the venues, so it is read from each
@@ -52,7 +54,7 @@ from db.database import DB_PATH, read_only
 from engine.helper import config
 
 MODES = {"live": ("live",), "paper": ("paper",), "all": ("paper", "live")}     # What --mode shows, in order.
-MARKETS = ("futures", "in-play")    # What everything is shown apart by, in order, see in_market().
+MARKETS = ("futures", "in-play")    # What everything is shown under, in order, see in_market() and print_market().
 MARKET_CHOICES = {"futures": ("futures",), "in-play": ("in-play",), "all": MARKETS}    # What --market shows.
 LARGEST = 5         # The largest opportunities and trades listed.
 OPENED_HOURS = {"hour": 1, "day": 24, "week": 24 * 7}     # The windows the open trades are counted as opened in.
@@ -199,31 +201,55 @@ def in_market(market):
 
 def opportunity_rules(market):
     """
-    The episodes of one market the executors trade, as a SQL condition on the episode, and in words: the futures
-    paying config.MIN_PAYOUT_HOURS or more out, and the games, matches, races, and windows under way at the peak
-    paying within config.MAX_PAYOUT_HOURS.
+    The episodes of one market live trades, as a SQL condition on the
+    episode, and its levels in words: the futures paying
+    config.MIN_PAYOUT_HOURS or more out, on the levels returning
+    config.MIN_ANNUAL_PCT a year, and the games, matches, races, and windows
+    under way at the peak paying within config.MAX_PAYOUT_HOURS, on the
+    levels at config.LIVE_IN_PLAY_MIN_EDGE or more. Which levels count at
+    the peak is the scanner's, see Opportunity.take_size.
     """
     if market == "futures":
-        return "live = 0 AND days_held * 24 >= ?", (config.MIN_PAYOUT_HOURS,), f"paying {config.MIN_PAYOUT_HOURS}h+ out"
+        return ("live = 0 AND days_held * 24 >= ?", (config.MIN_PAYOUT_HOURS,),
+                f"levels returning {config.MIN_ANNUAL_PCT}%+ a year, paying {config.MIN_PAYOUT_HOURS}h+ out")
     return ("live = 1 AND days_held * 24 <= ?", (config.MAX_PAYOUT_HOURS,),
-            f"games, matches, races, and windows under way, paying within {config.MAX_PAYOUT_HOURS}h")
+            f"levels at {100 * config.LIVE_IN_PLAY_MIN_EDGE:.0f}c+, {config.MIN_ANNUAL_PCT}%+ a year, games, matches, races, "
+            f"and windows under way, paying within {config.MAX_PAYOUT_HOURS}h")
 
 
 def print_market_opportunities(conn, since, hours, sports, market):
     """
-    The episodes of one market within the trading rules in the window, see print_opportunities().
+    The episodes of one market within live's rules in the window: an order
+    sent at the peak could have had MIN_CONTRACTS or more on the levels at
+    live's least edge or more, see opportunity_rules(), and the peak
+    returned config.MIN_ANNUAL_PCT a year or more. An edge on less, a
+    sliver of a level, is one no trade could take. Live takes an edge at
+    once, and its own fill empties the levels it takes, so what stayed
+    fillable through the stretch at config.MIN_EDGE, which these were
+    counted by until 2026-10-05, left out the very episodes it traded.
+    Episodes from before the scanner kept what the peak could have had have
+    none and are left out, as are ones still open, which are stored only
+    once they end. On a database the live process has not yet brought up to
+    it, the market says so.
+    Capital is what buying those contracts would have cost with fees, and
+    profit what they lock in. The annual rates weight each episode by its
+    capital, over the days until it pays. How long the edge stayed at
+    config.MIN_EDGE or more is the longest unbroken stretch of each episode,
+    in seconds to the thousandth.
     """
     cents = f"{100 * config.MIN_EDGE:.0f}c"
     where, params = in_sports(sports)
-    rule, rule_params, bets = opportunity_rules(market)
+    rule, rule_params, levels = opportunity_rules(market)
+    print(f"\n{market} opportunities ({MIN_CONTRACTS}+ contracts at the peak on {levels}), last {hours} hours")
+    if "take_size" not in [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]:
+        print("  not kept yet, until the live process restarts on this code")
+        return
     rows = query_rows(conn, f"""
-        SELECT p.sport, p.kind, p.label, trade, 100 * peak_edge, min_edge_seconds, min_edge_size, min_edge_size - min_edge_profit,
-               min_edge_profit, days_held
+        SELECT p.sport, p.kind, p.label, trade, 100 * peak_edge, min_edge_seconds, take_size, take_size - take_profit,
+               take_profit, days_held
         FROM opportunities o JOIN pairs p ON p.id = o.pair_id
-        WHERE start_ts >= ? AND peak_edge >= ? AND min_edge_seconds IS NOT NULL AND min_edge_size >= ? AND annual_pct >= ?
-          AND {rule}{in_market(market)}{where}
-        ORDER BY min_edge_profit DESC""", (since, config.MIN_EDGE, MIN_CONTRACTS, config.MIN_ANNUAL_PCT) + rule_params + params)
-    print(f"\n{market} opportunities ({cents}+ on {MIN_CONTRACTS}+ contracts, {config.MIN_ANNUAL_PCT}%+ a year, {bets}), last {hours} hours")
+        WHERE start_ts >= ? AND take_size >= ? AND annual_pct >= ? AND {rule}{in_market(market)}{where}
+        ORDER BY take_profit DESC""", (since, MIN_CONTRACTS, config.MIN_ANNUAL_PCT) + rule_params + params)
     if not rows:
         print("  none")
         return
@@ -237,7 +263,7 @@ def print_market_opportunities(conn, since, hours, sports, market):
         return capital, profit, 100 * profit / capital, 100 * yearly / capital, days
 
     capital, profit, ret, annual, days = totals(rows)
-    print(f"  {len(rows):,} episodes could have taken {capital:,.0f}$ and locked in {profit:,.2f}$")
+    print(f"  {len(rows):,} episodes could have taken {capital:,.0f}$ at their peaks and locked in {profit:,.2f}$")
     print(f"  {percent(ret)}% on capital, {percent(annual)}% a year, held {days or 0:,.1f} days on average")
     print(f"  at {cents} or more for {seconds(quantile([r[5] for r in rows], 0.5))} at the median, "
           f"{seconds(quantile([r[5] for r in rows], 0.9))} at the 90th percentile, {seconds(max(r[5] for r in rows))} at the longest")
@@ -258,21 +284,6 @@ def print_market_opportunities(conn, since, hours, sports, market):
                         f"{d:,.1f}" if d else "-"))
     print_table(f"{market} largest opportunities", ("bet", "peak c", f"{cents}+ for", "size", "capital $", "profit $", "annual %", "days"),
                 largest)
-
-
-def print_opportunities(conn, since, hours, sports, markets=MARKETS):
-    """
-    The episodes within the trading rules in the window, the futures then the games in play: at config.MIN_EDGE or
-    more and config.MIN_ANNUAL_PCT a year or more, both at the peak, with MIN_CONTRACTS or more fillable at that edge
-    through its longest stretch, see opportunity_rules(). An edge on less, a sliver of a level, is one no trade could
-    take, however long it lasted.
-    Capital is what buying every contract fillable at that edge through its longest stretch at it would have cost with
-    fees, and profit what it locks in. The annual rates weight each episode by its capital, over the days until it pays.
-    How long the edge stayed at config.MIN_EDGE or more is the longest unbroken stretch of each episode, in seconds to
-    the thousandth. Episodes before 2026-10-04 16:03 UTC kept their stretch at 5 cents, the minimum then.
-    """
-    for market in markets:
-        print_market_opportunities(conn, since, hours, sports, market)
 
 
 def print_open_trades(conn, since, hours, mode, market, sports, now):
@@ -447,17 +458,17 @@ def print_book_ages(conn, since, hours, market, sports):
                     ("venue", "buying", "quiet", "orders", "took some", "%", "asked", "filled"), body, left=3)
 
 
-def print_trades(conn, since, hours, modes=("live",), sports=(), now=None, markets=MARKETS):
+def print_market(conn, since, hours, sports, market, modes=("live",), now=None):
     """
-    The trades of each mode asked for apart, since paper and live money never mix, and in each the markets asked for,
-    the futures then the games in play.
+    Everything on one market under a heading of its own: its opportunities,
+    then the trades of each mode asked for, apart, since paper and live
+    money never mix.
     """
     now = now or now_iso()
+    print(f"\n===== {market} =====")
+    print_market_opportunities(conn, since, hours, sports, market)
     for mode in modes:
-        for market in markets:
-            print_market_trades(conn, since, hours, mode, market, sports, now)
-        if mode == "paper":
-            print_paper_money(conn)
+        print_market_trades(conn, since, hours, mode, market, sports, now)
 
 
 def read_live_balances(readers=None):
@@ -515,7 +526,9 @@ if __name__ == "__main__":
     conn = read_only()
     print_overview(conn, sports)
     print_gaps(conn, since, args.hours)
-    print_opportunities(conn, since, args.hours, sports, MARKET_CHOICES[args.market])
-    print_trades(conn, since, args.hours, MODES[args.mode], sports, now, MARKET_CHOICES[args.market])
+    for market in MARKET_CHOICES[args.market]:
+        print_market(conn, since, args.hours, sports, market, MODES[args.mode], now)
+    if "paper" in MODES[args.mode]:
+        print_paper_money(conn)
     if "live" in MODES[args.mode] and not args.no_live:
         print_live_money(read_live_balances())

@@ -246,7 +246,7 @@ place (see the top of `db/database.py`):
 |---|---|
 | contracts, bets, pairs | the catalog |
 | gaps | the recorder, when a feed connection drops |
-| opportunities | the scanner, one row per episode |
+| opportunities | the scanner, one row per episode, with what an order at its peak could have had as live takes it (`take_size`) |
 | trades | the executors, paper and live, with whether the game was under way (`in_play`) |
 | orders | the live executor, one row per real order, with the times of the book it went out on |
 | settlements | the settler |
@@ -528,7 +528,12 @@ executor takes a trade, and then not again, so one mispricing makes one
 trade. The live executor is offered it first. The edge coming back after it
 has gone is a new episode. An episode also keeps its longest stretch at
 `MIN_EDGE` or more, and the contracts that stayed fillable through all of
-it, which is what an order sent any time in the stretch could have had. A
+it, which is what an order sent any time in the stretch could have had.
+From 2026-10-05 it keeps too what an order sent at its peak could have had
+as live takes it, at once: the contracts on the levels at live's least edge
+or more, `pricing.live_min_edge()`, 5 cents on a game under way and 50% a
+year on a future, and what they lock in. The summary counts opportunities
+by that, since live's own fill empties the levels it takes. A
 book goes stale after a minute only once its game may have started: a
 future's markets, and a game's before kickoff, can rest unchanged for hours
 while they are open, so their books are priced however old they are.
@@ -804,41 +809,48 @@ its own.
 ### Tools
 
 `src/tools/summary.py` prints a short report from the database: its size
-and the pairs of each sport in one line, and feed drops. It shows the
-futures and the games in play apart, or one of them with `--market
-futures` or `--market in-play`. For each it shows the opportunities within
-the trading rules, an edge of `MIN_EDGE` or more and `MIN_ANNUAL_PCT` a
-year or more, a whole contract or more fillable at that edge through its
-longest stretch, on a future paying `MIN_PAYOUT_HOURS` or more out, or on
-a game, match, race, or window under way paying within `MAX_PAYOUT_HOURS`: what they could
-have taken and locked in at full size, how long the edge stayed at
-`MIN_EDGE` or more, in seconds to the thousandth, at the median, the 90th
-percentile, and the longest, the same by sport and kind, and the largest
-five. An edge on less than a contract, a sliver of a Polymarket US level
-that can last minutes, is left out, since a trade opens a whole contract
-or more and so could never take it. Episodes before 2026-10-04 16:03 UTC
-kept that stretch at five cents. It then shows, for paper and then live,
-or one of them with `--mode paper` or `--mode live`, and in each for the
-futures and then the games in play, the trades by outcome, filled,
-partial, then failed, and by sport and kind in the window, the five
-holding the most capital, the legs settled in it by venue, and
-the open trades: in a few lines, how many, how many of them opened in the
-last hour, day, and week and the capital those still hold, the capital
-they all hold on each venue and the profit they are expected to return
-with its rate a year weighted by capital, and the first, average, and last
-dates they resolve, the first maybe past and waiting on a venue, the
-average weighted by capital; then a table of each open trade opened in the
-window, newest first, with what it holds, its capital, expected profit and
-rates, and when it pays. Each live market ends with its real orders sent
-by venue and what came back, then its orders to open by venue, the side
-they bought, and how long the venue had sent nothing for the market when
-each went out (0-1, 1-5, 5-30, 30+ seconds), with how many took
-something, the paper section with the paper money from
-the ledger, and the live one with the live balances read from the venues now, with Kalshi's
-shards. Each section is a title line with its details on indented lines
-under it, and a long list, such as the pairs of each sport, wraps at 100
-characters. `--hours` sets the window, `--sport nfl,ncaaf` narrows
-everything to some sports, and `--no-live` leaves out the live balances.
+and the pairs of each sport in one line, and feed drops. Then everything on
+the futures under a heading of its own, then everything on the games in
+play, or one of them with `--market futures` or `--market in-play`. Each
+market starts with its opportunities as live takes them, at once: an
+episode counts when an order sent at its peak could have had a whole
+contract or more on the levels at live's least edge or more, the levels
+returning `MIN_ANNUAL_PCT` a year on a future paying `MIN_PAYOUT_HOURS` or
+more out, and those at `LIVE_IN_PLAY_MIN_EDGE` or more on a game, match,
+race, or window under way paying within `MAX_PAYOUT_HOURS`. It shows what
+those orders could have taken and locked in at full size, how long the edge
+stayed at `MIN_EDGE` or more, in seconds to the thousandth, at the median,
+the 90th percentile, and the longest, the same by sport and kind, and the
+largest five. An edge on less than a contract, a sliver of a Polymarket US
+level that can last minutes, is left out, since a trade opens a whole
+contract or more and so could never take it. Until 2026-10-05 an episode
+counted only with a whole contract fillable through all of its longest
+stretch at `MIN_EDGE`, which left out the very episodes live traded, since
+its own fill empties the levels it takes: of the two futures it traded in
+the hour after the 15:14 UTC restart, one stretch kept 0.29 contracts and
+the other 0.01. Episodes from before the scanner kept what the peak could
+have had, and ones still open, which are stored only once they end, are
+left out. The market then shows, for paper and then live, or one of them
+with `--mode paper` or `--mode live`, the trades by outcome, filled,
+partial, then failed, and by sport and kind in the window, the five holding
+the most capital, the legs settled in it by venue, and the open trades: in
+a few lines, how many, how many of them opened in the last hour, day, and
+week and the capital those still hold, the capital they all hold on each
+venue and the profit they are expected to return with its rate a year
+weighted by capital, and the first, average, and last dates they resolve,
+the first maybe past and waiting on a venue, the average weighted by
+capital; then a table of each open trade opened in the window, newest
+first, with what it holds, its capital, expected profit and rates, and when
+it pays. Live's trades end with its real orders sent by venue and what came
+back, then its orders to open by venue, the side they bought, and how long
+the venue had sent nothing for the market when each went out (0-1, 1-5,
+5-30, 30+ seconds), with how many took something. The paper money from the
+ledger and the live balances read from the venues now, with Kalshi's
+shards, come last. Each section is a title line with its details on
+indented lines under it, and a long list, such as the pairs of each sport,
+wraps at 100 characters. `--hours` sets the window, `--sport nfl,ncaaf`
+narrows everything to some sports, and `--no-live` leaves out the live
+balances.
 
 `src/tools/live_check.py` reads both venues' balances with the keys in
 `data/` and says when the Kalshi key's location attestation lapses, and

@@ -165,3 +165,21 @@ def test_step_12_gives_older_trades_no_in_play_so_none_of_them_counts(tmp_path):
     assert [tuple(r) for r in conn.execute("SELECT id, in_play FROM trades")] == [(1, None)]
     assert database.count_in_play_trades(conn, "live") == 0
     assert version(conn) == len(migrations.STEPS)
+
+
+def test_step_13_gives_older_episodes_no_take_so_the_summary_leaves_them_out(tmp_path):
+    path = tmp_path / "t.sqlite"
+    old = sqlite3.connect(path)
+    old.execute("""CREATE TABLE opportunities (
+    id             INTEGER PRIMARY KEY,
+    pair_id        INTEGER NOT NULL,
+    start_ts       TEXT NOT NULL,   -- When the net edge first went positive.
+    min_edge_profit REAL            -- Net dollars from filling them, at the stretch's thinnest moment.
+)""")
+    old.execute("INSERT INTO opportunities (id, pair_id, start_ts, min_edge_profit) VALUES (1, 7, 's', 0.5)")
+    old.execute("PRAGMA user_version = 12")
+    old.commit()
+    old.close()
+    conn = database.connect(path)
+    assert [tuple(r) for r in conn.execute("SELECT id, min_edge_profit, take_size, take_profit FROM opportunities")] == [(1, 0.5, None, None)]
+    assert version(conn) == len(migrations.STEPS)

@@ -4,7 +4,7 @@ Tests for pricing one side of a bet through a contract and both sides across a g
 
 import pytest
 from db.models import Book
-from engine.helper import pricing
+from engine.helper import config, pricing
 
 PM_FEES = {"feeCoefficient": 0.0695}
 NO_PM_FEES = {"feeCoefficient": 0}
@@ -50,6 +50,27 @@ def test_the_edge_for_a_return_a_year_returns_just_that():
     assert pricing.edge_for_annual(50, 365) == pytest.approx(1 / 3)       # A third of a dollar on the two thirds both legs cost, in a year.
     for days in (1 / 24, 4.25, 27.25, 180):
         assert pricing.annual_pct(pricing.edge_for_annual(50, days), days) == pytest.approx(50)
+
+
+def test_live_takes_five_cents_on_a_game_under_way_and_on_a_future_the_edge_returning_its_rate_a_year():
+    assert pricing.live_min_edge(True, 0.1) == config.LIVE_IN_PLAY_MIN_EDGE
+    assert pricing.live_min_edge(False, 27.25) == pytest.approx(0.036, abs=0.0001)     # 3.6 cents returns 50% a year over 27 days.
+    assert pricing.annual_pct(pricing.live_min_edge(False, 27.25), 27.25) == pytest.approx(config.MIN_ANNUAL_PCT)
+    assert pricing.live_min_edge(False, None) == config.MIN_EDGE          # A bet that gives no payout.
+
+
+def test_fillable_counts_the_contracts_and_profit_on_the_levels_at_the_floor_or_more():
+    members = [member("kalshi", "k"), member("polymarket_us", "us")]
+    # Yes costs 0.40 on Polymarket US. No costs 0.47 on Kalshi for 40, 13 cents, 0.57 for 60 more, 3 cents, and 0.59 for
+    # 50 more, 1 cent.
+    books = {("kalshi", "k"): Book("kalshi", "k", "t", [[0.53, 40], [0.43, 60], [0.41, 50]], [[0.99, 1]]),
+             ("polymarket_us", "us"): Book("polymarket_us", "us", "t", [[0.39, 200]], [[0.40, 200]])}
+    fee_infos = {("kalshi", "k"): NO_K_FEES, ("polymarket_us", "us"): NO_PM_FEES}
+    yes, no = members[1], members[0]
+    assert pricing.fillable(yes, no, books, fee_infos, 0.05) == pytest.approx((40, 5.2))
+    assert pricing.fillable(yes, no, books, fee_infos, 0.02) == pytest.approx((100, 7.0))
+    assert pricing.fillable(yes, no, books, fee_infos, 0.005) == pytest.approx((150, 7.5))
+    assert pricing.fillable(yes, no, books, fee_infos, 0.14) == (0.0, 0.0)
 
 
 def test_positive_depth_walks_both_ladders_while_the_edge_is_positive():

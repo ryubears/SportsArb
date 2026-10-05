@@ -71,7 +71,7 @@ from db.models import Order
 from engine.components.trading.brakes import Brakes
 from engine.components.trading.executor import Executor, Fill
 from engine.helper import config, game
-from engine.helper.pricing import edge_for_annual
+from engine.helper.pricing import live_min_edge
 
 PLACE = {"kalshi": kalshi.place_order, "polymarket_us": polymarket_us.place_order}   # How each venue takes an order.
 POSITIONS = {"kalshi": kalshi.positions, "polymarket_us": polymarket_us.positions}    # How each venue reports what the account holds.
@@ -211,14 +211,11 @@ class LiveExecutor(Executor):
         future, the edge that returns config.MIN_ANNUAL_PCT a year until the
         bet pays, so each level its orders sweep returns that, as the top
         must, see pays_enough(). config.MIN_EDGE for a bet that gives no
-        payout time, which pays_enough() turns down anyway.
+        payout time, which pays_enough() turns down anyway. See
+        pricing.live_min_edge(), which the scanner uses too.
         """
-        if self.in_game(pair, yes, no, now):
-            return config.LIVE_IN_PLAY_MIN_EDGE
         pays_at = game.pays_at((yes, no), pair["sport"])
-        if not pays_at:
-            return config.MIN_EDGE
-        return edge_for_annual(config.MIN_ANNUAL_PCT, game.days_until(now, pays_at))
+        return live_min_edge(self.in_game(pair, yes, no, now), game.days_until(now, pays_at) if pays_at else None)
 
     def most(self, pair, yes, no, now):
         """

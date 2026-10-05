@@ -123,6 +123,9 @@ class Opportunity:
     min_edge_seconds: float | None = None   # The longest unbroken stretch of the episode at config.MIN_EDGE or more.
     min_edge_size: float | None = None      # Contracts fillable at that edge through all of that stretch.
     min_edge_profit: float | None = None    # Net dollars from filling them, at the stretch's thinnest moment.
+    take_size: float | None = None      # Contracts fillable at the peak on the levels at live's least edge or more, see
+                                        # pricing.live_min_edge(): what an order sent then could have had. Null before 2026-10-05.
+    take_profit: float | None = None    # Net dollars from filling them.
 
 
 @dataclass

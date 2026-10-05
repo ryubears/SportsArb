@@ -238,10 +238,22 @@ def step_12_trades_in_play(conn):
         conn.execute("ALTER TABLE trades ADD COLUMN in_play INTEGER")
 
 
+def step_13_opportunities_take(conn):
+    """
+    Episodes now keep what an order sent at their peak could have had as
+    live takes it, which the summary shows them by. Older episodes did not,
+    so theirs is null and the summary leaves them out.
+    """
+    columns = [r[1] for r in conn.execute("PRAGMA table_info(opportunities)")]
+    for column in ("take_size", "take_profit"):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE opportunities ADD COLUMN {column} REAL")
+
+
 # Step n brings a database from user_version n - 1 to n. Only ever add to the end.
 STEPS = [step_1_catch_up, step_2_settlements, step_3_opening_balances, step_4_modes, step_5_drop_quotes, step_6_pair_sports,
          step_7_min_edge_stretch, step_8_drop_transfers, step_9_drop_trade_caps, step_10_twin_sequences, step_11_order_book_times,
-         step_12_trades_in_play]
+         step_12_trades_in_play, step_13_opportunities_take]
 
 
 def migrate(conn, fresh):

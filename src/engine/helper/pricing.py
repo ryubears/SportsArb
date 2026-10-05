@@ -209,13 +209,28 @@ def cheapest(members, books, side, fee_infos):
     return best, best_cost
 
 
+def ladders(yes, no, books, fee_infos):
+    """
+    The yes leg's and the no leg's ladders, then their (venue, fee_info), as positive_depth() takes them.
+    """
+    yes_key, no_key = (yes["venue"], yes["contract_id"]), (no["venue"], no["contract_id"])
+    return (ladder(books[yes_key], yes["polarity"], "yes"), ladder(books[no_key], no["polarity"], "no"),
+            (yes["venue"], fee_infos[yes_key]), (no["venue"], fee_infos[no_key]))
+
+
 def price_pair(yes, no, books, fee_infos):
     """
     Price buying the yes leg and the no leg together.
     """
-    yes_key, no_key = (yes["venue"], yes["contract_id"]), (no["venue"], no["contract_id"])
-    return Priced(yes, no, *positive_depth(ladder(books[yes_key], yes["polarity"], "yes"), ladder(books[no_key], no["polarity"], "no"),
-                                           (yes["venue"], fee_infos[yes_key]), (no["venue"], fee_infos[no_key]), config.MIN_EDGE))
+    return Priced(yes, no, *positive_depth(*ladders(yes, no, books, fee_infos), config.MIN_EDGE))
+
+
+def fillable(yes, no, books, fee_infos, min_edge):
+    """
+    The contracts fillable buying the yes leg and the no leg together on the levels at min_edge or more, from the top
+    down, and the net dollars they lock in: what an order sweeping those levels would have had.
+    """
+    return positive_depth(*ladders(yes, no, books, fee_infos), min_edge)[3:]
 
 
 def best_trade(members, books, fee_infos):
@@ -278,3 +293,17 @@ def edge_for_annual(pct, days):
     """
     ratio = pct * days / 36500
     return ratio / (1 + ratio)
+
+
+def live_min_edge(under_way, days):
+    """
+    The least edge live takes, and the floor of the deeper levels its orders
+    sweep: config.LIVE_IN_PLAY_MIN_EDGE on a game under way, otherwise the
+    edge that returns config.MIN_ANNUAL_PCT a year over the days until the
+    bet pays, or config.MIN_EDGE when it gives no payout. The live executor
+    trades by it, and the scanner keeps what an order at an episode's peak
+    could have had by it.
+    """
+    if under_way:
+        return config.LIVE_IN_PLAY_MIN_EDGE
+    return config.MIN_EDGE if days is None else edge_for_annual(config.MIN_ANNUAL_PCT, days)

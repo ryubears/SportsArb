@@ -29,8 +29,8 @@ def report(tmp_path, monkeypatch, capsys, fill, modes=("live",), sports=(), mark
     monkeypatch.setattr(summary, "DB_PATH", path)
     ro = database.read_only(path)      # As the script opens it.
     summary.print_overview(ro, sports)
-    summary.print_opportunities(ro, SINCE, 12, sports, markets)
-    summary.print_trades(ro, SINCE, 12, modes, sports, now=NOW, markets=markets)
+    for market in markets:
+        summary.print_market(ro, SINCE, 12, sports, market, modes, now=NOW)
     return capsys.readouterr().out
 
 
@@ -48,15 +48,16 @@ def table(out, title):
     return rows
 
 
-def episode(start, days, edge, size, live=0, pair_id=1, lasted=600.0):
+def episode(start, days, edge, size, live=0, pair_id=1, lasted=600.0, take=None):
     """
     An episode of the pair at start, paying days out, edge at its peak, and size fillable at the minimum edge or more for
-    lasted seconds, ten minutes unless given.
+    lasted seconds, ten minutes unless given. An order at the peak could have had take on live's levels, size unless given.
     """
+    take = size if take is None else take
     return Opportunity(pair_id=pair_id, trade="t", yes_venue="kalshi", yes_contract="k", no_venue="polymarket_us", no_contract="pm",
                        start_ts=start, end_ts=start, seconds=600, peak_ts=start, peak_edge=edge, peak_size=size, peak_profit=size * edge,
                        live=live, days_held=days, return_pct=100 * edge / (1 - edge), annual_pct=100 * edge / (1 - edge) * 365 / days,
-                       min_edge_seconds=lasted, min_edge_size=size, min_edge_profit=size * edge)
+                       min_edge_seconds=lasted, min_edge_size=size, min_edge_profit=size * edge, take_size=take, take_profit=take * edge)
 
 
 def test_only_episodes_within_the_rules_are_shown(tmp_path, monkeypatch, capsys):
@@ -65,19 +66,20 @@ def test_only_episodes_within_the_rules_are_shown(tmp_path, monkeypatch, capsys)
             episode("2026-09-27T13:00:00+00:00", 2, 0.06, 100),           # 6 cents paying in two days, 1,165% a year.
             episode("2026-09-27T14:00:00+00:00", 0.5, 0.10, 100),         # Pays out in 12 hours, too soon.
             episode("2026-09-27T15:00:00+00:00", 150, 0.10, 100),         # 10 cents over 150 days, 27% a year, too little.
-            episode("2026-09-27T16:00:00+00:00", 2, 0.015, 100),          # Under 2 cents.
+            episode("2026-09-27T16:00:00+00:00", 2, 0.015, 100),          # 1.5 cents paying in two days: a future has no 2 cent minimum.
             episode("2026-09-27T16:30:00+00:00", 2, 0.03, 100, lasted=0.004),      # 3 cents paying in two days, 278% a year.
-            episode("2026-09-27T16:45:00+00:00", 2, 0.06, 0.6, lasted=900),         # Under a whole contract at 2 cents, however long.
+            episode("2026-09-27T16:45:00+00:00", 2, 0.06, 0.6, lasted=900),         # Under a whole contract at the peak, however long.
+            # Live took the one contract at the peak, which left 0.29 fillable through the stretch.
+            episode("2026-09-27T16:50:00+00:00", 2, 0.14, 0.29, take=1),
             episode("2026-09-27T17:00:00+00:00", 2, 0.08, 100, live=1)])  # During a game.
     out = report(tmp_path, monkeypatch, capsys, fill)
-    assert ("\nfutures opportunities (2c+ on 1+ contracts, 50%+ a year, paying 24h+ out), last 12 hours\n"
-            "  2 episodes could have taken 191$ and locked in 9.00$\n"
-            "  4.7% on capital, 859.9% a year, held 2.0 days on average\n"
-            "  at 2c or more for 600.000s at the median, 600.000s at the 90th percentile, 600.000s at the longest\n") in out
-    assert table(out, "futures opportunities by kind") == [["nfl", "winner", "2", "600.000s", "600.000s", "191", "9.00", "4.7", "859.9", "2.0"]]
-    assert table(out, "futures largest opportunities") == [["the", "bet", "6.0", "600.000s", "100.0", "94", "6.00", "1,164.9", "2.0"],
-                                                        ["the", "bet", "3.0", "0.004s", "100.0", "97", "3.00", "564.4", "2.0"]]
-    assert "\nin-play opportunities (2c+ on 1+ contracts, 50%+ a year, games, matches, races, and windows under way, paying within 24h), last 12 hours\n  none\n" in out
+    assert ("\nfutures opportunities (1+ contracts at the peak on levels returning 50%+ a year, paying 24h+ out), last 12 hours\n"
+            "  4 episodes could have taken 290$ at their peaks and locked in 10.64$\n") in out
+    assert [r[:3] for r in table(out, "futures opportunities by kind")] == [["nfl", "winner", "4"]]
+    assert [r[2:4] + r[5:7] for r in table(out, "futures largest opportunities")] == [
+        ["6.0", "600.000s", "94", "6.00"], ["3.0", "0.004s", "97", "3.00"], ["1.5", "600.000s", "98", "1.50"], ["14.0", "600.000s", "1", "0.14"]]
+    assert ("\nin-play opportunities (1+ contracts at the peak on levels at 5c+, 50%+ a year, games, matches, races, and windows under way, "
+            "paying within 24h), last 12 hours\n  none\n") in out
 
 
 def test_in_play_opportunities_are_the_games_under_way_paying_within_a_day(tmp_path, monkeypatch, capsys):
@@ -91,11 +93,12 @@ def test_in_play_opportunities_are_the_games_under_way_paying_within_a_day(tmp_p
             episode("2026-09-27T14:00:00+00:00", 2, 0.10, 100, pair_id=3),                          # Paying in two days.
             episode("2026-09-27T15:00:00+00:00", 0.5, 0.10, 100, live=1, pair_id=1)])    # A future that pays too soon.
     out = report(tmp_path, monkeypatch, capsys, fill, modes=summary.MODES["all"])
-    assert "\nin-play opportunities (2c+ on 1+ contracts, 50%+ a year, games, matches, races, and windows under way, paying within 24h), last 12 hours\n" in out
+    assert ("\nin-play opportunities (1+ contracts at the peak on levels at 5c+, 50%+ a year, games, matches, races, and windows under way, "
+            "paying within 24h), last 12 hours\n") in out
     assert "  at 2c or more for 1.500s at the median, 1.500s at the 90th percentile, 1.500s at the longest\n" in out
     assert [r[:5] for r in table(out, "in-play opportunities by kind")] == [["nfl", "spread", "2", "1.500s", "1.500s"]]
     assert [r[3] for r in table(out, "in-play largest opportunities")] == ["0.250s", "1.500s"]
-    assert "\nfutures opportunities (2c+ on 1+ contracts, 50%+ a year, paying 24h+ out), last 12 hours\n  none\n" in out
+    assert "\nfutures opportunities (1+ contracts at the peak on levels returning 50%+ a year, paying 24h+ out), last 12 hours\n  none\n" in out
     assert out.index("\nfutures opportunities") < out.index("\nin-play opportunities")
 
 
@@ -108,10 +111,12 @@ def test_a_sport_filter_keeps_only_its_pairs_episodes_and_trades(tmp_path, monke
     assert "\nlive futures trades: 0 in all, 0 in the last 12 hours" in out
 
 
-def test_all_modes_show_paper_then_live(tmp_path, monkeypatch, capsys):
+def test_each_market_shows_under_its_heading_its_opportunities_then_paper_then_live(tmp_path, monkeypatch, capsys):
     out = report(tmp_path, monkeypatch, capsys, lambda conn: None, modes=summary.MODES["all"])
-    heads = ["paper futures trades: ", "paper futures open trades: ", "paper in-play trades: ", "paper in-play open trades: ",
-             "live futures trades: ", "live futures open trades: ", "live in-play trades: ", "live in-play open trades: "]
+    heads = ["===== futures =====", "futures opportunities", "paper futures trades: ", "paper futures open trades: ",
+             "live futures trades: ", "live futures open trades: ",
+             "===== in-play =====", "in-play opportunities", "paper in-play trades: ", "paper in-play open trades: ",
+             "live in-play trades: ", "live in-play open trades: "]
     assert [out.index(f"\n{head}") for head in heads] == sorted(out.index(f"\n{head}") for head in heads)
 
 
@@ -299,3 +304,10 @@ def test_a_market_filter_shows_only_the_futures_or_only_the_games_in_play(tmp_pa
     assert "\nin-play opportunities" in out and "\nlive in-play trades: " in out and "futures" not in out
     out = report(tmp_path / "b", monkeypatch, capsys, lambda conn: None, markets=summary.MARKET_CHOICES["futures"])
     assert "\nfutures opportunities" in out and "\nlive futures trades: " in out and "in-play" not in out
+
+
+def test_opportunities_on_a_database_the_live_process_has_not_brought_up_to_date_say_so(tmp_path, monkeypatch, capsys):
+    def fill(conn):
+        conn.execute("ALTER TABLE opportunities DROP COLUMN take_size")     # As before step 13.
+    out = report(tmp_path, monkeypatch, capsys, fill, markets=summary.MARKET_CHOICES["futures"])
+    assert "), last 12 hours\n  not kept yet, until the live process restarts on this code\n\nlive futures trades: " in out

@@ -58,6 +58,13 @@ def stretches(conn):
     return [tuple(r) for r in conn.execute("SELECT min_edge_seconds, min_edge_size, min_edge_profit FROM opportunities ORDER BY start_ts")]
 
 
+def takes(conn):
+    """
+    What an order at each stored episode's peak could have had as live takes it, as (contracts, profit), oldest first.
+    """
+    return [tuple(r) for r in conn.execute("SELECT take_size, take_profit FROM opportunities ORDER BY start_ts")]
+
+
 def replay(conn, books, drops=()):
     """
     Drive a Scanner with books in time order, the way the recorder drives it live, and return what it stored.
@@ -127,6 +134,21 @@ def test_an_episode_never_at_the_minimum_edge_has_no_stretch(tmp_path):
                   Book("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.50, 100]], [[0.51, 100]]),     # 1 cent.
                   Book("kalshi", "k", "2026-09-19T12:01:01+00:00", [[0.49, 100]], [[0.50, 100]])])
     assert stretches(conn) == [(0.0, 0.0, 0.0)]
+
+
+def test_an_episode_keeps_what_an_order_at_its_peak_could_have_had_on_the_levels_live_takes(tmp_path):
+    # Yes costs 0.40 on Polymarket US. At the peak no costs 0.47 on Kalshi for 40, 13 cents, 0.57 for 60 more, 3 cents,
+    # and 0.59 for 50 more, 1 cent. A future paying in 10 days takes the levels at 1.35 cents or more, 50% a year, and a
+    # game under way those at 5 cents or more.
+    at = "2026-09-19T12:00:%02d+00:00"
+    for kickoff, take in ((None, (100, 7.0)), ("2026-09-19T11:00:00+00:00", (40, 5.2))):
+        conn = make_db(tmp_path / str(kickoff is None), [member("kalshi", "k", start_time=kickoff),
+                                                         member("polymarket_us", "pm", start_time=kickoff)], future=kickoff is None)
+        replay(conn, [Book("polymarket_us", "pm", at % 0, [[0.39, 500]], [[0.40, 500]]),
+                      Book("kalshi", "k", at % 1, [[0.53, 40], [0.43, 60], [0.41, 50]], [[0.99, 1]]),
+                      Book("kalshi", "k", at % 2, [[0.50, 500]], [[0.99, 1]]),    # 10 cents on 500 after the peak counts for nothing.
+                      Book("kalshi", "k", at % 3, [[0.40, 100]], [[0.99, 1]])])
+        assert takes(conn) == [pytest.approx(take)], kickoff
 
 
 def test_a_games_book_ages_only_once_the_game_may_have_started(tmp_path):
