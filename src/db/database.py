@@ -336,38 +336,6 @@ def load_open_trades(conn, mode):
           AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id) ORDER BY t.id""", (mode,))]
 
 
-def insert_twin(conn, live_trade_id, sequence=None):
-    """
-    Store a live trade the in-play test took, which has no paper twin yet,
-    and in what order its orders went out, see the twins table.
-    """
-    conn.execute("INSERT INTO twins (live_trade_id, sequence) VALUES (?, ?)", (live_trade_id, sequence))
-    conn.commit()
-
-
-def set_twin(conn, live_trade_id, paper_trade_id):
-    """
-    Store the paper twin of a live trade the in-play test took.
-    """
-    conn.execute("UPDATE twins SET paper_trade_id = ? WHERE live_trade_id = ?", (paper_trade_id, live_trade_id))
-    conn.commit()
-
-
-def last_twin_sequence(conn):
-    """
-    The order the in-play test's newest trade with a leg on each venue sent its orders in, or None before any.
-    """
-    row = conn.execute("SELECT sequence FROM twins WHERE sequence IS NOT NULL ORDER BY live_trade_id DESC LIMIT 1").fetchone()
-    return row[0] if row else None
-
-
-def count_twins(conn):
-    """
-    How many live trades the in-play test has taken.
-    """
-    return conn.execute("SELECT COUNT(*) FROM twins").fetchone()[0]
-
-
 def load_exposed_trades(conn, mode, now):
     """
     Trades of one mode that are done, hold more on one side than the other,

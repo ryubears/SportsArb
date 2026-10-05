@@ -497,7 +497,7 @@ def test_positions_are_not_compared_while_orders_go_out(tmp_path):
     assert not any("differ" in line for line in logs)
 
 
-# THE IN-PLAY TEST, live trading a few contracts of games under way beside paper twins
+# IN PLAY, live trading games under way with run.py --live-in-play
 
 UNDER_WAY = "2026-09-22T18:00:00+00:00"     # An hour into the game, which pays within the day.
 GAME = {**PAIR, "members": [YES, NO]}       # The pair as the scanner offers it, with every member.
@@ -505,7 +505,7 @@ GAME = {**PAIR, "members": [YES, NO]}       # The pair as the scanner offers it,
 
 def in_play(tmp_path, venues, latest, logs=None):
     """
-    A live executor running the in-play test an hour into the game, with books of then.
+    A live executor trading games under way, an hour into the game, with books of then.
     """
     conn = database.connect(tmp_path / "t.sqlite")
     cash = LiveBalances(lambda m: None, {"kalshi": lambda: (1000.0, {}), "polymarket_us": lambda: (1000.0, {})})
@@ -517,9 +517,9 @@ def in_play(tmp_path, venues, latest, logs=None):
     return conn, ex
 
 
-def signal(ex, pair=GAME, now=UNDER_WAY):
+def signal(ex, pair=GAME, members=(YES, NO), now=UNDER_WAY):
     async def scenario():
-        sent = ex.signal(pair, YES, NO, 0.08, 100, FEES, now)
+        sent = ex.signal(pair, *members, 0.08, 100, FEES, now)
         while ex.tasks:
             await asyncio.gather(*ex.tasks)
         return sent
@@ -527,24 +527,17 @@ def signal(ex, pair=GAME, now=UNDER_WAY):
 
 
 @pytest.mark.full_share
-def test_in_the_in_play_test_live_trades_a_game_under_way_a_few_contracts_and_keeps_it_for_its_paper_twin(tmp_path):
-    latest = books(size=100)
-    latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [[0.44, 100]], [[0.45, 10], [0.46, 100]])
+def test_live_trades_a_game_under_way_as_many_contracts_as_the_books_show_polymarket_us_first(tmp_path):
     venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
-    conn, ex = in_play(tmp_path, venues, latest)
+    conn, ex = in_play(tmp_path, venues, books(size=100))
     assert signal(ex)
     t = stored(conn)[0]
-    # Five contracts at most, which the top 10 at 0.45 hold, so neither limit goes deeper than the levels that hold them.
-    assert (t["quantity"], t["yes_limit"], t["no_limit"], t["status"]) == (5, 0.45, 0.47, "filled")
-    # The test's first trade with a leg on each venue sends Polymarket US's order first, and Kalshi's for what it filled.
-    assert venues.orders == [("polymarket_us", "buy", "yes", 5, 0.45), ("kalshi", "buy", "no", 5, 0.47)]
-    assert [tuple(r) for r in conn.execute("SELECT * FROM twins")] == [(t["id"], None, "polymarket_first")]
-    yes, no, live, legs, lead = ex.twin_of(GAME["id"], UNDER_WAY)
-    assert (yes, no, live.id, [leg.limit for leg in legs], lead) == (YES, NO, t["id"], [0.45, 0.47], "polymarket_us")
-    assert ex.twin_of(GAME["id"], UNDER_WAY) is None                    # Paper twins it once.
+    assert (t["quantity"], t["yes_limit"], t["no_limit"], t["status"]) == (100, 0.45, 0.47, "filled")
+    # Polymarket US's order goes first, and Kalshi's once it has answered, for what it filled.
+    assert venues.orders == [("polymarket_us", "buy", "yes", 100, 0.45), ("kalshi", "buy", "no", 100, 0.47)]
 
 
-def test_in_the_in_play_test_a_game_not_yet_under_way_and_one_paying_too_late_are_left_to_paper(tmp_path):
+def test_in_play_a_game_not_yet_under_way_and_one_paying_too_late_are_not_traded(tmp_path):
     venues = Venues()
     conn, ex = in_play(tmp_path, venues, books())
     assert not signal(ex, now="2026-09-22T16:00:00+00:00")             # An hour before kickoff.
@@ -553,68 +546,43 @@ def test_in_the_in_play_test_a_game_not_yet_under_way_and_one_paying_too_late_ar
     assert venues.orders == [] and stored(conn) == []
 
 
-def test_without_the_in_play_test_live_trades_no_game_under_way(tmp_path):
+def test_without_in_play_live_trades_no_game_under_way(tmp_path):
     venues = Venues()
     conn, ex = in_play(tmp_path, venues, books())
-    ex.in_play_test = False
+    ex.in_play = False
     assert not signal(ex) and venues.orders == []
 
 
-def test_the_in_play_test_stops_after_its_trades_and_counts_those_before_a_restart(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "LIVE_IN_PLAY_TRADES", 2)
-    logs = []
-    venues = Venues(polymarket_us=[fills(), fills()], kalshi=[fills(), fills()])
-    conn, ex = in_play(tmp_path, venues, books(), logs)
-    assert signal(ex)
-    restarted = LiveExecutor(conn, ex.cash, ex.books, logs.append, clock=lambda: UNDER_WAY, place=venues.place(),
-                             positions={"polymarket_us": lambda: {}}, in_play=True)
-    assert restarted.in_play_trades == 1
-    assert signal(restarted) and not signal(restarted)
-    assert "live in-play test: 2 trades taken, so no more in play; futures go on" in logs
-    # The restart took turns from the trade before it: that one sent Polymarket US's order first, this one both at once.
-    assert [r[0] for r in conn.execute("SELECT sequence FROM twins ORDER BY live_trade_id")] == ["polymarket_first", "together"]
+def test_in_play_a_future_is_traded_as_ever_both_orders_at_once(tmp_path):
+    venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
+    conn, ex = in_play(tmp_path, venues, books())
     future = {**PAIR, "game_date": None, "kind": "champion", "label": "nfl champion 2027 CAR"}
     sure = {**YES, "start_time": None, "close_time": "2026-10-20T00:00:00+00:00"}, {**NO, "start_time": None, "close_time": "2026-10-20T00:00:00+00:00"}
-    venues.scripts.update(polymarket_us=[fills()], kalshi=[fills()])
+    started = threading.Barrier(2, timeout=5)       # Each order waits for the other: they are both out at once.
 
-    async def scenario():
-        sent = restarted.signal(future, *sure, 0.08, 100, FEES, UNDER_WAY)
-        while restarted.tasks:
-            await asyncio.gather(*restarted.tasks)
-        return sent
-    assert asyncio.run(scenario())
-    assert stored(conn)[-1]["quantity"] == 10                           # A future is sized as ever, half the 20 the books show.
+    def together(answer):
+        def place(quantity, price):
+            started.wait()
+            return answer(quantity, price)
+        return place
+    venues.scripts.update(polymarket_us=[together(fills())], kalshi=[together(fills())])
+    assert signal(ex, future, sure)
+    assert stored(conn)[0]["quantity"] == 10                            # Half the 20 the books show.
+    assert sorted(venues.orders) == [("kalshi", "buy", "no", 10, 0.47), ("polymarket_us", "buy", "yes", 10, 0.45)]
 
 
 @pytest.mark.full_share
 def test_polymarket_us_first_sends_kalshi_only_what_it_filled_and_nothing_when_it_missed(tmp_path):
     venues = Venues(polymarket_us=[fills(3), fills(0)], kalshi=[fills()])
-    logs = []
-    conn, ex = in_play(tmp_path, venues, books(size=100), logs)
+    conn, ex = in_play(tmp_path, venues, books(size=100))
     assert signal(ex)
     t = stored(conn)[0]
-    assert venues.orders == [("polymarket_us", "buy", "yes", 5, 0.45), ("kalshi", "buy", "no", 3, 0.47)]
-    assert (t["quantity"], t["yes_filled"], t["no_filled"], t["matched"], t["status"]) == (5, 3, 3, 3, "partial")
-    ex.sequence = "together"                            # So the next takes Polymarket US first again.
+    assert venues.orders == [("polymarket_us", "buy", "yes", 100, 0.45), ("kalshi", "buy", "no", 3, 0.47)]
+    assert (t["quantity"], t["yes_filled"], t["no_filled"], t["matched"], t["status"]) == (100, 3, 3, 3, "partial")
     assert signal(ex, {**GAME, "id": 2})
     t = stored(conn)[1]
     # Polymarket US filled nothing, so Kalshi was never sent and nothing is held: there is nothing to sell back.
-    assert venues.orders[2:] == [("polymarket_us", "buy", "yes", 5, 0.45)]
+    assert venues.orders[2:] == [("polymarket_us", "buy", "yes", 100, 0.45)]
     assert (t["yes_filled"], t["no_filled"], t["yes_held"], t["no_held"], t["status"]) == (0, 0, 0, 0, "failed")
     assert t["hedge"] == "no leg not sent, as polymarket_us filled nothing first"
     assert ex.cash.reserved == {} or not any(ex.cash.reserved.values())
-
-
-def test_a_trade_with_both_legs_on_kalshi_sends_them_at_once_and_takes_no_turn(tmp_path):
-    venues = Venues(kalshi=[fills(), fills()])
-    conn, ex = in_play(tmp_path, venues, books())
-    both_kalshi = {**YES, "venue": "kalshi", "contract_id": "k2"}
-    ex.books()[("kalshi", "k2")] = Book("kalshi", "k2", UNDER_WAY, [[0.44, 20]], [[0.45, 20]])
-
-    async def scenario():
-        sent = ex.signal(GAME, both_kalshi, NO, 0.08, 100, {**FEES, ("kalshi", "k2"): NO_K_FEES}, UNDER_WAY)
-        while ex.tasks:
-            await asyncio.gather(*ex.tasks)
-        return sent
-    assert asyncio.run(scenario())
-    assert [tuple(r)[1:] for r in conn.execute("SELECT * FROM twins")] == [(None, None)] and ex.sequence is None

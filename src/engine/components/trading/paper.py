@@ -38,15 +38,13 @@ a level gone and back between two looks still has ours taken off, never
 more.
 
 Paper trades the games, matches, races, and windows that pay within
-config.PAPER_MAX_PAYOUT_HOURS, in play too. Everything else, the sizing,
-the flattening, and storing each trade, is the shared Executor's, and the
-money is the PaperBalances from money/paper.py.
+config.MAX_PAYOUT_HOURS, in play too. Everything else, the sizing, the
+flattening, the order its legs go in, and storing each trade, is the
+shared Executor's, and the money is the PaperBalances from money/paper.py.
 
-In the in-play test a live trade taken in play has a paper twin: a paper
-trade on the same signal, of the same size and limits, its orders sent in
-the same order, see twin(). Our
-live orders are real and take from the books the twin's orders meet, so
-paper adds back what they took, see footprints.py.
+When live trades the same games in play, run.py --live-in-play, both take
+the same signals. Our live orders are real and take from the books paper's
+orders meet, so paper adds back what they took, see footprints.py.
 """
 
 import asyncio
@@ -57,7 +55,7 @@ from contextlib import ExitStack, contextmanager
 from statistics import NormalDist
 from common.timeutil import at_seconds, epoch, now_iso
 from common.venues import is_maintenance
-from engine.components.trading.executor import Executor, Fill, shard
+from engine.components.trading.executor import Executor, Fill
 from engine.helper import config
 from engine.helper.pricing import book_level, fresh, ladder, sell_ladder, sweep, takes
 
@@ -82,9 +80,9 @@ class PaperExecutor(Executor):
 
     def pays_in_time(self, hours, pair):
         """
-        Paper trades a bet paying out within config.PAPER_MAX_PAYOUT_HOURS.
+        Paper trades a bet paying out within config.MAX_PAYOUT_HOURS.
         """
-        return hours <= config.PAPER_MAX_PAYOUT_HOURS
+        return hours <= config.MAX_PAYOUT_HOURS
 
     # BOOKS
 
@@ -229,22 +227,6 @@ class PaperExecutor(Executor):
         Sell back contracts held through a leg at whatever the venue's book offers when the order would arrive, whatever the floor.
         """
         return await self.order(trade, leg, "flatten", quantity, when=when)
-
-    def twin(self, pair, yes, no, live, live_legs, now, lead=None):
-        """
-        Send the paper twin of a live trade just taken in play on the pair,
-        through the members yes and no: the same signal, the same legs, the
-        same limits, the same size, the leg on lead's venue first when the
-        live trade sent it first, when the paper money pays for it. Returns
-        the paper Trade, or None.
-        """
-        legs = [dataclasses.replace(leg, held=0, cost=0.0) for leg in live_legs]
-        per_contract = {}
-        for leg in legs:
-            per_contract[(leg.venue, shard(leg))] = per_contract.get((leg.venue, shard(leg)), 0.0) + leg.limit
-        if any(self.cash.spendable(venue, part) < live.quantity * cost for (venue, part), cost in per_contract.items()):
-            return None
-        return self.open(pair, yes, no, live.edge, legs, live.quantity, live.pays_at, now, lead)
 
     async def run_trade(self, trade, legs):
         """

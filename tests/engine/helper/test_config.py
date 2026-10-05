@@ -43,7 +43,7 @@ def test_settings_are_read_when_used_not_when_imported(restore, tmp_path):
     from db import database
     config.override(["paper_start_balance=2500"])
     assert PaperBalances(database.connect(tmp_path / "t.sqlite")).amounts == {"kalshi": 2500.0, "polymarket_us": 2500.0}
-    assert "min edge 0.02$" in run.trading_settings() and "start balance 2,500$" in run.trading_settings()
+    assert "min edge 0.02$" in run.trading_settings() and "start balance 2,500$" in run.paper_settings()
 
 
 def test_the_command_line_rejects_a_bad_setting():

@@ -42,8 +42,6 @@ def test_depth_stops_where_the_edge_falls_under_the_floor():
     assert pricing.depth(leg_a, leg_b, fee, fee, 0.05) == (0.46, 0.47, 100)      # The third level is under 5 cents.
     assert pricing.depth(leg_a, leg_b, fee, fee, 0.08) == (0.45, 0.47, 1)        # Only the top level clears 8 cents.
     assert pricing.depth(leg_a, leg_b, fee, fee, 0.09) == (None, None, 0)        # Nothing does.
-    assert pricing.depth(leg_a, leg_b, fee, fee, 0.05, most=1) == (0.45, 0.47, 1)       # The top level holds the one asked for.
-    assert pricing.depth(leg_a, leg_b, fee, fee, 0.05, most=5) == (0.46, 0.47, 100)     # Five need the second.
 
 
 def test_positive_depth_walks_both_ladders_while_the_edge_is_positive():
@@ -110,26 +108,30 @@ def test_best_trade_picks_the_cheapest_leg_on_each_side_across_venues():
 
 
 def test_best_trade_uses_a_no_contract_for_yes_exposure():
-    members = [member("kalshi", "k_yes", "yes"), member("kalshi", "k_no", "no")]
+    members = [member("kalshi", "k_yes", "yes"), member("polymarket_us", "us_no", "no")]
     books = {("kalshi", "k_yes"): Book("kalshi", "k_yes", "t", [[0.40, 100]], [[0.60, 100]]),
-              ("kalshi", "k_no"): Book("kalshi", "k_no", "t", [[0.55, 100]], [[0.70, 100]])}
-    fee_infos = {("kalshi", "k_yes"): NO_K_FEES, ("kalshi", "k_no"): NO_K_FEES}
+              ("polymarket_us", "us_no"): Book("polymarket_us", "us_no", "t", [[0.55, 100]], [[0.70, 100]])}
+    fee_infos = {("kalshi", "k_yes"): NO_K_FEES, ("polymarket_us", "us_no"): NO_PM_FEES}
     yes, no, edge, *_ = pricing.best_trade(members, books, fee_infos)
     # Yes through the no contract's bid costs 0.45, cheaper than the yes contract's 0.60 ask.
     # No through the yes contract's bid costs 0.60, cheaper than the no contract's 0.70 ask.
-    assert (yes["contract_id"], no["contract_id"]) == ("k_no", "k_yes")
+    assert (yes["contract_id"], no["contract_id"]) == ("us_no", "k_yes")
     assert edge == pytest.approx(1 - 0.45 - 0.60)
 
 
-def test_best_trade_never_uses_one_contract_for_both_legs():
-    # k_no is cheapest on both sides, so it is paired with the other contract on whichever side works out better.
-    members = [member("kalshi", "k_yes", "yes"), member("kalshi", "k_no", "no")]
+def test_best_trade_never_puts_both_legs_on_one_venue():
+    # k_no is cheapest on both sides, and k_yes, also on Kalshi, holds no for less than Polymarket US does, but the legs go
+    # on two venues: k_no with Polymarket US on whichever side works out better, here no at one minus its 0.38 bid.
+    members = [member("kalshi", "k_yes", "yes"), member("kalshi", "k_no", "no"), member("polymarket_us", "us", "yes")]
     books = {("kalshi", "k_yes"): Book("kalshi", "k_yes", "t", [[0.40, 100]], [[0.60, 100]]),
-              ("kalshi", "k_no"): Book("kalshi", "k_no", "t", [[0.55, 100]], [[0.56, 100]])}
-    fee_infos = {("kalshi", "k_yes"): NO_K_FEES, ("kalshi", "k_no"): NO_K_FEES}
+              ("kalshi", "k_no"): Book("kalshi", "k_no", "t", [[0.55, 100]], [[0.56, 100]]),
+              ("polymarket_us", "us"): Book("polymarket_us", "us", "t", [[0.38, 100]], [[0.58, 100]])}
+    fee_infos = {("kalshi", "k_yes"): NO_K_FEES, ("kalshi", "k_no"): NO_K_FEES, ("polymarket_us", "us"): NO_PM_FEES}
     yes, no, edge, *_ = pricing.best_trade(members, books, fee_infos)
-    assert (yes["contract_id"], no["contract_id"]) == ("k_no", "k_yes")
-    assert edge == pytest.approx(1 - 0.45 - 0.60)
+    assert (yes["contract_id"], no["contract_id"]) == ("k_no", "us")
+    assert edge == pytest.approx(1 - 0.45 - 0.62)
+    # Without a member on another venue there is no trade at all.
+    assert pricing.best_trade(members[:2], books, fee_infos) is None
 
 
 def test_best_trade_ignores_a_crossed_book_with_no_partner():

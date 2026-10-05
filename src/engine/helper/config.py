@@ -19,8 +19,10 @@ from common import sports
 MIN_EDGE = 0.02             # Net dollars per contract at the top before orders are sent, and the floor for the deeper levels they sweep.
                             # Five cents to 2026-10-04. MIN_ANNUAL_PCT weighs an edge against the time it ties the money up, so this
                             # floor only keeps out the noise of an edge of a cent or so.
-MIN_PAYOUT_HOURS = 24       # The soonest a bet live trades may pay out, so it trades no game once it is near or under way. There the
-                            # fast traders take an edge before our Polymarket US leg lands, and the leg is missed.
+MIN_PAYOUT_HOURS = 24       # The soonest a future, or a bet on a game before it starts, may pay out for live to trade it. A game
+                            # under way live trades only with run.py --live-in-play, by MAX_PAYOUT_HOURS.
+MAX_PAYOUT_HOURS = 24       # The latest a bet on a game, match, race, or window may pay out for paper to trade it, before it and while
+                            # it is played, and for live to trade it once under way, so both trade the ones on the day.
 MIN_ANNUAL_PCT = 50         # The least an edge must return a year on the capital it ties up until the bet pays, before a game or on
                             # a future. A 5 cent edge clears it if it pays within 38 days, 10 cents within 81, and 20 within 182.
 FILL_SHARE = 1.0            # The share of visible size at a level a trade asks for. At 0.5 to 2026-10-03, 222 of 231 live trades were
@@ -38,7 +40,6 @@ CONFIRM_SECONDS = {"polymarket_us": 0.3}
 
 # PAPER, trading/paper.py and money/paper.py. How paper orders fill, and the paper money.
 
-PAPER_MAX_PAYOUT_HOURS = 24     # The latest a bet paper trades may pay out, so it trades games, matches, races, and windows on the day.
 PAPER_REJECT_PROBABILITY = 0.0  # The share of orders a venue turns away for no reason paper sees. Of 1,183 live orders to 2026-10-04 none
                                 # was: 3 lacked the cash and 3 came in Kalshi's maintenance, which paper turns away as live does.
 # How long an order takes, in milliseconds, as the median and the 90th percentile of a lognormal draw. 'open' and 'flatten'
@@ -75,12 +76,6 @@ LIVE_UNKNOWN_LIMIT = 3      # Orders with an unknown outcome among the newest LI
 LIVE_REJECT_LIMIT = 3       # Orders one venue refuses in a row at which live trading halts.
 LIVE_RESULT_HOURS = 6       # The sliding window the loss brake looks at, in hours.
 LIVE_MAX_LOSS_SHARE = 0.10  # Net loss of the trades decided in the window, as a share of the live money, over which live trading halts.
-# The in-play test, run.py --live-in-play: live also trades the games, matches, races, and windows under way that paper
-# trades, a few contracts at a time, each beside a paper twin of the same size on the same signal, to see whether paper's
-# fills in play are ones live gets.
-LIVE_IN_PLAY_CONTRACTS = 5  # The most contracts a live trade in play asks for.
-LIVE_IN_PLAY_TRADES = 200   # The live trades in play after which the test takes no more. Futures go on as before. 100 when
-                            # the test began on 2026-10-04.
 KEY_CHECK_HOURS = 1         # Between readings of when the Kalshi key's location attestation lapses, see notify.AttestationWatch.
 KEY_WARN_HOURS = 48         # How long before it lapses the email goes out, so it comes before the day it does.
 

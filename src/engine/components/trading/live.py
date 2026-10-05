@@ -21,21 +21,15 @@ live executor reads each venue's positions and logs any contract the
 venue holds more or less of than the live trades say, which would mean
 the records are wrong, see check_positions().
 
-Live trades the futures, see executor.py. In the in-play test, which run.py
---live-in-play starts, it also trades the games, matches, races, and windows
-under way that paper trades, by paper's rules, at most
-config.LIVE_IN_PLAY_CONTRACTS a trade, until config.LIVE_IN_PLAY_TRADES
-of them, counted in the twins table so a restart goes on from there. Each
-one has a paper twin on the same signal, of the same size and limits, see
-paper.py, so live fills in play can be set against paper's, and each order
-leaves a footprint of what it took, which paper adds back, see
-footprints.py. Its trades with a leg on each venue take turns: one sends
-both orders at once, the next Polymarket US's first and Kalshi's only once
-that has answered, for what it filled, see Executor.fill_legs(). A Kalshi
-leg lands first otherwise, and another trader seeing it trade may take the
-Polymarket US quote away before our order gets there, while a Polymarket
-US leg that misses first leaves nothing to sell back. The twins table
-says which each trade did, and its twin does the same.
+Live trades the futures, see executor.py, and with run.py --live-in-play
+also the games, matches, races, and windows under way that pay within
+config.MAX_PAYOUT_HOURS, sized as any other trade, by the books and the
+cash, with Polymarket US's order first and Kalshi's only once that has
+answered, for what it filled, see Executor.fill_legs(). From 2026-10-04 to
+10-05 the in-play test traded 200 of them at no more than 5 contracts,
+each beside a paper twin on the same signal, see tools/in_play_test.py.
+When paper trades the same games, each live order leaves a footprint of
+what it took, which paper adds back, see footprints.py.
 
 An order whose outcome cannot be known, because no answer came, the venue
 failed on its side, or its answer cannot be read, leaves what its trade
@@ -60,7 +54,7 @@ from db import database
 from db.models import Order
 from engine.components.trading.brakes import Brakes
 from engine.components.trading.executor import Executor, Fill
-from engine.helper import config, game
+from engine.helper import config
 
 PLACE = {"kalshi": kalshi.place_order, "polymarket_us": polymarket_us.place_order}   # How each venue takes an order.
 POSITIONS = {"kalshi": kalshi.positions, "polymarket_us": polymarket_us.positions}    # How each venue reports what the account holds.
@@ -83,10 +77,7 @@ class LiveExecutor(Executor):
     def __init__(self, conn, cash, books, log=print, clock=now_iso, place=None, notifier=None, positions=None,
                  is_maintenance=is_maintenance, in_play=False, footprints=None):
         super().__init__(conn, cash, books, log, clock, is_maintenance)
-        self.in_play_test = in_play     # Whether the in-play test runs, trading games under way too.
-        self.in_play_trades = database.count_twins(conn)    # Live trades the test has taken, this run and before it.
-        self.twins = {}             # Pair id maps to (now, yes, no, Trade, legs, lead) for an in-play trade just taken, for paper's twin.
-        self.sequence = database.last_twin_sequence(conn)   # How the test's last trade with a leg on each venue sent its orders.
+        self.in_play = in_play      # Whether live trades games under way too, see plays().
         self.footprints = footprints    # Where each order leaves what it took, for paper to give back, or None.
         self.place = place or PLACE
         self.threads = ThreadPoolExecutor(ORDER_THREADS, thread_name_prefix="orders")
@@ -183,70 +174,25 @@ class LiveExecutor(Executor):
             return False
         return super().signal(pair, yes, no, edge, size, fee_infos, now)
 
-    def in_play(self, pair):
-        """
-        Whether the pair is traded by the in-play test's rules: one on a game, match, race, or window while the test runs.
-        """
-        return self.in_play_test and pair.get("game_date") is not None
-
     def plays(self, pair, yes, no, now):
         """
-        In the in-play test a game, match, race, or window only once it is
-        under way, until the test has taken all its trades. Whether it is
-        under way is judged by every member of the pair, since a Kalshi
+        A future, and with in_play a game, match, race, or window only once
+        it is under way, judged by every member of the pair, since a Kalshi
         contract gives no kickoff. Otherwise as the shared Executor says:
         live's desk offers it only futures then, see run.py.
         """
-        if not self.in_play(pair):
+        if not self.in_play or pair.get("game_date") is None:
             return super().plays(pair, yes, no, now)
-        return self.in_play_trades < config.LIVE_IN_PLAY_TRADES and game.started(pair["game_date"], pair.get("members") or (yes, no), now)
+        return self.under_way(pair, yes, no, now)
 
     def pays_in_time(self, hours, pair):
         """
-        In the in-play test, as on paper, a game paying within config.PAPER_MAX_PAYOUT_HOURS. Otherwise a bet paying
+        With in_play, a game paying within config.MAX_PAYOUT_HOURS, as on paper. Otherwise a bet paying
         config.MIN_PAYOUT_HOURS or more out.
         """
-        if not self.in_play(pair):
+        if not self.in_play or pair.get("game_date") is None:
             return super().pays_in_time(hours, pair)
-        return hours <= config.PAPER_MAX_PAYOUT_HOURS
-
-    def most(self, pair):
-        """
-        In the in-play test no more than config.LIVE_IN_PLAY_CONTRACTS on a game.
-        """
-        return config.LIVE_IN_PLAY_CONTRACTS if self.in_play(pair) else None
-
-    def choose_lead(self, pair, legs):
-        """
-        In the in-play test, for a trade with a leg on each venue, take turns
-        with the test's last such trade: both orders at once, or Polymarket
-        US's first. Otherwise both at once.
-        """
-        if not self.in_play(pair) or {leg.venue for leg in legs} != {"kalshi", "polymarket_us"}:
-            return None
-        self.sequence = "together" if self.sequence == "polymarket_first" else "polymarket_first"
-        return "polymarket_us" if self.sequence == "polymarket_first" else None
-
-    def opened(self, pair, yes, no, trade, legs, lead, now):
-        """
-        Count an in-play trade, store it in the twins table with the order its orders went in, and keep it for
-        paper's twin on the same signal.
-        """
-        if not self.in_play(pair):
-            return
-        self.in_play_trades += 1
-        mixed = {leg.venue for leg in legs} == {"kalshi", "polymarket_us"}
-        database.insert_twin(self.conn, trade.id, ("polymarket_first" if lead else "together") if mixed else None)
-        self.twins[pair["id"]] = (now, yes, no, trade, legs, lead)
-        if self.in_play_trades >= config.LIVE_IN_PLAY_TRADES:
-            self.log(f"live in-play test: {self.in_play_trades} trades taken, so no more in play; futures go on")
-
-    def twin_of(self, pair_id, now):
-        """
-        The in-play trade this executor took on the pair at now, as (yes, no, Trade, legs, lead), for paper's twin, or None.
-        """
-        taken = self.twins.pop(pair_id, None)
-        return taken[1:] if taken and taken[0] == now else None
+        return hours <= config.MAX_PAYOUT_HOURS
 
     # ORDERS
 

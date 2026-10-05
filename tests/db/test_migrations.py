@@ -125,6 +125,4 @@ def test_the_in_play_tests_trades_with_a_leg_on_each_venue_sent_both_orders_at_o
     old.close()
     conn = database.connect(path)
     assert [tuple(r) for r in conn.execute("SELECT live_trade_id, sequence FROM twins ORDER BY live_trade_id")] == [(1, "together"), (2, None)]
-    database.insert_twin(conn, 3, "polymarket_first")
-    assert database.last_twin_sequence(conn) == "polymarket_first"
     assert version(conn) == len(migrations.STEPS)

@@ -33,9 +33,7 @@ def test_the_live_trades_are_set_beside_their_paper_twins_for_each_order_of_thei
     pairs = [(trade(conn, "live", 5, 5, 95, 20, profit=0.15), trade(conn, "paper", 5, 5, 90, 20, profit=0.15), "together"),
              (trade(conn, "live", 0, 0, 60, 0), trade(conn, "paper", 5, 5, 88, 19, profit=0.15), "polymarket_first"),
              (trade(conn, "live", 5, 5, 99, 22, profit=0.15), None, "together")]
-    for live, paper, sequence in pairs:
-        database.insert_twin(conn, live, sequence)
-        database.set_twin(conn, live, paper)
+    conn.executemany("INSERT INTO twins (live_trade_id, paper_trade_id, sequence) VALUES (?, ?, ?)", pairs)
     s = Settlement(pairs[0][0], SIGNAL, mode="live")                    # The first live trade has paid out: yes won.
     s.record("yes", "yes", 5.0, SIGNAL)
     s.record("no", "no", 0.0, SIGNAL)

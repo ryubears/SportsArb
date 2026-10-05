@@ -9,8 +9,8 @@ League, Formula 1, NASCAR, UFC, tennis, darts, the 2026 US elections, and
 Bitcoin. It follows two kinds of bet: futures, titles, awards, a season's
 leaders, season totals, election races, and Bitcoin's price by a date,
 which live trades, and the bets on one event, games, matches, fights,
-races, and Bitcoin's 15 minute windows, which paper trades, before and
-while they are played. When the cheapest way to hold *yes* on one venue and
+races, and Bitcoin's 15 minute windows, which live trades once they are
+under way and paper before and while they are played. When the cheapest way to hold *yes* on one venue and
 the cheapest way to hold *no* on the other add up to less than a dollar
 after fees, buying both locks in the difference whatever happens.
 
@@ -23,11 +23,13 @@ trades futures, where an edge lasts long enough for our orders to reach
 it, and paper the bets on one event paying within a day, where faster
 traders may take the edges first, to see how they would do, its orders
 timed as live ones are. By default the orders are paper.
-With `--execute live` or `--execute both` it sends real ones. Since
-October 4 the service on the instance trades every sport's futures and the
-elections live, and `--execute both` runs paper on every event beside it.
-Bitcoin's futures are followed but held out of live trading until they
-have shown what they do.
+With `--execute live` or `--execute both` it sends real ones, and with
+`--live-in-play` live trades the games under way too, Polymarket US's
+order first. From October 4 to 5 the service on the instance traded every
+sport's futures and the elections live, with paper on every event beside
+it, and the in-play test below. From October 5 it is set to trade live
+alone: every sport's futures, Bitcoin's and the elections' included, and
+every game under way (`--execute live --live-in-play --not-live none`).
 
 ## How it works
 
@@ -142,8 +144,8 @@ Follow one Kalshi order book change from the wire to a trade.
 5. **Price** (`Scanner.on_book` and `update` in `market/scan.py`, with
    `pricing.best_trade`). For every pair the contract belongs to, the
    scanner finds the cheapest way to hold yes and the cheapest way to
-   hold no across the pair's members. Then it works out the edge of
-   buying both.
+   hold no across the pair's members, on two different venues. Then it
+   works out the edge of buying both.
 6. **Follow the episode**. A positive edge opens an `Episode` or extends
    it and keeps its peak. When the edge ends, the episode is stored as an
    Opportunity. While it lasts, each desk's executor is offered it, until
@@ -163,9 +165,9 @@ checks before it trades, below.
 
 1. **Decide** (`Executor.signal` in `trading/executor.py`). The executor
    takes the signal when the edge is at least `MIN_EDGE`, for live the pair
-   is a future or its game has not kicked off, the bet pays when the desk
-   trades it (`pays_in_time`), live `MIN_PAYOUT_HOURS` or more away and
-   paper within `PAPER_MAX_PAYOUT_HOURS`, and the edge returns
+   is a future, or with `--live-in-play` a game under way (`plays`), the bet
+   pays when the desk trades it (`pays_in_time`), a future
+   `MIN_PAYOUT_HOURS` or more away and a game within `MAX_PAYOUT_HOURS`, and the edge returns
    `MIN_ANNUAL_PCT` a year or more until then (`pays_enough`), and a
    Polymarket US leg's book is current (`confirm_wait`): newer than the
    Kalshi leg's last change, by the venues' own clocks, or else that change
@@ -177,7 +179,10 @@ checks before it trades, below.
    of what those levels show, but no more than the cash each venue can
    spend, on Kalshi the cash on the market's shard, live as on paper. The
    cash is reserved and the trade is stored before any order goes out.
-2. **Fill** (`run_trade`). Both legs go out at once.
+2. **Fill** (`run_trade`). Both legs go out at once, but on a game under
+   way Polymarket US's goes first and Kalshi's only once that has
+   answered, for what it filled, and not at all when it filled nothing
+   (`fill_legs`).
    - Paper (`trading/paper.py`): each order takes a trip there and back
      drawn from what the live orders took, and fills against the book the
      venue had when it would have arrived, by the venue's own clock, from
@@ -237,7 +242,7 @@ place (see the top of `db/database.py`):
 | settlements | the settler |
 | ledger | paper money, every dollar in and out |
 | alerts | every email the live process sends: low cash, halts, and the Kalshi key's attestation |
-| twins | the in-play test, each live trade in play, its paper twin, and the order its orders went in |
+| twins | the in-play test of 2026-10-04 to 10-05, each of its 200 live trades in play, its paper twin, and the order its orders went in; nothing writes to it now |
 
 Trades and settlements carry a `mode`, `paper` or `live`, so the two modes
 never mix. Every table has a model in `db/models.py` and its schema in
@@ -458,9 +463,10 @@ desk the futures, a pair without one, bar the sports given to `--not-live`,
 `crypto` by default, whose futures are followed but traded by neither. On
 one signal the live desk's real orders would take the contracts the paper
 desk's simulated ones look for. Each desk still flattens and settles every
-trade it holds. With `--live-in-play`, which needs `--execute both`, the
-live desk is offered the bets on one event too, for the in-play test under
-**trading/** below. The same loop starts the hourly catalog refresh in a
+trade it holds. With `--live-in-play`, which needs `--execute live` or
+`both`, the live desk is offered the bets on one event too, and trades them
+once under way, see **trading/** below; with paper running too, both take
+those signals, and paper is given back what live's orders took. The same loop starts the hourly catalog refresh in a
 child process and applies the result to the live connections, and with
 Bitcoin followed it refreshes Bitcoin's catalog alone 20 seconds after each
 15 minute window opens, when both venues list it, so a window is traded for
@@ -497,8 +503,12 @@ feed runs in the main process instead.
 
 **scan.py** prices every pair whose member's book just changed. Using
 **pricing.py** it walks the ladders to find the cheapest way to hold yes
-and the cheapest way to hold no across the pair's members, on any venues,
-including the venue's taker fee from **fees.py**. An episode is a stretch
+and the cheapest way to hold no across the pair's members, on two
+different venues, including the venue's taker fee from **fees.py**. Two
+contracts on one venue, such as a game's two teams on Kalshi, are priced
+by the same traders, and a gap between them is gone before both orders
+land: in the in-play test 52 trades with both legs on Kalshi matched 5 of
+the 247 contracts they asked for, live and paper alike. An episode is a stretch
 where the net edge stays positive. When it ends it is stored as an
 `Opportunity` with its legs, duration, peak edge, how many contracts the
 recorded depth would have filled at the peak, and the return on the capital
@@ -514,13 +524,12 @@ future's markets, and a game's before kickoff, can rest unchanged for hours
 while they are open, so their books are priced however old they are.
 
 **trading/** trades the signal. **executor.py** holds what paper and live
-share, which is everything but how an order is filled. Live trades only
-bets that pay out a day or more away, the futures, and never a game once it
-has kicked off: near a game and during it, faster traders take an edge
-before our Polymarket US order lands, and the leg is missed. The in-play
-test, below, is the one exception. Paper trades
+share, which is everything but how an order is filled. Live trades the
+futures, which pay out a day or more away, and with `--live-in-play` the
+games, matches, races, and windows once under way that pay within 24 hours
+(`MAX_PAYOUT_HOURS`), below. Paper trades
 the bets on one event (`in_play`), before and while they are played, that
-pay within 24 hours (`PAPER_MAX_PAYOUT_HOURS`), to see how they would do. A
+pay within 24 hours (`MAX_PAYOUT_HOURS`), to see how they would do. A
 signal needs a net edge of at least two cents per contract (`MIN_EDGE`,
 five until 2026-10-04 16:03 UTC), for live a payout at least 24 hours away
 (`MIN_PAYOUT_HOURS`), and a return of at least 50% a year on the money it
@@ -528,7 +537,7 @@ ties up until then (`MIN_ANNUAL_PCT`), which is what weighs an edge against
 the time it ties the money up; the two cents only keep out the noise of a
 cent or so. Two cents clears 50% a year for a bet paying within 14 days,
 five cents within 38, ten within 81, twenty within 182. One limit order is
-sent per leg, both at once. Both ladders are walked together and each leg's
+sent per leg, both at once, but in play Polymarket US's first, below. Both ladders are walked together and each leg's
 limit is set at the deepest level that still leaves the minimum edge, so an
 order sweeps every level above the floor rather than only the top one. A
 trade asks for all of what those levels show (`FILL_SHARE`, half until
@@ -585,8 +594,8 @@ A trade opens in whole contracts, at least one, so no order opens a
 fraction of a contract, but a leg may fill to the hundredth,
 6.42 of 7 for one, and live trading counts it so: the other leg's 0.58
 over is sold back like any excess, in an order for 0.58 of a contract. A
-Kalshi order sent after Polymarket US's, in the in-play test below, asks
-for what that filled, to the hundredth.
+Kalshi order sent after Polymarket US's, in play, below, asks for what that
+filled, to the hundredth.
 Paper trading keeps to whole contracts, as its fills are worked out from
 the books (`Executor.step`). Every `LIVE_POSITION_SECONDS`, 5 minutes, the
 live executor reads each venue's positions and compares them with what
@@ -622,38 +631,41 @@ shard 0, where the football futures with the long-lasting edges are, and
 shard, or Polymarket US, falls under $5 (`LIVE_LOW_CASH`), and again only
 after it has been back over.
 
-**The in-play test.** Paper's results in play are only as good as its
-fills, and no live order had been sent in play to check them against.
-With `--live-in-play` live also trades the games, matches, races, and
-windows under way that paper trades, by paper's rules: once the game has
-started by any member's kickoff, since a Kalshi contract gives none, paying
-within 24 hours, at most 5 contracts a trade (`LIVE_IN_PLAY_CONTRACTS`),
-the ladders walked only as deep as the levels that hold them, until 200
-such trades (`LIVE_IN_PLAY_TRADES`, 100 at first). They are counted in the
-`twins` table, so a restart goes on from there, and the futures go on as
-before. On each of those signals paper sends a twin in place of its own
-trade, with the same legs, limits, and size (`PaperExecutor.twin`). Our
-live orders are real and take from the books the twin's orders meet, so
-each leaves a footprint (**footprints.py**): from the venue's time on its
-answer and the book on the tape just before then, what it took from each
-level. Paper adds that back to every book the venue made after, until the
-level falls below what our order left of it, as other takers or cancels
-would have taken ours too, and waits up to 2 seconds for the answers of
-live orders sent before its own. The brakes cover these trades as any live
-trade. A trade with a leg on each venue sends both orders at once, or
-Polymarket US's first and Kalshi's only once that has answered, for what
-it filled, by turns (`Executor.fill_legs`), and its twin does the same.
-Sent at once the Kalshi leg lands first, in some 12 ms against Polymarket
-US's 59, and in the first trades live's Polymarket US legs filled 2 times
-in 10 where paper's twins filled 7, though live's had arrived as quickly:
-another trader may take the Polymarket US quote away once our Kalshi leg
-trades, and Kalshi legs bought for a Polymarket US leg that then missed
-are sold back at a loss. Sent first, a Polymarket US leg that misses
-leaves nothing to sell back, at the cost of Kalshi's going out some 100 ms
-later. The twins table says which way each trade went, and
-`tools/in_play_test.py` sets the live trades beside their twins, each way
-apart. While the test runs paper trades those signals at 5 contracts, not
-at its own size.
+**Games in play.** With `--live-in-play` live also trades the games,
+matches, races, and windows under way, of every sport, Bitcoin's windows
+included: once the game has started by any member's kickoff, since a
+Kalshi contract gives none, paying within 24 hours (`MAX_PAYOUT_HOURS`),
+sized as any trade, by the books and the cash. Its Polymarket US order
+goes first and its Kalshi order only once that has answered, for what it
+filled, and not at all when it filled nothing (`Executor.fill_legs`);
+paper does the same in play. Sent at once the Kalshi leg lands first, in
+some 12 ms against Polymarket US's 59, and another trader may take the
+Polymarket US quote away once ours trades, leaving the Kalshi leg to sell
+back at a loss. Sent first, a Polymarket US leg that misses leaves nothing
+to sell back, at the cost of Kalshi's going out some 80 ms later. Futures,
+and games before they start, still send both at once. With paper running
+too, both take the same signals, and since our live orders are real and
+take from the books paper's orders meet, each leaves a footprint
+(**footprints.py**): from the venue's time on its answer and the book on
+the tape just before then, what it took from each level. Paper adds that
+back to every book the venue made after, until the level falls below what
+our order left of it, as other takers or cancels would have taken ours
+too, and waits up to 2 seconds for the answers of live orders sent before
+its own. The brakes cover these trades as any live trade.
+
+This follows the in-play test of 2026-10-04 17:49 to 10-05 01:27 UTC. Live
+traded 200 games under way at no more than 5 contracts, each beside a
+paper twin on the same signal with the same legs, limits, and size, the
+trades with a leg on each venue sending both orders at once and Polymarket
+US's first by turns. On those 147 trades live matched 111 of the 500
+contracts asked for, paper 278: live's Polymarket US legs filled 56 times
+and paper's 106, while their Kalshi legs filled alike, so paper is
+optimistic in play, most of all on the NFL. Live's 69 sent Polymarket US
+first made $3.84, matching about as many contracts as the 78 sent at once,
+which lost $3.84 with 52 of them left on one leg to sell back, against 12.
+The 52 trades with both legs on Kalshi lost $7.21, which is why the legs
+are now always on two venues. The `twins` table holds the test, and
+`tools/in_play_test.py` reports it.
 
 Live trading has brakes, in **brakes.py**, sized for a test with about $100
 on each venue. An order whose outcome cannot be known (a timeout, a dropped
@@ -735,22 +747,24 @@ its own.
 ### Tools
 
 `src/tools/summary.py` prints a short report from the database: its size
-and the pairs of each sport in one line, and feed drops. For paper and
-then live, or one of them with `--mode paper` or `--mode live`, it shows
-the opportunities within that desk's rules, an edge of `MIN_EDGE` or more
-and `MIN_ANNUAL_PCT` a year or more, a whole contract or more fillable at
-that edge through its longest stretch, for paper on a game, match, race,
-or window paying within `PAPER_MAX_PAYOUT_HOURS`, in play too, and for
-live on a future paying `MIN_PAYOUT_HOURS` or more out: what they could
+and the pairs of each sport in one line, and feed drops. It shows the
+futures and the games in play apart, or one of them with `--market
+futures` or `--market in-play`. For each it shows the opportunities within
+the trading rules, an edge of `MIN_EDGE` or more and `MIN_ANNUAL_PCT` a
+year or more, a whole contract or more fillable at that edge through its
+longest stretch, on a future paying `MIN_PAYOUT_HOURS` or more out, or on
+a game, match, race, or window under way paying within `MAX_PAYOUT_HOURS`: what they could
 have taken and locked in at full size, how long the edge stayed at
 `MIN_EDGE` or more, in seconds to the thousandth, at the median, the 90th
 percentile, and the longest, the same by sport and kind, and the largest
 five. An edge on less than a contract, a sliver of a Polymarket US level
 that can last minutes, is left out, since a trade opens a whole contract
 or more and so could never take it. Episodes before 2026-10-04 16:03 UTC
-kept that stretch at five cents. It then shows
-the trades by outcome, filled, partial, then failed, and by sport and kind
-in the window, the legs settled in it by venue, and
+kept that stretch at five cents. It then shows, for paper and then live,
+or one of them with `--mode paper` or `--mode live`, and in each for the
+futures and then the games in play, the trades by outcome, filled,
+partial, then failed, and by sport and kind in the window, the five
+holding the most capital, the legs settled in it by venue, and
 the open trades: in a few lines, how many, how many of them opened in the
 last hour, day, and week and the capital those still hold, the capital
 they all hold on each venue and the profit they are expected to return
@@ -758,9 +772,9 @@ with its rate a year weighted by capital, and the first, average, and last
 dates they resolve, the first maybe past and waiting on a venue, the
 average weighted by capital; then a table of each open trade opened in the
 window, newest first, with what it holds, its capital, expected profit and
-rates, and when it pays. The paper section ends with the paper money from
-the ledger, and the live one with the real orders sent by venue and what
-came back, and the live balances read from the venues now, with Kalshi's
+rates, and when it pays. Each live market ends with its real orders sent
+by venue and what came back, the paper section with the paper money from
+the ledger, and the live one with the live balances read from the venues now, with Kalshi's
 shards. Each section is a title line with its details on indented lines
 under it, and a long list, such as the pairs of each sport, wraps at 100
 characters. `--hours` sets the window, `--sport nfl,ncaaf` narrows
@@ -796,8 +810,8 @@ sale of 0.42 of a contract went unrecorded. Without `--apply` it writes
 nothing, so it also serves as a check that the live records match the
 venues. Stop the recorder before `--apply`.
 
-`src/tools/in_play_test.py` reports the in-play test: the live trades in
-play beside their paper twins on the same signals, for those sending both
+`src/tools/in_play_test.py` reports the in-play test of 2026-10-04 to
+10-05: the live trades in play beside their paper twins on the same signals, for those sending both
 orders at once and those sending Polymarket US's first apart, how many of
 each filled in full, in part, on one leg, or not at all, the contracts
 matched, how often each venue's leg filled of those sent, what was locked
@@ -1074,13 +1088,13 @@ python3 -m engine.run --sport nfl
 `--sport ncaaf`, `--sport epl`, `--sport politics`, `--sport crypto`, and
 the rest build or run one sport's markets, `--sport nfl,ncaaf,mlb` several
 from one pool of money, and `--sport all` every one, as the instance does
-with `--sport all --execute both`. `--no-trade` scans without trading,
+with `--sport all --execute live --live-in-play --not-live none`. `--no-trade` scans without trading,
 `--no-scan` only records, and `--seconds 120` runs a short test.
 `--execute live` trades the futures with real money and `--execute both`
 runs both desks, paper trading the bets on one event. `--not-live
 crypto,politics` holds sports' futures out of live trading, `crypto` alone
 by default, and `--not-live none` holds none. `--live-in-play`, with
-`--execute both`, runs the in-play test. The settings a run is tuned
+`--execute live` or `both`, has live trade the games under way too. The settings a run is tuned
 by, such as the minimum edge, the annual return, and the starting balance,
 are in `src/engine/helper/config.py`. Those only paper trading reads start
 with `PAPER_`, those only live trading reads with `LIVE_`, and the rest
@@ -1110,6 +1124,7 @@ Then read the reports:
 ```bash
 python3 src/tools/summary.py --hours 24
 python3 src/tools/summary.py --mode paper --sport epl,ucl
+python3 src/tools/summary.py --mode live --market in-play
 python3 src/tools/latency_report.py --hours 4
 python3 src/tools/in_play_test.py
 ```
@@ -1164,5 +1179,6 @@ Where to look to change something:
 | how far behind the feeds run | `tools/latency_report.py`, `tools/feed_check.py` |
 | how the processes are wired | `engine/run.py` |
 | the report on the database | `tools/summary.py` |
-| the in-play test, live in play beside paper twins | `trading/live.py`, `trading/footprints.py`, `tools/in_play_test.py` |
+| live trading games in play, Polymarket US first | `trading/executor.py` (`fill_legs`), `trading/live.py`, `trading/footprints.py` |
+| the in-play test of 2026-10-04 to 10-05 | `tools/in_play_test.py` |
 | live records against the venues' positions | `tools/repair_fills.py` |

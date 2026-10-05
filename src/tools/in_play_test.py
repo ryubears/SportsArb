@@ -1,13 +1,15 @@
 """
 Print how the live trades of the in-play test did beside their paper twins.
 
-In the in-play test, which engine.run --live-in-play starts, live trades a
-few contracts of the games, matches, races, and windows under way, and paper
-sends a twin of each: the same signal, the same legs, the same limits, the
-same size, giving back what our live orders took from the books, see
-trading/live.py and trading/paper.py. The twins table pairs them. Where
-the two did alike, paper's fills in play are ones live gets; where live did
-worse, paper is optimistic there.
+The in-play test ran from 2026-10-04 17:49 to 2026-10-05 01:27 UTC. Live
+traded 200 times on the games, matches, races, and windows under way, at
+no more than 5 contracts, and paper sent a twin of each: the same signal,
+the same legs, the same limits, the same size, giving back what our live
+orders took from the books, see trading/footprints.py. The twins table
+pairs them. Where the two did alike, paper's fills in play are ones live
+gets; where live did worse, paper is optimistic there. Since then live
+trades games under way at full size with engine.run --live-in-play, and
+nothing adds to the table.
 
 The trades with a leg on each venue take turns sending both orders at
 once and Polymarket US's first, Kalshi's only once that has answered, so
@@ -37,9 +39,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))     # src, so th
 from common.stats import quantile
 from common.venues import VENUES
 from db.database import read_only
-from engine.helper import config
 from tools.summary import print_table, short_time
 
+TRADES = 200        # The live trades the test took, 100 when it began.
+CONTRACTS = 5       # The most contracts each asked for.
 COLUMNS = ("id", "signal_ts", "quantity", "yes_venue", "yes_filled", "yes_latency_ms", "no_venue", "no_filled", "no_latency_ms",
            "matched", "status", "profit", "hedge_pnl", "yes_cost", "no_cost")
 
@@ -111,7 +114,7 @@ def print_report(conn, recent=20):
     The whole report, see the module's docstring.
     """
     pairs = load_pairs(conn)
-    print(f"in-play test: {len(pairs)} of {config.LIVE_IN_PLAY_TRADES} live trades, at most {config.LIVE_IN_PLAY_CONTRACTS} "
+    print(f"in-play test: {len(pairs)} of {TRADES} live trades, at most {CONTRACTS} "
           f"contracts each" + (f", {short_time(pairs[0][1]['signal_ts'])} to {short_time(pairs[-1][1]['signal_ts'])} UTC" if pairs else ""))
     twinned = [pair for pair in pairs if pair[2]]
     if len(twinned) < len(pairs):

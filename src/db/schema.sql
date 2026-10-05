@@ -172,8 +172,9 @@ CREATE TABLE IF NOT EXISTS orders (
 -- orders queued behind it.
 CREATE INDEX IF NOT EXISTS idx_orders_trade ON orders (trade_id);
 
--- The in-play test, see trading/live.py: each live trade taken while its game was under way, and the paper trade on the same
--- signal, of the same size and limits, it is set against.
+-- The in-play test of 2026-10-04 17:49 to 2026-10-05 01:27 UTC: each of the 200 live trades it took while their games were
+-- under way, at no more than 5 contracts, and the paper trade on the same signal, of the same size and limits, it is set
+-- against. tools/in_play_test.py reports on it. Nothing writes to it any more.
 CREATE TABLE IF NOT EXISTS twins (
     live_trade_id   INTEGER PRIMARY KEY,    -- The live trade, see trades.
     paper_trade_id  INTEGER,                -- Its paper twin, or null when the paper money could not pay for one.

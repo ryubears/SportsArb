@@ -1,12 +1,12 @@
 """
 What our live orders took from the venues' books, so paper can give it back.
 
-In the in-play test, see live.py, a live trade and a paper twin of the same
-size are sent on one signal, see paper.py. The live orders are real: each
-takes contracts from the levels of its venue's book, and from the moment it
-reaches the venue the books on the tapes show those levels smaller. The
-paper twin must not see that, or it would be judged on what our own live
-order left it. So each live order leaves a Footprint, and paper adds what it
+When live trades games in play beside paper, see live.py, both take the
+same signals, see paper.py. The live orders are real: each takes contracts
+from the levels of its venue's book, and from the moment it reaches the
+venue the books on the tapes show those levels smaller. Paper must not see
+that, or it would be judged on what our own live order left it. So each
+live order leaves a Footprint, and paper adds what it
 took back to each level it took from, in every book the venue made from
 then on, until the level falls below what our order left of it, when other
 takers or cancels would have taken ours too, or KEEP_SECONDS have passed.
@@ -14,8 +14,8 @@ takers or cancels would have taken ours too, or KEEP_SECONDS have passed.
 What a live order took from each level is worked out as the venue fills
 it, by sweeping the book the venue had just before the order reached it,
 from a tape, up to what the venue said filled, no further than the order's
-limit. That needs a tape kept from before the order arrived, as the paper
-twin's is, see market/tape.py. Once worked out it is kept, so later books
+limit. That needs a tape kept from before the order arrived, as a paper
+trade on the same signal keeps, see market/tape.py. Once worked out it is kept, so later books
 of the contract get it back too.
 """
 

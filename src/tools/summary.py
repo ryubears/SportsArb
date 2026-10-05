@@ -2,23 +2,26 @@
 Print a short summary of the database: the pairs, the opportunities the
 executors' rules trade, and the trades.
 
-Opportunities are shown for each mode, paper then live, or one with
---mode, only those within its rules: an edge of config.MIN_EDGE or more at
-the peak, returning config.MIN_ANNUAL_PCT a year or more, a whole contract
-or more fillable at that edge through its longest stretch, since a trade
-opens no fewer, and for paper a game, match, race, or window paying within
-config.PAPER_MAX_PAYOUT_HOURS, found in play too, for live a future paying
-config.MIN_PAYOUT_HOURS or more out, found before any game. Each shows
-what it could have taken at full size through its longest stretch at that
+Everything is shown for the futures and for the games, matches, races,
+and windows in play apart, see MARKETS. Opportunities are shown only
+within the trading rules: an edge of config.MIN_EDGE or more at the peak,
+returning config.MIN_ANNUAL_PCT a year or more, a whole contract or more
+fillable at that edge through its longest stretch, since a trade opens no
+fewer, and a future paying config.MIN_PAYOUT_HOURS or more out, or a game
+under way paying within config.MAX_PAYOUT_HOURS. Each market shows what
+it could have taken at full size through its longest stretch at that
 edge, and what that locks in, overall, by sport and kind, and the largest,
-and how long the edge stayed at that, in seconds to the thousandth. Trades
-are shown for each mode the same way, by outcome and by kind for the
-window, the legs settled in it, and the open trades: in a few lines, how
-many, how many of them opened in the last hour, day, and week and the
-capital those hold, the capital they all hold and the profit they are
-expected to return, its rate a year, and when they resolve, then each one
-opened in the window. --sport narrows everything to some sports. Reads
-only, so it is safe to run while the live process is writing.
+and how long the edge stayed at that, in seconds to the thousandth.
+Trades are shown for each mode, paper then live, or one with --mode, and
+in it for each market: by outcome and by kind for the window, the largest,
+the legs settled in it, and the open trades: in a few lines, how many, how
+many of them opened in the last hour, day, and week and the capital those
+hold, the capital they all hold and the profit they are expected to
+return, its rate a year, and when they resolve, then each one opened in
+the window. Live's orders follow its trades in each market. --market
+narrows everything to the futures or the games in play, and --sport to
+some sports. Reads only, so it is safe to run while the live process is
+writing.
 
 The script sets its own import path, so it runs from any folder. The live
 money is not in the database but on the venues, so it is read from each
@@ -31,6 +34,7 @@ Run with:
     python3 src/tools/summary.py --hours 6
     python3 src/tools/summary.py --mode paper
     python3 src/tools/summary.py --mode live --sport nfl,ncaaf
+    python3 src/tools/summary.py --mode live --market in-play
     python3 src/tools/summary.py --no-live
 """
 
@@ -46,6 +50,9 @@ from db.database import DB_PATH, read_only
 from engine.helper import config
 
 MODES = {"live": ("live",), "paper": ("paper",), "all": ("paper", "live")}     # What --mode shows, in order.
+MARKETS = ("futures", "in-play")    # What everything is shown apart by, in order, see in_market().
+MARKET_CHOICES = {"futures": ("futures",), "in-play": ("in-play",), "all": MARKETS}    # What --market shows.
+LARGEST = 5         # The largest opportunities and trades listed.
 OPENED_HOURS = {"hour": 1, "day": 24, "week": 24 * 7}     # The windows the open trades are counted as opened in.
 WIDTH = 100         # The longest line a list of items wraps at.
 MIN_CONTRACTS = 1   # The fewest contracts a trade opens, see Executor.quantity_for(), so the least an episode worth showing kept.
@@ -177,34 +184,42 @@ def seconds(value):
     return f"{value or 0:,.3f}s"
 
 
-def opportunity_rules(mode):
+def in_market(market):
     """
-    The episodes a mode's executor would trade, as a SQL condition on the episode and its pair, and in words. Paper
-    trades the bets on one event, a game, a match, a race, or a window, paying within config.PAPER_MAX_PAYOUT_HOURS,
-    found in play too, and live the futures paying config.MIN_PAYOUT_HOURS or more out, found before any game started.
+    A SQL condition keeping one market's pairs: the futures, which have no game, or the games, matches, races, and
+    windows, which live trades once under way. Until 2026-10-05 paper traded them before they started too, and its
+    trades then count with the in-play ones.
     """
-    if mode == "paper":
-        return ("p.game_date IS NOT NULL AND days_held * 24 <= ?", (config.PAPER_MAX_PAYOUT_HOURS,),
-                f"games, matches, races, and windows paying within {config.PAPER_MAX_PAYOUT_HOURS}h, in play too")
-    return ("p.game_date IS NULL AND live = 0 AND days_held * 24 >= ?", (config.MIN_PAYOUT_HOURS,),
-            f"futures paying {config.MIN_PAYOUT_HOURS}h+ out")
+    return " AND p.game_date IS NULL" if market == "futures" else " AND p.game_date IS NOT NULL"
 
 
-def print_mode_opportunities(conn, since, hours, sports, mode):
+def opportunity_rules(market):
     """
-    The episodes within one mode's rules in the window, see print_opportunities().
+    The episodes of one market the executors trade, as a SQL condition on the episode, and in words: the futures
+    paying config.MIN_PAYOUT_HOURS or more out, and the games, matches, races, and windows under way at the peak
+    paying within config.MAX_PAYOUT_HOURS.
+    """
+    if market == "futures":
+        return "live = 0 AND days_held * 24 >= ?", (config.MIN_PAYOUT_HOURS,), f"paying {config.MIN_PAYOUT_HOURS}h+ out"
+    return ("live = 1 AND days_held * 24 <= ?", (config.MAX_PAYOUT_HOURS,),
+            f"games, matches, races, and windows under way, paying within {config.MAX_PAYOUT_HOURS}h")
+
+
+def print_market_opportunities(conn, since, hours, sports, market):
+    """
+    The episodes of one market within the trading rules in the window, see print_opportunities().
     """
     cents = f"{100 * config.MIN_EDGE:.0f}c"
     where, params = in_sports(sports)
-    rule, rule_params, bets = opportunity_rules(mode)
+    rule, rule_params, bets = opportunity_rules(market)
     rows = query_rows(conn, f"""
         SELECT p.sport, p.kind, p.label, trade, 100 * peak_edge, min_edge_seconds, min_edge_size, min_edge_size - min_edge_profit,
                min_edge_profit, days_held
         FROM opportunities o JOIN pairs p ON p.id = o.pair_id
         WHERE start_ts >= ? AND peak_edge >= ? AND min_edge_seconds IS NOT NULL AND min_edge_size >= ? AND annual_pct >= ?
-          AND {rule}{where}
+          AND {rule}{in_market(market)}{where}
         ORDER BY min_edge_profit DESC""", (since, config.MIN_EDGE, MIN_CONTRACTS, config.MIN_ANNUAL_PCT) + rule_params + params)
-    print(f"\n{mode} opportunities ({cents}+ on {MIN_CONTRACTS}+ contracts, {config.MIN_ANNUAL_PCT}%+ a year, {bets}), last {hours} hours")
+    print(f"\n{market} opportunities ({cents}+ on {MIN_CONTRACTS}+ contracts, {config.MIN_ANNUAL_PCT}%+ a year, {bets}), last {hours} hours")
     if not rows:
         print("  none")
         return
@@ -230,35 +245,35 @@ def print_mode_opportunities(conn, since, hours, sports, mode):
         c, pr, r_, a, d = totals(group)
         body.append((sport, kind, len(group), seconds(quantile([r[5] for r in group], 0.5)), seconds(max(r[5] for r in group)),
                      f"{c:,.0f}", f"{pr:,.2f}", percent(r_), percent(a), f"{d or 0:,.1f}"))
-    print_table(f"{mode} opportunities by kind", ("sport", "kind", "episodes", f"median {cents}+", f"longest {cents}+", "capital $",
+    print_table(f"{market} opportunities by kind", ("sport", "kind", "episodes", f"median {cents}+", f"longest {cents}+", "capital $",
                                                   "profit $", "return %", "annual %", "avg days"), body, left=2)
     largest = []
-    for sport, kind, label, trade, peak, lasted, size, cap, pr, d in rows[:5]:
+    for sport, kind, label, trade, peak, lasted, size, cap, pr, d in rows[:LARGEST]:
         r_, a = returns(cap, pr, d)
         largest.append((label[:44], f"{peak:.1f}", seconds(lasted), f"{size:,.1f}", f"{cap:,.0f}", f"{pr:,.2f}", percent(a),
                         f"{d:,.1f}" if d else "-"))
-    print_table(f"{mode} largest opportunities", ("bet", "peak c", f"{cents}+ for", "size", "capital $", "profit $", "annual %", "days"),
+    print_table(f"{market} largest opportunities", ("bet", "peak c", f"{cents}+ for", "size", "capital $", "profit $", "annual %", "days"),
                 largest)
 
 
-def print_opportunities(conn, since, hours, sports, modes=("paper", "live")):
+def print_opportunities(conn, since, hours, sports, markets=MARKETS):
     """
-    The episodes within each mode's rules in the window, paper then live: at config.MIN_EDGE or more and
-    config.MIN_ANNUAL_PCT a year or more, both at the peak, with MIN_CONTRACTS or more fillable at that edge through
-    its longest stretch, on the bets the mode trades, see opportunity_rules(). An edge on less, a sliver of a level,
-    is one no trade could take, however long it lasted.
+    The episodes within the trading rules in the window, the futures then the games in play: at config.MIN_EDGE or
+    more and config.MIN_ANNUAL_PCT a year or more, both at the peak, with MIN_CONTRACTS or more fillable at that edge
+    through its longest stretch, see opportunity_rules(). An edge on less, a sliver of a level, is one no trade could
+    take, however long it lasted.
     Capital is what buying every contract fillable at that edge through its longest stretch at it would have cost with
     fees, and profit what it locks in. The annual rates weight each episode by its capital, over the days until it pays.
     How long the edge stayed at config.MIN_EDGE or more is the longest unbroken stretch of each episode, in seconds to
     the thousandth. Episodes before 2026-10-04 16:03 UTC kept their stretch at 5 cents, the minimum then.
     """
-    for mode in modes:
-        print_mode_opportunities(conn, since, hours, sports, mode)
+    for market in markets:
+        print_market_opportunities(conn, since, hours, sports, market)
 
 
-def print_open_trades(conn, since, hours, mode, sports, now):
+def print_open_trades(conn, since, hours, mode, market, sports, now):
     """
-    The open trades of one mode in a few lines, then each one opened in the window, newest first. Capital is what the
+    The open trades of one mode in one market in a few lines, then each one opened in the window, newest first. Capital is what the
     contracts still held cost with fees, and the expected profit what the trades locked in, a dollar for each pair held
     less what it cost, with what flattening made or lost. A contract held without its other side, which the held column
     shows, is counted at its cost, as if it broke even. The rate a year scales each trade's return over the days from the
@@ -270,10 +285,11 @@ def print_open_trades(conn, since, hours, mode, sports, now):
         SELECT t.id, p.label, t.yes_held, t.no_held, t.yes_venue, t.yes_cost, t.no_venue, t.no_cost, t.profit + t.hedge_pnl,
                t.signal_ts, t.pays_at
         FROM trades t JOIN pairs p ON p.id = t.pair_id
-        WHERE t.mode = ? AND t.yes_held + t.no_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id){where}
+        WHERE t.mode = ? AND t.yes_held + t.no_held > 0 AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.trade_id = t.id)
+          {in_market(market)}{where}
         ORDER BY t.pays_at, t.id""", (mode,) + params)
     if not rows:
-        print(f"\n{mode} open trades: none")
+        print(f"\n{mode} {market} open trades: none")
         return
     capital, profit, yearly, when, venues, body = 0.0, 0.0, 0.0, 0.0, {}, []
     for trade_id, label, yes, no, yes_venue, yes_cost, no_venue, no_cost, pr, signal, pays in rows:
@@ -293,7 +309,7 @@ def print_open_trades(conn, since, hours, mode, sports, now):
     widths = [max(len(o[i]) for o in opened) for i in range(3)]
     ret, annual = (100 * profit / capital, 100 * yearly / capital) if capital > 0 else (None, None)
     held = ", ".join(f"{venue} {amount:,.2f}$" for venue, amount in sorted(venues.items()))
-    print(f"\n{mode} open trades: {len(rows):,}")
+    print(f"\n{mode} {market} open trades: {len(rows):,}")
     for text, count, cap in opened:
         print(f"  {text:<{widths[0]}}  {count:>{widths[1]}} using {cap:>{widths[2]}}")
     print(f"  capital {capital:,.2f}$, held on {held}")
@@ -303,34 +319,44 @@ def print_open_trades(conn, since, hours, mode, sports, now):
         print(f"  none opened in the last {hours} hours")
         return
     body.sort(reverse=True)
-    print_table(f"{mode} open trades opened in the last {hours} hours, newest first",
+    print_table(f"{mode} {market} open trades opened in the last {hours} hours, newest first",
                 ("trade", "bet", "opened UTC", "held yes/no", "capital $", "profit $", "return %", "annual %", "pays"),
                 [r[1:] for r in body], left=3)
 
 
-def print_mode_trades(conn, since, hours, mode, sports, now):
+def print_market_trades(conn, since, hours, mode, market, sports, now):
     """
-    One mode's trades: how many, by outcome and by kind in the window, the legs settled in it, and the open ones.
+    One mode's trades in one market: how many, by outcome and by kind in the window, the largest, the legs settled in
+    it, and the open ones, then live's orders.
     """
     where, params = in_sports(sports)
+    where = in_market(market) + where
     total = first_value(conn, f"SELECT COUNT(*) FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ?{where}", (mode,) + params)
     recent = first_value(conn, f"SELECT COUNT(*) FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ? AND signal_ts >= ?{where}",
                          (mode, since) + params)
-    print(f"\n{mode} trades: {total:,} in all, {recent:,} in the last {hours} hours")
+    print(f"\n{mode} {market} trades: {total:,} in all, {recent:,} in the last {hours} hours")
     if recent:
         body = query_rows(conn, f"""
             SELECT status, COUNT(*), SUM(quantity), SUM(matched), ROUND(SUM(profit), 2), ROUND(SUM(hedge_pnl), 2), ROUND(SUM(profit + hedge_pnl), 2)
             FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ? AND signal_ts >= ?{where} GROUP BY status""",
             (mode, since) + params)
         body.sort(key=lambda r: by_status(r[0]))
-        print_table(f"{mode} by outcome, last {hours} hours", ("status", "trades", "wanted", "matched", "locked in $", "hedges $", "net $"),
+        print_table(f"{mode} {market} by outcome, last {hours} hours", ("status", "trades", "wanted", "matched", "locked in $", "hedges $", "net $"),
                     [(s, n, contracts(q), contracts(m), *rest) for s, n, q, m, *rest in body])
         body = query_rows(conn, f"""
             SELECT p.sport, p.kind, COUNT(*), ROUND(AVG(100 * edge), 1), ROUND(100.0 * SUM(matched) / SUM(quantity), 0),
                    ROUND(SUM(profit + hedge_pnl), 2), ROUND(AVG(julianday(pays_at) - julianday(signal_ts)), 1)
             FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ? AND signal_ts >= ?{where} GROUP BY p.sport, p.kind
             ORDER BY p.sport, p.kind""", (mode, since) + params)
-        print_table(f"{mode} by kind, last {hours} hours", ("sport", "kind", "trades", "avg edge c", "fill %", "net $", "avg days held"), body)
+        print_table(f"{mode} {market} by kind, last {hours} hours", ("sport", "kind", "trades", "avg edge c", "fill %", "net $", "avg days held"), body)
+        body = query_rows(conn, f"""
+            SELECT t.id, p.label, t.signal_ts, t.status, t.matched, t.quantity, t.yes_cost + t.no_cost, t.profit, t.profit + t.hedge_pnl, t.pays_at
+            FROM trades t JOIN pairs p ON p.id = t.pair_id WHERE t.mode = ? AND signal_ts >= ?{where}
+            ORDER BY t.yes_cost + t.no_cost DESC, t.id LIMIT ?""", (mode, since) + params + (LARGEST,))
+        print_table(f"{mode} {market} largest trades, last {hours} hours",
+                    ("trade", "bet", "opened UTC", "status", "matched", "wanted", "capital $", "locked in $", "net $", "pays"),
+                    [(i, label[:44], short_time(signal)[:16], status, contracts(m), contracts(q), f"{cap:,.2f}", f"{pr:,.2f}", f"{net:,.2f}",
+                      pays[:10]) for i, label, signal, status, m, q, cap, pr, net, pays in body], left=4)
     # A settlement's settled_at is its later leg's, so a leg settled in the window is on a settlement that was too,
     # which is checked first, before its trade is looked up.
     settled = query_rows(conn, f"""
@@ -344,8 +370,11 @@ def print_mode_trades(conn, since, hours, mode, sports, now):
             WHERE s.mode = ? AND s.settled_at >= ? AND s.no_result IS NOT NULL AND s.no_settled_at >= ?{where})
         GROUP BY venue ORDER BY venue""", (mode, since, since) + params + (mode, since, since) + params)
     if settled:
-        print_table(f"{mode} settled legs by venue, last {hours} hours", ("venue", "legs", "contracts", "cost $", "payout $", "realized $"), settled)
-    print_open_trades(conn, since, hours, mode, sports, now)
+        print_table(f"{mode} {market} settled legs by venue, last {hours} hours", ("venue", "legs", "contracts", "cost $", "payout $", "realized $"),
+                    settled)
+    print_open_trades(conn, since, hours, mode, market, sports, now)
+    if mode == "live":
+        print_live_orders(conn, since, hours, market, sports)
 
 
 def print_paper_money(conn):
@@ -359,32 +388,32 @@ def print_paper_money(conn):
             print(f"  {venue} {amount:,.2f}$")
 
 
-def print_live_orders(conn, since, hours, sports):
+def print_live_orders(conn, since, hours, market, sports):
     """
-    The real orders sent in the window, by venue, purpose, and what came back.
+    The real orders sent in the window for the trades of one market, by venue, purpose, and what came back.
     """
     where, params = in_sports(sports)
     body = query_rows(conn, f"""
         SELECT o.venue, purpose, o.status, COUNT(*), SUM(o.quantity), SUM(filled), ROUND(SUM(dollars), 2), ROUND(SUM(fees), 2), ROUND(AVG(latency_ms))
-        FROM orders o JOIN trades t ON t.id = o.trade_id JOIN pairs p ON p.id = t.pair_id WHERE sent_at >= ?{where}
+        FROM orders o JOIN trades t ON t.id = o.trade_id JOIN pairs p ON p.id = t.pair_id WHERE sent_at >= ?{in_market(market)}{where}
         GROUP BY o.venue, purpose, o.status""", (since,) + params)
     body.sort(key=lambda r: (r[0], r[1], by_status(r[2])))
     if body:
-        print_table(f"live orders, last {hours} hours", ("venue", "purpose", "status", "orders", "asked", "filled", "dollars $", "fees $", "avg ms"),
+        print_table(f"live {market} orders, last {hours} hours", ("venue", "purpose", "status", "orders", "asked", "filled", "dollars $", "fees $", "avg ms"),
                     [(v, p, s, n, contracts(q), contracts(f), *rest) for v, p, s, n, q, f, *rest in body])
 
 
-def print_trades(conn, since, hours, modes=("live",), sports=(), now=None):
+def print_trades(conn, since, hours, modes=("live",), sports=(), now=None, markets=MARKETS):
     """
-    The trades of each mode asked for apart, since paper and live money never mix.
+    The trades of each mode asked for apart, since paper and live money never mix, and in each the markets asked for,
+    the futures then the games in play.
     """
     now = now or now_iso()
     for mode in modes:
-        print_mode_trades(conn, since, hours, mode, sports, now)
+        for market in markets:
+            print_market_trades(conn, since, hours, mode, market, sports, now)
         if mode == "paper":
             print_paper_money(conn)
-        else:
-            print_live_orders(conn, since, hours, sports)
 
 
 def read_live_balances(readers=None):
@@ -430,7 +459,9 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Summarize the SportsArb database.")
     ap.add_argument("--hours", type=int, default=24, help="size of the recent window for feed drops, opportunities, and trades")
     ap.add_argument("--mode", choices=sorted(MODES), default="all",
-                    help="the opportunities and trades to show: live, paper, or all, the default")
+                    help="the trades to show: live, paper, or all, the default")
+    ap.add_argument("--market", choices=sorted(MARKET_CHOICES), default="all",
+                    help="the opportunities and trades to show: the futures, the games in-play, or all, the default")
     ap.add_argument("--sport", default="", help="the sports to show, comma separated, every sport when left out")
     ap.add_argument("--no-live", action="store_true", help="leave out the live balances, which are read from the venues")
     args = ap.parse_args()
@@ -440,7 +471,7 @@ if __name__ == "__main__":
     conn = read_only()
     print_overview(conn, sports)
     print_gaps(conn, since, args.hours)
-    print_opportunities(conn, since, args.hours, sports, MODES[args.mode])
-    print_trades(conn, since, args.hours, MODES[args.mode], sports, now)
+    print_opportunities(conn, since, args.hours, sports, MARKET_CHOICES[args.market])
+    print_trades(conn, since, args.hours, MODES[args.mode], sports, now, MARKET_CHOICES[args.market])
     if "live" in MODES[args.mode] and not args.no_live:
         print_live_money(read_live_balances())

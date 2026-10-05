@@ -175,18 +175,17 @@ def positive_depth(leg_a, leg_b, fee_a, fee_b, min_edge):
     return (top_edge if top_edge is not None else -1.0), size, profit, worth_size, worth_profit
 
 
-def depth(leg_a, leg_b, fee_a, fee_b, min_edge, most=None):
+def depth(leg_a, leg_b, fee_a, fee_b, min_edge):
     """
     Buy equal amounts of two ladders while the net edge per contract stays
-    at or above min_edge, and, given most, only until most contracts are
-    reached. Returns the deepest cost included on each leg, which is the
-    limit an order needs to sweep those levels, and the contracts within
-    them: (limit_a, limit_b, contracts).
+    at or above min_edge. Returns the deepest cost included on each leg,
+    which is the limit an order needs to sweep those levels, and the
+    contracts within them: (limit_a, limit_b, contracts).
     """
     limit_a = limit_b = None
     total = 0.0
     for cost_a, cost_b, contracts, edge in walk_pair(leg_a, leg_b, fee_a, fee_b):
-        if edge < min_edge or (most is not None and total >= most):
+        if edge < min_edge:
             break
         limit_a, limit_b = cost_a, cost_b
         total += contracts
@@ -221,24 +220,27 @@ def price_pair(yes, no, books, fee_infos):
 def best_trade(members, books, fee_infos):
     """
     The cheapest yes leg and the cheapest no leg across a pair's members,
-    priced together. The two legs are never the same contract, since buying
-    both sides of one book is not a trade between venues and a crossed book
-    would look like free money. Returns a Priced, or None when a side has
-    no book on another contract.
+    on two different venues, priced together. Both legs are never on one
+    venue: buying both sides of one book is not a trade, a crossed book would
+    look like free money, and two contracts on one venue, such as a game's
+    two teams on Kalshi, are priced by the same traders, so a gap between
+    them is one that moved before the other and is gone before both orders
+    land. In the in-play test of 2026-10-04 52 trades with both legs on
+    Kalshi matched 5 of the 247 contracts they asked for, live and paper
+    alike. Returns a Priced, or None when no two venues quote a side each.
     """
     yes, _ = cheapest(members, books, "yes", fee_infos)
     no, _ = cheapest(members, books, "no", fee_infos)
     if yes is None or no is None:
         return None
-    if yes is not no:
+    if yes["venue"] != no["venue"]:
         return price_pair(yes, no, books, fee_infos)
-    # One contract is cheapest on both sides. Try the best partner for each side and keep the better pair.
-    others = [m for m in members if m is not yes]
+    # One venue is cheapest on both sides. Try the best partner on another venue for each side and keep the better pair.
     candidates = []
-    other_no, _ = cheapest(others, books, "no", fee_infos)
+    other_no, _ = cheapest([m for m in members if m["venue"] != yes["venue"]], books, "no", fee_infos)
     if other_no is not None:
         candidates.append(price_pair(yes, other_no, books, fee_infos))
-    other_yes, _ = cheapest(others, books, "yes", fee_infos)
+    other_yes, _ = cheapest([m for m in members if m["venue"] != no["venue"]], books, "yes", fee_infos)
     if other_yes is not None:
         candidates.append(price_pair(other_yes, no, books, fee_infos))
     return max(candidates, key=lambda c: c.edge) if candidates else None

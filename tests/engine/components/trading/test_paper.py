@@ -25,7 +25,7 @@ from trade_setup import CLOSE, FEES, KICKOFF, NO, NO_K_FEES, NO_PM_FEES, NOW, PA
 @pytest.fixture
 def quick(monkeypatch):
     monkeypatch.setattr(config, "PAPER_ORDER_MS", {venue: {"open": (1, 1), "flatten": (1, 1), "back": (1, 1)} for venue in VENUES})
-    monkeypatch.setattr(config, "PAPER_MAX_PAYOUT_HOURS", 24 * 7)     # The pair pays two days after NOW.
+    monkeypatch.setattr(config, "MAX_PAYOUT_HOURS", 24 * 7)     # The pair pays two days after NOW.
     monkeypatch.setattr(config, "PAPER_REJECT_PROBABILITY", 0)
 
 
@@ -292,7 +292,7 @@ def at(ex, pair, yes, no, edge, now, fees=FEES):
 
 def test_paper_trades_bets_paying_within_a_day_in_play_too_and_nothing_further_out(tmp_path, quick, monkeypatch):
     # Paper trades the bets on one event, a game here, before and while it is played, once it pays within 24 hours.
-    monkeypatch.setattr(config, "PAPER_MAX_PAYOUT_HOURS", 24)
+    monkeypatch.setattr(config, "MAX_PAYOUT_HOURS", 24)
     _, _, ex = executor(tmp_path / "soon", books())
     assert ex.signal(PAIR, YES, NO, 0.50, 100, FEES, NOW) is False                     # Pays out two days on.
     assert ex.signal(FUTURE, FUTURE_YES, FUTURE_NO, 0.50, 100, FEES, NOW) is False     # Pays out in February.
@@ -528,7 +528,7 @@ def timed(monkeypatch):
                                                    "polymarket_us": {"open": (60, 60), "flatten": (24, 24), "back": (30, 30)}})
     monkeypatch.setattr(config, "PAPER_FEED_SECONDS", {"kalshi": 0.05, "polymarket_us": 0.05})
     monkeypatch.setattr(config, "PAPER_REJECT_PROBABILITY", 0)
-    monkeypatch.setattr(config, "PAPER_MAX_PAYOUT_HOURS", 24 * 7)     # The pair pays two days after NOW.
+    monkeypatch.setattr(config, "MAX_PAYOUT_HOURS", 24 * 7)     # The pair pays two days after NOW.
 
 
 def stamped(venue, bid, ask, made, received):
@@ -584,28 +584,29 @@ def test_a_change_the_venue_made_after_the_order_arrived_does_not_stop_it(tmp_pa
     assert (t["status"], t["yes_filled"], t["no_filled"], t["yes_cost"]) == ("filled", 50, 50, pytest.approx(50 * 0.45))
 
 
-# THE IN-PLAY TEST, paper twins of live trades on the same signal
+# IN PLAY BESIDE LIVE, Polymarket US's leg first and given back what our live orders took
 
-def twinned(tmp_path, footprints, start=config.PAPER_START_BALANCE, lead=None):
+STARTED = tuple(dict(m, start_time="2026-09-20T17:00:00+00:00") for m in (YES, NO))     # The game kicked off half an hour before NOW.
+
+
+def beside_live(tmp_path, footprints):
     """
-    Send the paper twin of a live trade of 5 contracts at NOW, on books of 5 a level. Live's own yes order reached
-    Polymarket US 30 ms after the signal and bought all 5 at 0.45, so the venue's books from then show the level gone.
-    footprints, when given, is where that live order left what it took. Returns the database and the twin, or None.
+    Signal the pair half an hour into its game at NOW, on books of 5 a level, while live trades it too. Live's own yes
+    order reached Polymarket US 30 ms after the signal and bought all 5 at 0.45, so the venue's books from then show the
+    level gone. footprints, when given, is where that live order left what it took. Returns the database and paper's trade.
     """
     latest, tapes = {}, Tapes()
     for key, book in books(size=5).items():
         latest[key] = dataclasses.replace(book, at=T - 1)
     conn = database.connect(tmp_path / "t.sqlite")
-    ex = PaperExecutor(conn, PaperBalances(conn, start), lambda: latest, lambda m: None, random.Random(1), clock=lambda: NOW,
+    ex = PaperExecutor(conn, PaperBalances(conn), lambda: latest, lambda m: None, random.Random(1), clock=lambda: NOW,
                        tapes=tapes, footprints=footprints)
-    legs = [Leg("yes", "polymarket_us", "pm", "yes", limit=0.45, quantity=5, fee_info=NO_PM_FEES),
-            Leg("no", "kalshi", "k", "yes", limit=0.47, quantity=5, fee_info=NO_K_FEES)]
-    live = types.SimpleNamespace(id=7, quantity=5, edge=0.08, pays_at=PAYS_AT)
+    live_leg = Leg("yes", "polymarket_us", "pm", "yes", limit=0.45, quantity=5, fee_info=NO_PM_FEES)
 
     async def scenario():
-        sent = footprints.sent(legs[0], False, 0.45) if footprints else None
-        twin = ex.twin(PAIR, YES, NO, live, legs, NOW, lead)
-        await asyncio.sleep(0)                  # The twin starts, and tapes its books from here.
+        sent = footprints.sent(live_leg, False, 0.45) if footprints else None
+        assert ex.signal(PAIR, *STARTED, 0.08, 100, FEES, NOW)
+        await asyncio.sleep(0)                  # The trade starts, and tapes its books from here.
         for book in (stamped("polymarket_us", 0.44, 0.46, 0.030, 0.110), stamped("polymarket_us", 0.44, 0.46, 0.100, 0.180),
                      stamped("kalshi", 0.53, 0.54, 0.020, 0.032)):
             latest[(book.venue, book.contract_id)] = book
@@ -613,45 +614,22 @@ def twinned(tmp_path, footprints, start=config.PAPER_START_BALANCE, lead=None):
         if sent:
             footprints.answer(sent, "polymarket_us", {"executions": [{"transactTime": at_seconds(T + 0.030)}]}, 5)
         await asyncio.gather(*ex.tasks)
-        return twin
-    return conn, asyncio.run(scenario())
+    asyncio.run(scenario())
+    return conn, stored(conn)[0]
 
 
 @pytest.mark.full_share
-def test_a_paper_twin_has_the_live_trades_size_and_limits_and_gets_back_what_our_live_order_took(tmp_path, timed):
-    conn, twin = twinned(tmp_path, Footprints(clock=lambda: T))
-    t = stored(conn)[0]
-    assert (t["id"], t["mode"], t["signal_ts"], t["quantity"], t["yes_limit"], t["no_limit"], t["edge"], t["pays_at"]) == (
-        twin.id, "paper", NOW, 5, 0.45, 0.47, 0.08, PAYS_AT)
-    # Its yes order reached Polymarket US at 60 ms, after our live order had bought the 5 at 0.45 there, which paper
-    # gives back, so the twin is judged on the book as it would have been without our own order.
-    assert (t["status"], t["yes_filled"], t["no_filled"]) == ("filled", 5, 5)
-
-
-@pytest.mark.full_share
-def test_without_giving_back_a_paper_twin_would_find_what_our_live_order_took_gone(tmp_path, timed):
-    conn, twin = twinned(tmp_path, None)
-    t = stored(conn)[0]
-    assert (t["yes_filled"], t["no_filled"], t["hedge"]) == (0, 5, "sold back 5 of 5 on kalshi")
-
-
-def test_no_paper_twin_is_sent_when_the_paper_money_falls_short(tmp_path, timed):
-    conn, twin = twinned(tmp_path, Footprints(clock=lambda: T), start=2.0)
-    assert twin is None and stored(conn) == []
-
-
-@pytest.mark.full_share
-def test_a_paper_twin_sends_polymarket_us_first_when_its_live_trade_did(tmp_path, timed):
-    conn, twin = twinned(tmp_path, Footprints(clock=lambda: T), lead="polymarket_us")
-    t = stored(conn)[0]
-    # Polymarket US's answer came at 90 ms, 60 there and 30 back, and only then went Kalshi's order: 12 there and 8 back.
-    assert (t["status"], t["yes_filled"], t["no_filled"]) == ("filled", 5, 5)
+def test_in_play_paper_sends_polymarket_us_first_and_gets_back_what_our_live_order_took(tmp_path, timed):
+    conn, t = beside_live(tmp_path, Footprints(clock=lambda: T))
+    # Its yes order reached Polymarket US at 60 ms, after our live order had bought the 5 at 0.45 there, which paper gives
+    # back, so it is judged on the book as it would have been without our own order. Its answer came at 90 ms, 60 there
+    # and 30 back, and only then went Kalshi's order: 12 there and 8 back.
+    assert (t["status"], t["quantity"], t["yes_filled"], t["no_filled"]) == ("filled", 5, 5, 5)
     assert (t["yes_fill_ts"], t["no_fill_ts"]) == (at_seconds(T + 0.09), at_seconds(T + 0.11))
 
 
 @pytest.mark.full_share
-def test_a_paper_twin_that_missed_on_polymarket_us_first_sends_no_kalshi_order(tmp_path, timed):
-    conn, twin = twinned(tmp_path, None, lead="polymarket_us")     # Without giving back, our live order took the 0.45 level.
-    t = stored(conn)[0]
+def test_in_play_without_giving_back_paper_finds_what_our_live_order_took_gone_and_sends_no_kalshi_order(tmp_path, timed):
+    conn, t = beside_live(tmp_path, None)
     assert (t["status"], t["yes_filled"], t["no_filled"], t["hedge"]) == ("failed", 0, 0, "no leg not sent, as polymarket_us filled nothing first")
     assert stored(conn, "ledger")[-1]["reason"] == "transfer_in"        # No buy, so the money never moved.

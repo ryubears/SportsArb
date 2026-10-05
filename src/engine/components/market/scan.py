@@ -3,7 +3,7 @@ Find arbitrage episodes in pairs as the recorder's books change.
 
 Whenever a member's book changes, the scanner finds the cheapest way to
 hold yes and the cheapest way to hold no across the pair's members, on
-any venues, and prices buying both. An episode is a stretch where that
+two different venues, and prices buying both. An episode is a stretch where that
 net edge stays above zero after fees. Each episode becomes an Opportunity
 with its two legs, its duration, its peak edge, how many contracts could
 have been filled at the peak by walking the books' depth, and the return

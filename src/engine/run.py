@@ -21,18 +21,16 @@ venues, trading/ makes the trades, and money/ keeps the cash.
   settler, and its trades stored with its mode, so paper and live never
   mix. They trade apart: the paper desk the bets on one event, a game, a
   match, a race, or a Bitcoin window, before it and while it is played,
-  that pay within PAPER_MAX_PAYOUT_HOURS, and the live desk the futures,
-  which pay MIN_PAYOUT_HOURS or more out, bar the sports given to
-  --not-live. On the same signal live's real orders took the contracts
-  paper's simulated ones looked for: from 2026-10-04, when live began
-  asking for all it saw, paper twins of live trades failed 10 times in 13.
-  Each desk still flattens and settles every trade it holds. With
-  --live-in-play, which needs --execute both, live also trades the
-  games, matches, races, and windows under way, at most
-  LIVE_IN_PLAY_CONTRACTS a trade for LIVE_IN_PLAY_TRADES trades, and paper
-  sends a twin of each on the same signal, of the same size, giving back
-  what our live orders took from the books, so live fills in play can be
-  set against paper's. See trading/live.py and trading/footprints.py.
+  that pay within MAX_PAYOUT_HOURS, and the live desk the futures, which
+  pay MIN_PAYOUT_HOURS or more out, bar the sports given to --not-live.
+  On the same signal live's real orders took the contracts paper's
+  simulated ones looked for: from 2026-10-04, when live began asking for
+  all it saw, paper twins of live trades failed 10 times in 13. Each desk
+  still flattens and settles every trade it holds. With --live-in-play
+  live also trades the games, matches, races, and windows under way that
+  pay within MAX_PAYOUT_HOURS, of every sport, Polymarket US's order
+  first. When paper runs too it trades the same games, given back what
+  our live orders took from the books, see trading/footprints.py.
   - Paper: trading/paper.py fills against the same books with the paper
     money of money/paper.py.
   - Live: trading/live.py sends real orders with the money the venues
@@ -59,7 +57,7 @@ Run with:
     python3 -m engine.run --sport all --execute live
     python3 -m engine.run --sport all --execute both
     python3 -m engine.run --sport all --execute both --not-live crypto,politics
-    python3 -m engine.run --sport all --execute both --live-in-play
+    python3 -m engine.run --sport all --execute live --live-in-play --not-live none
     python3 -m engine.run --sport nfl --seconds 120 --catalog-minutes 0
     python3 -m engine.run --sport nfl --skip-refresh
     python3 -m engine.run --sport nfl --no-scan
@@ -115,7 +113,7 @@ class RunOptions:
     scan: bool = True                               # Price the books and store episodes.
     executors: tuple = ("paper",)                   # The modes that trade the scanner's signals, 'paper' and 'live', when scanning.
     not_live: tuple = ("crypto",)                   # Sports whose futures the live desk leaves alone.
-    live_in_play: bool = False                      # Whether live also trades games under way, in the in-play test.
+    live_in_play: bool = False                      # Whether live also trades games under way.
 
 
 def code_version():
@@ -139,17 +137,25 @@ def book_waits():
 
 def trading_settings():
     """
-    The settings that decide what the paper trader does, in one line, so each run's log says what it ran with.
+    The settings that decide what both traders do, in one line, so each run's log says what it ran with.
+    """
+    c = config
+    return (f"settings: min edge {c.MIN_EDGE:.2f}$ and {c.MIN_ANNUAL_PCT}% a year, live paying {c.MIN_PAYOUT_HOURS}h or more out "
+            f"before a game and on a future, a game paying within {c.MAX_PAYOUT_HOURS}h, legs on two venues, Polymarket US's first "
+            f"on a game under way, fill share {c.FILL_SHARE}, expected game "
+            f"{', '.join(f'{sport} {hours}h' for sport, hours in c.GAME_HOURS.items())} + settle {c.SETTLE_HOURS}h; {book_waits()}")
+
+
+def paper_settings():
+    """
+    The settings that decide how paper orders fill, in one line.
     """
     c = config
     trips = ", ".join(f"{venue} {times['open'][0]}ms there ({times['flatten'][0]} to flatten) and {times['back'][0]} back"
                       for venue, times in c.PAPER_ORDER_MS.items())
-    return (f"settings: min edge {c.MIN_EDGE:.2f}$ and {c.MIN_ANNUAL_PCT}% a year, live paying {c.MIN_PAYOUT_HOURS}h or more out "
-            f"and no game once kicked off, paper paying within {c.PAPER_MAX_PAYOUT_HOURS}h and in play too, fill share {c.FILL_SHARE}, "
-            f"rejects {c.PAPER_REJECT_PROBABILITY:.0%}, paper orders take {trips}, filling at the venue's book then, waiting up to "
-            f"{', '.join(f'{venue} {s}s' for venue, s in c.PAPER_FEED_SECONDS.items())} for it to reach us, expected game "
-            f"{', '.join(f'{sport} {hours}h' for sport, hours in c.GAME_HOURS.items())} + settle {c.SETTLE_HOURS}h, "
-            f"start balance {c.PAPER_START_BALANCE:,.0f}$; {book_waits()}")
+    return (f"paper rejects {c.PAPER_REJECT_PROBABILITY:.0%} of orders, which take {trips}, filling at the venue's book then, waiting "
+            f"up to {', '.join(f'{venue} {s}s' for venue, s in c.PAPER_FEED_SECONDS.items())} for it to reach us, start balance "
+            f"{c.PAPER_START_BALANCE:,.0f}$")
 
 
 def live_settings():
@@ -171,16 +177,15 @@ class Desk:
     those on one game, match, race, or window, or 'futures', or None for
     both, and held_out the sports whose futures it leaves alone. tapes are
     the recorder's tapes, which paper orders meet the venues' books on, see
-    market/tape.py. in_play starts live's in-play test, and footprints keep
-    what live orders took for paper to give back, see trading/footprints.py.
-    twins, paper's, is the live executor whose in-play trades it twins.
+    market/tape.py. in_play has live trade games under way too, and
+    footprints keep what live orders took for paper to give back, see
+    trading/footprints.py.
     """
 
-    def __init__(self, mode, conn, books, notifier, markets=None, held_out=(), tapes=None, in_play=False, footprints=None, twins=None):
+    def __init__(self, mode, conn, books, notifier, markets=None, held_out=(), tapes=None, in_play=False, footprints=None):
         self.mode = mode
         self.markets = markets
         self.held_out = tuple(held_out)
-        self.twins = twins
         if mode == "paper":
             self.cash = PaperBalances(conn)
             self.executor = PaperExecutor(conn, self.cash, books, log, tapes=tapes, footprints=footprints)
@@ -203,19 +208,10 @@ class Desk:
 
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """
-        Offer the executor a scanner signal on a pair this desk trades.
-        Paper sends the twin of a live trade just taken on the same signal
-        in its place, see PaperExecutor.twin(). Returns whether it traded.
+        Offer the executor a scanner signal on a pair this desk trades. Returns whether it traded.
         """
         if not self.trades(pair):
             return False
-        taken = self.twins.twin_of(pair["id"], now) if self.twins else None
-        if taken:
-            live_yes, live_no, live, live_legs, lead = taken
-            twin = self.executor.twin(pair, live_yes, live_no, live, live_legs, now, lead)
-            if twin:
-                database.set_twin(self.executor.conn, live.id, twin.id)
-            return twin is not None
         return self.executor.signal(pair, yes, no, edge, size, fee_infos, now)
 
     def tick(self, now, clock):
@@ -242,12 +238,12 @@ class Session:
     in. Without a scanner only the books are recorded, and without a desk
     the scanner only stores what it sees. The paper desk trades the bets on
     one event and the live desk the futures, bar the sports in not_live,
-    and with live_in_play the events under way too, each with a paper twin.
+    and with live_in_play the events under way too.
     """
 
     def __init__(self, conn, sports, with_scanner=True, executors=("paper",), not_live=("crypto",), live_in_play=False):
-        if live_in_play and set(executors) != {"live", "paper"}:
-            raise ValueError("the in-play test needs both desks, live and paper")
+        if live_in_play and "live" not in executors:
+            raise ValueError("live trading in play needs the live desk")
         self.conn = conn
         self.sports = sports
         self.not_live = tuple(s for s in sports if s in not_live)
@@ -255,15 +251,15 @@ class Session:
         self.notifier = notify.Notifier(conn, log)
         self.attestation = notify.AttestationWatch(conn, self.notifier, log)
         # The executors trade against the recorder's books, which exist once the recorder does, below. The desks trade
-        # apart, since on one signal live's real orders take what paper's look for.
+        # apart, since on one signal live's real orders take what paper's look for, but for games under way with
+        # live_in_play, where paper is given back what live took.
         self.tapes = Tapes()
-        footprints = Footprints() if live_in_play else None
+        footprints = Footprints() if live_in_play and "paper" in executors else None
         rules = {"paper": dict(markets="events", tapes=self.tapes, footprints=footprints),
                  "live": dict(markets=None if live_in_play else "futures", held_out=self.not_live, in_play=live_in_play, footprints=footprints)}
         self.desks = []
-        for mode in executors if with_scanner else ():     # Live first, so a paper twin follows its live trade.
-            twins = next((d.executor for d in self.desks if d.mode == "live"), None) if mode == "paper" and live_in_play else None
-            self.desks.append(Desk(mode, conn, lambda: self.recorder.books, self.notifier, twins=twins, **rules[mode]))
+        for mode in executors if with_scanner else ():     # Live first, so its orders go out first.
+            self.desks.append(Desk(mode, conn, lambda: self.recorder.books, self.notifier, **rules[mode]))
         self.scanner = scan.Scanner(conn, sports, log, [d.signal for d in self.desks], books=lambda: self.recorder.books) if with_scanner else None
         for desk in self.desks:
             desk.executor.recheck = self.scanner.recheck
@@ -275,7 +271,7 @@ class Session:
         """
         Open the venue connections for everything the catalog says to record.
         """
-        if any(d.mode == "paper" for d in self.desks):
+        if self.desks:
             log(trading_settings())
         if any(d.mode == "live" for d in self.desks):
             log(live_settings())
@@ -283,15 +279,14 @@ class Session:
             log(f"live trades the futures of {', '.join(live) or 'no sport'}"
                 + (f", not of {', '.join(self.not_live)}" if self.not_live else ""))
             if self.live_in_play:
-                taken = next(d.executor.in_play_trades for d in self.desks if d.mode == "live")
-                log(f"live in-play test: live also trades the games, matches, races, and windows under way that pay within "
-                    f"{config.PAPER_MAX_PAYOUT_HOURS}h, at most {config.LIVE_IN_PLAY_CONTRACTS} contracts a trade, for "
-                    f"{config.LIVE_IN_PLAY_TRADES} trades, {taken} taken so far, each with a paper twin on the same signal, those with a "
-                    f"leg on each venue sending both orders at once and Polymarket US's first by turns")
+                log(f"live also trades the games, matches, races, and windows under way of every sport that pay within "
+                    f"{config.MAX_PAYOUT_HOURS}h, as many contracts as the books and the cash allow, Polymarket US's order first "
+                    f"and Kalshi's for what it filled")
             if not notify.EMAIL_FILE.exists():
                 log(f"no email settings in {notify.EMAIL_FILE}, alerts are only logged and stored")
         if any(d.mode == "paper" for d in self.desks):
-            log(f"paper trades the games, matches, races, and windows of every sport that pay within {config.PAPER_MAX_PAYOUT_HOURS}h, "
+            log(paper_settings())
+            log(f"paper trades the games, matches, races, and windows of every sport that pay within {config.MAX_PAYOUT_HOURS}h, "
                 f"in play too")
         targets = load_targets(self.conn, self.sports)
         log("recording " + ", ".join(f"{len(ids)} {venue}" for venue, ids in targets.items()) + " contracts")
@@ -475,7 +470,7 @@ if __name__ == "__main__":
                     help="sports whose futures live leaves alone, comma separated, crypto by default, or none")
     ap.add_argument("--no-trade", action="store_true", help="scan without trading")
     ap.add_argument("--live-in-play", action="store_true",
-                    help="with --execute both, live also trades a few contracts of games under way, beside paper twins")
+                    help="with --execute live or both, live also trades games under way, Polymarket US's order first")
     ap.add_argument("--execute", choices=sorted(EXECUTE), default="paper",
                     help="trade on paper, the bets on one event, with real money on the venues, the futures, or both")
     ap.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
@@ -487,8 +482,8 @@ if __name__ == "__main__":
     not_live = () if args.not_live.strip() == "none" else tuple(s.strip() for s in args.not_live.split(",") if s.strip())
     if any(s not in fetch.SPORTS for s in not_live):
         ap.error(f"--not-live takes sports from {', '.join(sorted(fetch.SPORTS))}, or none, not {args.not_live!r}")
-    if args.live_in_play and (args.execute != "both" or args.no_trade or args.no_scan):
-        ap.error("--live-in-play needs --execute both, scanning and trading")
+    if args.live_in_play and (args.execute == "paper" or args.no_trade or args.no_scan):
+        ap.error("--live-in-play needs --execute live or both, scanning and trading")
     try:
         config.override(args.set)
     except ValueError as e:
