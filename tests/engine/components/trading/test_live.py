@@ -636,6 +636,14 @@ def test_in_play_live_takes_an_edge_of_five_cents_or_more_at_once(tmp_path):
     assert venues.orders == [("polymarket_us", "buy", "yes", 5, 0.48), ("kalshi", "buy", "no", 5, 0.47)]
 
 
+def test_in_play_live_asks_no_return_a_year_of_a_game_under_way(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "MIN_ANNUAL_PCT", 10 ** 6)     # More than any edge returns, even in a day.
+    venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
+    conn, ex = in_play(tmp_path, venues, books())
+    assert not signal(ex, FUTURE, SURE)                                 # A future must still return it.
+    assert signal(ex) and [t["in_play"] for t in stored(conn)] == [1]
+
+
 def test_in_play_live_stops_after_its_trades_on_games_under_way_and_a_restart_goes_on_counting(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "LIVE_IN_PLAY_TRADES", 2)
     venues = Venues(polymarket_us=[fills()] * 3, kalshi=[fills()] * 3)

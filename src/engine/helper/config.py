@@ -27,7 +27,8 @@ MAX_PAYOUT_HOURS = 24       # The latest a bet on a game, match, race, or window
                             # it is played, and for live to trade it once under way, so both trade the ones on the day.
 MIN_ANNUAL_PCT = 50         # The least an edge must return a year on the capital it ties up until the bet pays, before a game or on
                             # a future. A 5 cent edge clears it if it pays within 38 days, 10 cents within 81, and 20 within 182.
-                            # Live's future orders sweep only the levels that clear it too, see LiveExecutor.min_edge().
+                            # Live's future orders sweep only the levels that clear it too, see LiveExecutor.min_edge(). A game under
+                            # way is asked none from 2026-10-05, see Executor.pays_enough().
 FILL_SHARE = 1.0            # The share of visible size at a level a trade asks for. At 0.5 to 2026-10-03, 222 of 231 live trades were
                             # sized by it, not the cash, every Kalshi order filled in full, Polymarket US orders of 10 or more filled
                             # in full 45 times in 46, and another taker bought the same side at our price within 10 s of 4 of 140.

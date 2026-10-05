@@ -51,10 +51,11 @@ Live trades a season's future, or a game before it starts, while its edge
 is config.MIN_EDGE or more, the bet pays out config.MIN_PAYOUT_HOURS or
 more away, and the edge returns config.MIN_ANNUAL_PCT a year or more until
 then, and with run.py --live-in-play a game under way too, paying within
-config.MAX_PAYOUT_HOURS, see live.py. Live's orders on a future sweep only
-the levels that return config.MIN_ANNUAL_PCT a year. On a game under way
-live takes an edge of config.LIVE_IN_PLAY_MIN_EDGE or more at once, but
-only as Polymarket US's book for its leg changes, at most
+config.MAX_PAYOUT_HOURS, of which no return a year is asked, see live.py
+and pays_enough(). Live's orders on a future sweep only the levels that
+return config.MIN_ANNUAL_PCT a year. On a game under way live takes an
+edge of config.LIVE_IN_PLAY_MIN_EDGE or more at once, but only as
+Polymarket US's book for its leg changes, at most
 config.LIVE_IN_PLAY_CONTRACTS a trade, for config.LIVE_IN_PLAY_TRADES
 trades, see min_edge(), just_quoted(), and most(). Paper trades games
 before and while they are played, paying within config.MAX_PAYOUT_HOURS,
@@ -448,15 +449,18 @@ class Executor:
         """
         return hours >= config.MIN_PAYOUT_HOURS
 
-    def pays_enough(self, edge, now, pays_at, pair):
+    def pays_enough(self, edge, now, pays_at, pair, under_way):
         """
         Whether an edge is worth the capital it ties up until the bet pays at
         pays_at: when this executor trades, see pays_in_time(), and returning
-        config.MIN_ANNUAL_PCT a year or more until then.
+        config.MIN_ANNUAL_PCT a year or more until then, but on a game under
+        way any edge, from 2026-10-05 at the user's asking: it pays within
+        config.MAX_PAYOUT_HOURS, where five cents returns over 1,900% a year,
+        so the rate never turned one down.
         """
         if not pays_at or not self.pays_in_time(hours_between(now, pays_at), pair):
             return False
-        return annual_pct(edge, game.days_until(now, pays_at)) >= config.MIN_ANNUAL_PCT
+        return under_way or annual_pct(edge, game.days_until(now, pays_at)) >= config.MIN_ANNUAL_PCT
 
     def min_edge(self, pair, yes, no, now):
         """
@@ -550,7 +554,8 @@ class Executor:
         if not self.plays(pair, yes, no, now):
             return False
         pays_at = game.pays_at((yes, no), pair["sport"])
-        if not self.pays_enough(edge, now, pays_at, pair):
+        under_way = self.under_way(pair, yes, no, now)
+        if not self.pays_enough(edge, now, pays_at, pair, under_way):
             return False
         if not self.just_quoted(pair, yes, no, now):
             return False
@@ -571,7 +576,6 @@ class Executor:
             leg.quantity = quantity
             self.cash.reserve(leg.venue, quantity * leg.limit, shard(leg))
         yes_leg, no_leg = legs
-        under_way = self.under_way(pair, yes, no, now)
         trade = Trade(mode=self.mode, pair_id=pair["id"], label=pair["label"], trade=trade_words(yes, no), signal_ts=now, edge=edge,
                       quantity=quantity, pays_at=pays_at, in_play=int(under_way),
                       yes_venue=yes["venue"], yes_contract=yes["contract_id"], yes_polarity=yes["polarity"], yes_limit=yes_leg.limit,

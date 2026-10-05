@@ -203,26 +203,26 @@ def opportunity_rules(market):
     """
     The episodes of one market live trades, as a SQL condition on the
     episode, and its levels in words: the futures paying
-    config.MIN_PAYOUT_HOURS or more out, on the levels returning
-    config.MIN_ANNUAL_PCT a year, and the games, matches, races, and windows
-    under way at the peak paying within config.MAX_PAYOUT_HOURS, on the
-    levels at config.LIVE_IN_PLAY_MIN_EDGE or more. Which levels count at
+    config.MIN_PAYOUT_HOURS or more out and returning config.MIN_ANNUAL_PCT
+    a year at the peak, on the levels returning that, and the games,
+    matches, races, and windows under way at the peak paying within
+    config.MAX_PAYOUT_HOURS, on the levels at config.LIVE_IN_PLAY_MIN_EDGE
+    or more, of which no return a year is asked. Which levels count at
     the peak is the scanner's, see Opportunity.take_size.
     """
     if market == "futures":
-        return ("live = 0 AND days_held * 24 >= ?", (config.MIN_PAYOUT_HOURS,),
+        return ("live = 0 AND days_held * 24 >= ? AND annual_pct >= ?", (config.MIN_PAYOUT_HOURS, config.MIN_ANNUAL_PCT),
                 f"levels returning {config.MIN_ANNUAL_PCT}%+ a year, paying {config.MIN_PAYOUT_HOURS}h+ out")
     return ("live = 1 AND days_held * 24 <= ?", (config.MAX_PAYOUT_HOURS,),
-            f"levels at {100 * config.LIVE_IN_PLAY_MIN_EDGE:.0f}c+, {config.MIN_ANNUAL_PCT}%+ a year, games, matches, races, "
-            f"and windows under way, paying within {config.MAX_PAYOUT_HOURS}h")
+            f"levels at {100 * config.LIVE_IN_PLAY_MIN_EDGE:.0f}c+, games, matches, races, and windows under way, "
+            f"paying within {config.MAX_PAYOUT_HOURS}h")
 
 
 def print_market_opportunities(conn, since, hours, sports, market):
     """
     The episodes of one market within live's rules in the window: an order
     sent at the peak could have had MIN_CONTRACTS or more on the levels at
-    live's least edge or more, see opportunity_rules(), and the peak
-    returned config.MIN_ANNUAL_PCT a year or more. An edge on less, a
+    live's least edge or more, see opportunity_rules(). An edge on less, a
     sliver of a level, is one no trade could take. Live takes an edge at
     once, and its own fill empties the levels it takes, so what stayed
     fillable through the stretch at config.MIN_EDGE, which these were
@@ -248,8 +248,8 @@ def print_market_opportunities(conn, since, hours, sports, market):
         SELECT p.sport, p.kind, p.label, trade, 100 * peak_edge, min_edge_seconds, take_size, take_size - take_profit,
                take_profit, days_held
         FROM opportunities o JOIN pairs p ON p.id = o.pair_id
-        WHERE start_ts >= ? AND take_size >= ? AND annual_pct >= ? AND {rule}{in_market(market)}{where}
-        ORDER BY take_profit DESC""", (since, MIN_CONTRACTS, config.MIN_ANNUAL_PCT) + rule_params + params)
+        WHERE start_ts >= ? AND take_size >= ? AND {rule}{in_market(market)}{where}
+        ORDER BY take_profit DESC""", (since, MIN_CONTRACTS) + rule_params + params)
     if not rows:
         print("  none")
         return
