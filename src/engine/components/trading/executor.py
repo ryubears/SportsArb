@@ -56,13 +56,14 @@ config.MIN_ANNUAL_PCT a year or more until then, and with run.py
 of which no return a year is asked, see live.py and pays_enough(). Live's
 orders on a future sweep only the levels that return config.MIN_ANNUAL_PCT
 a year. On a game under way live takes an edge of
-config.LIVE_IN_PLAY_MIN_EDGE or more at once, but only as Polymarket US's
-book for its leg changes, at most config.LIVE_IN_PLAY_CONTRACTS a trade,
-for config.LIVE_IN_PLAY_TRADES trades, see min_edge(), just_quoted(), and
-most(). Paper trades an edge of config.MIN_EDGE or more on games before and
-while they are played, paying within config.MAX_PAYOUT_HOURS, see paper.py.
-The legs are on two venues, or on a future two contracts of one venue
-with the same rules, see pricing.best_trade(). Both venues
+config.LIVE_IN_PLAY_MIN_EDGE or more once it has lasted
+config.LIVE_IN_PLAY_HOLD_SECONDS, as the scanner's episode times it, the
+scanner offering it again then, through recheck, and at most
+config.LIVE_IN_PLAY_CONTRACTS a trade, see min_edge(), hold(), and most().
+Paper trades an edge of config.MIN_EDGE or more on games before and while
+they are played, paying within config.MAX_PAYOUT_HOURS, when first seen,
+see paper.py. The legs are on two venues, or on a future two contracts of
+one venue with the same rules, see pricing.best_trade(). Both venues
 must be trading, outside the weekly maintenance each publishes, see
 common/venues.py: while one has stopped, its feed may still show prices no
 order can trade at. A trade asks for config.FILL_SHARE of what the books
@@ -144,7 +145,9 @@ class Executor:
         self.set_aside = {}         # Trade id maps to why no more orders are sent for it, which only live trading does.
         self.leads = {}             # Trade id maps to the venue whose leg goes first, for a trade whose legs are not sent at once.
         self.waiting = set()        # Pairs whose edge waited for a book to catch up since the last summary, see confirm_wait().
+        self.held = set()           # Pairs whose edge was held until it had lasted since the last summary, see hold().
         self.recheck = None         # Called with (pair id, seconds) when an edge waits, to price the pair again once the wait ends.
+        self.edge_since = None      # Called with a pair id, returns when its edge at config.MIN_EDGE or more began, see Scanner.edge_since().
         self.retrying = None        # The task flattening exposed trades while one runs.
         self.totals = {"trades": 0, "profit": 0.0, "hedge": 0.0}
         self.reload_exposed()
@@ -411,8 +414,11 @@ class Executor:
         self.done = []
         counts = {s: sum(1 for t in recent if t.status == s) for s in ("filled", "partial", "failed")}
         waiting = ""
+        if self.held:
+            waiting += f"; {len(self.held)} pairs' edges held until they lasted"
+            self.held = set()
         if self.waiting:
-            waiting = f"; {len(self.waiting)} pairs' edges waited for a book to catch up"
+            waiting += f"; {len(self.waiting)} pairs' edges waited for a book to catch up"
             self.waiting = set()
         return (f"{self.mode}: {len(recent)} trades ({counts['filled']} filled, {counts['partial']} partial, {counts['failed']} failed), "
                 f"locked in {sum(t.profit for t in recent):.2f}$, hedges {sum(t.hedge_pnl for t in recent):+.2f}$; "
@@ -489,12 +495,12 @@ class Executor:
         """
         return None
 
-    def just_quoted(self, pair, yes, no, now):
+    def hold(self, pair, yes, no, now):
         """
-        Whether the signal at now is on prices this executor trades: any here, while live, on a game under way, trades
-        only Polymarket US's just as they reach us, see LiveExecutor.just_quoted().
+        How many seconds the pair's edge must still last before this executor trades it, 0 when it may now: paper takes
+        an edge the moment it is seen, live waits on a game under way, see LiveExecutor.hold().
         """
-        return True
+        return 0.0
 
     def confirm_wait(self, yes, no, now):
         """
@@ -552,14 +558,14 @@ class Executor:
         """
         Called by the scanner when a pair shows an edge. Sends the two legs
         when the edge, see min_edge(), whether its game has started, see
-        plays(), the time until the bet pays, its return a year, the prices
-        it is on, see just_quoted(), both venues trading, and the balances
-        allow, the leg on lead()'s venue first when it names one. Returns
-        True when orders were sent, so the scanner sends no more for this
-        episode. The scanner's size counts every level with a positive edge,
-        while the legs are sized from the levels that keep the least edge,
-        see quantity_for(). The cost is reserved here, before anything is
-        awaited, so a second signal in the same moment sees what is left.
+        plays(), the time until the bet pays, its return a year, how long
+        the edge has lasted, see hold(), both venues trading, and the
+        balances allow, the leg on lead()'s venue first when it names one.
+        Returns True when orders were sent, so the scanner sends no more for
+        this episode. The scanner's size counts every level with a positive
+        edge, while the legs are sized from the levels that keep the least
+        edge, see quantity_for(). The cost is reserved here, before anything
+        is awaited, so a second signal in the same moment sees what is left.
         """
         least = self.min_edge(pair, yes, no, now)
         if edge < least:
@@ -570,7 +576,11 @@ class Executor:
         under_way = self.under_way(pair, yes, no, now)
         if not self.pays_enough(edge, now, pays_at, pair, under_way):
             return False
-        if not self.just_quoted(pair, yes, no, now):
+        hold = self.hold(pair, yes, no, now)
+        if hold > 0:
+            self.held.add(pair["id"])
+            if self.recheck:
+                self.recheck(pair["id"], hold)
             return False
         wait = self.confirm_wait(yes, no, now)
         if wait is None or wait > 0:

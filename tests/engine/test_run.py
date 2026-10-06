@@ -137,12 +137,12 @@ def test_a_session_trading_both_modes_keeps_a_desk_for_each_and_offers_live_the_
     s = asyncio.run(scenario())
     assert [d.mode for d in s.desks] == ["live", "paper"]
     assert s.scanner.on_signals == [s.desks[0].signal, s.desks[1].signal]
-    assert all(d.executor.recheck == s.scanner.recheck for d in s.desks)
+    assert all(d.executor.recheck == s.scanner.recheck and d.executor.edge_since == s.scanner.edge_since for d in s.desks)
     assert s.desks[0].cash.amounts == {"kalshi": 800.0, "polymarket_us": 600.0}
     assert s.desks[1].cash.amounts == {"kalshi": 10000.0, "polymarket_us": 10000.0}         # Paper money is its own.
     out = [line[9:] for line in capsys.readouterr().out.splitlines()]                       # Past the timestamp.
     assert out[0].startswith("settings: min edge") and out[1].startswith(
-        "LIVE TRADING with real money: an edge as soon as seen, a future's orders down to the levels returning 100% a year, balances read")
+        "LIVE TRADING with real money: a future's edge as soon as seen, its orders down to the levels returning 100% a year, balances read")
     assert out[2:6] == ["live trades the futures of nfl", f"no email settings in {tmp_path / 'email.json'}, alerts are only logged and stored",
                         out[4], "paper trades the games, matches, races, and windows of every sport that pay within 24h, in play too"]
     assert out[4].startswith("paper rejects 0% of orders")
@@ -200,8 +200,8 @@ def test_live_in_play_is_offered_games_too_alone_or_beside_paper_which_gets_back
     # Live alone is offered the games and the futures. Whether a game is under way its executor judges, see live.py.
     assert s.desks[0].markets is None and s.desks[0].executor.in_play and s.desks[0].executor.footprints is None
     assert offered == [("live", "2026-10-11"), ("live", None)] and results == [True, True]
-    assert ("live also trades the games, matches, races, and windows under way of every sport that pay within 24h, an edge of 0.05$ "
-            "or more at once, as Polymarket US's book for its leg changes, at most 5 contracts a trade, for 200 trades, 0 taken so far, "
+    assert ("live also trades the games, matches, races, and windows under way of every sport that pay within 24h, an edge of 0.02$ "
+            "or more once it has lasted 0.5s at 0.02$ or more, at most 10 contracts a trade, "
             "Polymarket US's order first and Kalshi's for what it filled") in capsys.readouterr().out
     s, offered, results = asyncio.run(scenario(run.EXECUTE["both"]))
     # Beside paper both take the game, live first, and paper is given back what live's orders took.

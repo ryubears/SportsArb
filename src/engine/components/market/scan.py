@@ -19,22 +19,25 @@ and its own fill empties the levels it takes, so the Opportunity keeps
 too what one order could have had as live takes it: the contracts
 fillable on the levels at live's least edge or more, see
 pricing.live_min_edge(), and what they lock in, and whether that moment
-came with a change of the Polymarket US leg's book, which live needs in
-play. It is the best of the moments at the peak's edge, and of every
-moment while none of those had offered a whole contract: a peak's first
-moment can offer a fraction of one, where live, which opens whole
-contracts, trades a moment later at the same edge or a little less. Until
-2026-10-06 only the peak's first moment counted, and 21 of 55 live
-futures trades that evening came from episodes kept with under a contract.
+came with a change of the Polymarket US leg's book. It is the best of the
+moments at the peak's edge, and of every moment while none of those had
+offered a whole contract: a peak's first moment can offer a fraction of
+one, where live, which opens whole contracts, trades a moment later at the
+same edge or a little less. Until 2026-10-06 only the peak's first moment
+counted, and 21 of 55 live futures trades that evening came from episodes
+kept with under a contract. On a game under way only the moments once the
+edge has stayed at config.MIN_EDGE or more for
+config.LIVE_IN_PLAY_HOLD_SECONDS count, since live trades it only then.
 
 The recorder drives the Scanner with the books it holds in memory and
 the Scanner stores every episode as it ends, so the opportunities table
 is the log of everything it saw. The summary script reads it. The
 pricing itself lives in pricing.py.
 
-A desk that turns an edge down only to wait for a book to catch up asks
-for the pair again once the wait ends, through recheck(), so the edge is
-offered then rather than at the next change or tick, up to a second later.
+A desk that turns an edge down only to wait for a book to catch up, or
+for the edge to last, see edge_since(), asks for the pair again once the
+wait ends, through recheck(), so the edge is offered then rather than at
+the next change or tick, up to a second later.
 """
 
 import asyncio
@@ -205,17 +208,22 @@ class Scanner:
         levels at live's least edge on the pair or more, see
         pricing.live_min_edge(), the net dollars they lock in, and whether
         the pricing came with a change of the Polymarket US leg's book, which
-        live needs to trade a game under way, see
+        live traded a game under way on from 2026-10-05 to 10-06, see
         pricing.polymarket_us_just_changed(). The best has a whole contract
-        or more, the fewest a trade opens, then on a game under way that
-        change, then the most profit.
+        or more, the fewest a trade opens, then the most profit. On a game
+        under way a moment counts only once the episode's edge has stayed at
+        config.MIN_EDGE or more for config.LIVE_IN_PLAY_HOLD_SECONDS, as
+        live waits for it to, see LiveExecutor.hold().
         """
         under_way = started(pair["game_date"], pair["members"], now)
+        if under_way and (episode.worth_since is None
+                          or seconds_between(episode.worth_since, now) < config.LIVE_IN_PLAY_HOLD_SECONDS):
+            return
         pays_at = payout_time((priced.yes, priced.no), pair["sport"])
         floor = live_min_edge(under_way, days_until(now, pays_at))
         size, profit = fillable(priced.yes, priced.no, books, self.fee_infos, floor)
         pm_changed = polymarket_us_just_changed(priced.yes, priced.no, books, now)
-        rank = (size >= 1, pm_changed or not under_way, profit)
+        rank = (size >= 1, profit)
         if episode.take_rank is None or rank > episode.take_rank:
             episode.take, episode.pm_changed, episode.take_rank = (size, profit), pm_changed, rank
 
@@ -231,16 +239,25 @@ class Scanner:
                 episode = self.episodes[pair_id] = Episode(pair, now, priced, now)
             elif priced.edge > episode.peak.edge:
                 episode.peak, episode.peak_ts = priced, now
+            episode.see(priced, now)
             # What one order could have had, worked out at the peak's edge, and at every moment until a whole contract was
             # on offer, not on every pricing.
             if priced.edge >= episode.peak.edge or episode.take[0] < 1:
                 self.weigh_take(episode, pair, priced, books, now)
-            episode.see(priced, now)
             for i, on_signal in enumerate(self.on_signals):
                 if i not in episode.taken and on_signal(pair, priced.yes, priced.no, priced.edge, priced.size, self.fee_infos, now):
                     episode.taken.add(i)
         elif episode is not None:
             self.close(pair_id, now)
+
+    def edge_since(self, pair_id):
+        """
+        When the pair's open episode last reached config.MIN_EDGE, by our
+        clock, if it has stayed there since, or None. A desk that trades an
+        edge only once it has lasted asks, see Executor.hold().
+        """
+        episode = self.episodes.get(pair_id)
+        return episode.worth_since if episode else None
 
     def reprice(self, pair_id):
         """
@@ -253,9 +270,10 @@ class Scanner:
     def recheck(self, pair_id, seconds):
         """
         Price a pair again in seconds, when a desk waits that long for a
-        book to catch up, see Executor.confirm_wait(). A pair keeps one
-        timer, the soonest asked for. Outside a running loop, and without
-        books, the next change or tick prices it instead.
+        book to catch up, see Executor.confirm_wait(), or for its edge to
+        last, see Executor.hold(). A pair keeps one timer, the soonest asked
+        for. Outside a running loop, and without books, the next change or
+        tick prices it instead.
         """
         try:
             loop = asyncio.get_running_loop()

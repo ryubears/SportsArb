@@ -399,13 +399,6 @@ def load_holdings(conn, mode):
     return {(venue, contract_id): round(contracts, 2) for venue, contract_id, contracts in rows if round(contracts, 2)}
 
 
-def count_in_play_trades(conn, mode):
-    """
-    How many trades of a mode were made on a game under way, of those that say, see Trade.in_play.
-    """
-    return conn.execute("SELECT COUNT(*) FROM trades WHERE mode = ? AND in_play = 1", (mode,)).fetchone()[0]
-
-
 def last_order_id(conn):
     """
     The id of the newest live order, or None when there is none.

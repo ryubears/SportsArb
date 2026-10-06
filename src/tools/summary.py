@@ -11,9 +11,9 @@ since a trade opens no fewer, on the levels at live's least edge or more,
 see pricing.live_min_edge(): on a future paying config.MIN_PAYOUT_HOURS
 or more out, the levels returning config.MIN_ANNUAL_PCT a year, and on a
 game under way paying within config.MAX_PAYOUT_HOURS, those at
-config.LIVE_IN_PLAY_MIN_EDGE or more, when that moment came with a change
-of Polymarket US's book, as live needs. Which moment is the scanner's,
-see Opportunity.take_size.
+config.LIVE_IN_PLAY_MIN_EDGE or more once the edge has lasted
+config.LIVE_IN_PLAY_HOLD_SECONDS, as live waits for it to. Which moment
+is the scanner's, see Opportunity.take_size.
 Each market shows what those orders could have taken at full size and
 what that locks in, overall, by sport and kind, and the largest, and how
 long the edge stayed at config.MIN_EDGE or more, in seconds to the
@@ -210,21 +210,25 @@ def opportunity_rules(market):
     a year at the peak, on the levels returning that, and the games,
     matches, races, and windows under way at the peak paying within
     config.MAX_PAYOUT_HOURS, on the levels at config.LIVE_IN_PLAY_MIN_EDGE
-    or more, of which no return a year is asked, and whose order came with
-    a change of the Polymarket US leg's book, the only moment live trades
-    one, see Opportunity.pm_changed. A book that stands still there in
-    play may be on a market no longer trading: two episodes of one
-    Bitcoin window on 2026-10-05 showed 5,304$ to be locked in at 18.7 and
-    51.8 cents, unlikely to be real when both venues settle it on the same
-    index. Which levels count, and at which moment, is the scanner's, see
-    Opportunity.take_size.
+    or more, of which no return a year is asked, whose edge stayed at
+    config.MIN_EDGE or more for config.LIVE_IN_PLAY_HOLD_SECONDS, as live
+    waits for it to, see LiveExecutor.hold(). The scanner counts a game's
+    moments only from then, so the stretch condition leaves out only the
+    episodes of before 2026-10-06, kept by the rules of then. Lasting does
+    not make an edge real: two episodes of one Bitcoin window on 2026-10-05
+    showed 5,304$ to be locked in at 18.7 and 51.8 cents for one and two
+    minutes, unlikely when both venues settle it on the same index, likely
+    a book left standing on a market no longer trading. When that book is
+    Polymarket US's, live, sending its order first, loses only an order
+    that fills nothing. Which levels count, and at which moment, is the
+    scanner's, see Opportunity.take_size.
     """
     if market == "futures":
         return ("live = 0 AND days_held * 24 >= ? AND annual_pct >= ?", (config.MIN_PAYOUT_HOURS, config.MIN_ANNUAL_PCT),
                 f"levels returning {config.MIN_ANNUAL_PCT}%+ a year, paying {config.MIN_PAYOUT_HOURS}h+ out")
-    return ("live = 1 AND days_held * 24 <= ? AND pm_changed = 1", (config.MAX_PAYOUT_HOURS,),
-            f"levels at {100 * config.LIVE_IN_PLAY_MIN_EDGE:.0f}c+ as Polymarket US's book changed, games, matches, races, "
-            f"and windows under way, paying within {config.MAX_PAYOUT_HOURS}h")
+    return ("live = 1 AND days_held * 24 <= ? AND min_edge_seconds >= ?", (config.MAX_PAYOUT_HOURS, config.LIVE_IN_PLAY_HOLD_SECONDS),
+            f"levels at {100 * config.LIVE_IN_PLAY_MIN_EDGE:.0f}c+ once the edge lasted {config.LIVE_IN_PLAY_HOLD_SECONDS:g}s, "
+            f"games, matches, races, and windows under way, paying within {config.MAX_PAYOUT_HOURS}h")
 
 
 def print_market_opportunities(conn, since, hours, sports, market):

@@ -25,16 +25,17 @@ and paper the bets on one event paying within a day, where faster traders
 may take the edges first, to see how they would do, its orders timed as
 live ones are. By default the orders are paper. With `--execute live` or
 `--execute both` it sends real ones, and with `--live-in-play` live trades
-the games under way too, Polymarket US's order first, an edge of five cents
-or more at once as Polymarket US's book changes, at most 5 contracts a
-trade, for 200 trades. From October 4 to 5 the service on the instance
+the games under way too, Polymarket US's order first, an edge of two cents
+or more once it has lasted half a second, at most 10 contracts a trade.
+From October 4 to 5 the service on the instance
 traded every sport's futures and the elections live, with paper on every
 event beside it, and the in-play test below. From October 5 it is set to
 trade live alone: every sport's futures, Bitcoin's and the elections'
 included, and every game under way
-(`--execute live --live-in-play --not-live none`). From October 6 live
-trades the futures alone, the games in play switched off
-(`--execute live --not-live none`).
+(`--execute live --live-in-play --not-live none`). On October 6 live
+traded the futures alone for a time, the games in play switched off
+(`--execute live --not-live none`), until the games came back under the
+half second rules below.
 
 ## How it works
 
@@ -173,24 +174,25 @@ checks before it trades, below.
    takes the signal when the edge is at least `MIN_EDGE`, for live on a
    future the edge that returns `MIN_ANNUAL_PCT` a year until it pays and
    on a game under way `LIVE_IN_PLAY_MIN_EDGE` (`min_edge`), for live the
-   pair is a future, or with `--live-in-play` a game under way until
-   `LIVE_IN_PLAY_TRADES` of them (`plays`), the bet pays when the desk
-   trades it (`pays_in_time`), a future `MIN_PAYOUT_HOURS` or more away and
-   a game within `MAX_PAYOUT_HOURS`, and the edge returns `MIN_ANNUAL_PCT`
-   a year or more until then, asked of no game under way from 2026-10-05
-   (`pays_enough`), for live on a game under way the signal came with a
-   change of the Polymarket US leg's book (`just_quoted`), and a Polymarket
-   US leg's book is current (`confirm_wait`): newer than the Kalshi leg's
-   last change, by the venues' own clocks, or else that change is
-   `CONFIRM_SECONDS` old. Otherwise the edge waits, and the scanner offers
-   it again at the next change, or the moment the wait ends (`recheck`),
-   not at the next tick up to a second later. `quantity_for` walks both
-   ladders together through the levels that keep that edge and sets each
-   leg's limit at the deepest one, live on a game under way stopping at
-   `LIVE_IN_PLAY_CONTRACTS` (`most`). It then asks for `FILL_SHARE` of what
-   those levels show, but no more than the cash each venue can spend, on
-   Kalshi the cash on the market's shard, live as on paper. The cash is
-   reserved and the trade is stored before any order goes out.
+   pair is a future, or with `--live-in-play` a game under way (`plays`),
+   the bet pays when the desk trades it (`pays_in_time`), a future
+   `MIN_PAYOUT_HOURS` or more away and a game within `MAX_PAYOUT_HOURS`,
+   and the edge returns `MIN_ANNUAL_PCT` a year or more until then, asked
+   of no game under way from 2026-10-05 (`pays_enough`), for live on a game
+   under way the edge has stayed at `MIN_EDGE` or more for
+   `LIVE_IN_PLAY_HOLD_SECONDS`, by the scanner's episode (`hold`,
+   `Scanner.edge_since`), and a Polymarket US leg's book is current
+   (`confirm_wait`): newer than the Kalshi leg's last change, by the
+   venues' own clocks, or else that change is `CONFIRM_SECONDS` old.
+   Otherwise the edge waits, and the scanner offers it again at the next
+   change, or the moment the wait ends (`recheck`), not at the next tick up
+   to a second later. `quantity_for` walks both ladders together through
+   the levels that keep that edge and sets each leg's limit at the deepest
+   one, live on a game under way stopping at `LIVE_IN_PLAY_CONTRACTS`
+   (`most`). It then asks for `FILL_SHARE` of what those levels show, but
+   no more than the cash each venue can spend, on Kalshi the cash on the
+   market's shard, live as on paper. The cash is reserved and the trade is
+   stored before any order goes out.
 2. **Fill** (`run_trade`). With a leg on each venue, live's Polymarket US
    order goes first and its Kalshi order only once that has answered, for
    what it filled, and not at all when it filled nothing (`fill_legs`,
@@ -542,20 +544,22 @@ stretch at `MIN_EDGE` or more, and the contracts that stayed fillable
 through all of it, which is what an order sent any time in the stretch
 could have had. From 2026-10-05 it keeps too what one order could have had
 as live takes it, at once: the contracts on the levels at live's least edge
-or more, `pricing.live_min_edge()`, 5 cents on a game under way and 100% a
-year on a future, and what they lock in, and whether that moment came with
-a change of the Polymarket US leg's book (`pm_changed`), the only moment
-live trades a game under way. The summary counts opportunities by that,
-since live's own fill empties the levels it takes. It is the best of the
-moments at the peak's edge, and of every moment while none of those had
-offered a whole contract (`Scanner.weigh_take`): a peak's first moment can
-offer a sliver of a contract, and live, which opens whole ones, trades a
-moment later at the same edge or a little less. Until 2026-10-06 only the
-peak's first moment counted, and 21 of the 55 live futures trades that
-evening came from episodes kept with under a contract, one of them filling
-30. A book goes stale after a minute only once its game may have started: a
-future's markets, and a game's before kickoff, can rest unchanged for hours
-while they are open, so their books are priced however old they are.
+or more, `pricing.live_min_edge()`, 2 cents on a game under way, counted
+only once the edge has lasted `LIVE_IN_PLAY_HOLD_SECONDS`, and 100% a year
+on a future, and what they lock in, and whether that moment came with a
+change of the Polymarket US leg's book (`pm_changed`), the only moment live
+traded a game under way from 2026-10-05 to 10-06. The summary counts
+opportunities by that, since live's own fill empties the levels it takes.
+It is the best of the moments at the peak's edge, and of every moment while
+none of those had offered a whole contract (`Scanner.weigh_take`): a peak's
+first moment can offer a sliver of a contract, and live, which opens whole
+ones, trades a moment later at the same edge or a little less. Until
+2026-10-06 only the peak's first moment counted, and 21 of the 55 live
+futures trades that evening came from episodes kept with under a contract,
+one of them filling 30. A book goes stale after a minute only once its game
+may have started: a future's markets, and a game's before kickoff, can rest
+unchanged for hours while they are open, so their books are priced however
+old they are.
 
 **trading/** trades the signal. **executor.py** holds what paper and live
 share, which is everything but how an order is filled. Live trades the
@@ -565,30 +569,30 @@ games, matches, races, and windows once under way that pay within 24 hours
 (`in_play`), before and while they are played, that pay within 24 hours
 (`MAX_PAYOUT_HOURS`), to see how they would do. A signal needs a net edge
 of at least two cents per contract (`MIN_EDGE`, five until 2026-10-04 16:03
-UTC; live on a game under way five cents, `LIVE_IN_PLAY_MIN_EDGE`, from
-2026-10-05), for live a payout at least 24 hours away (`MIN_PAYOUT_HOURS`),
-and a return of at least 100% a year on the money it ties up until then
-(`MIN_ANNUAL_PCT`, 50% until 2026-10-06), which is what weighs an edge
-against the time it ties the money up; the two cents only keep out the
-noise of a cent or so. From 2026-10-05 a game under way is asked no return
-a year: it pays within a day, where five cents returns over 1,900% a year,
-so the rate never turned one down. Two cents clears 100% a year for a bet
-paying within 7 days, five cents within 19, ten within 40, twenty within
-91. One limit order is sent per leg, live's Polymarket US order first with
-a leg on each venue, below. Both ladders are walked together and each leg's
-limit is set at the deepest level that still leaves the minimum edge, so an
-order sweeps every level above the floor rather than only the top one. A
-trade asks for all of what those levels show (`FILL_SHARE`, half until
-2026-10-04), as far as the cash free on each venue pays for, both legs from
-one venue's cash when they share it, live as on paper, with no cap on
-contracts but live's in play, below. No cash is held back: trades may spend
-all that is free. Since 2026-10-05 live's orders on a future sweep only the
-levels that themselves return `MIN_ANNUAL_PCT` a year until it pays, as the
-top must, not every level down to `MIN_EDGE`: for a future four months out
-that stops at about 14 cents (`LiveExecutor.min_edge`,
-`pricing.edge_for_annual`). The two cents never decided whether a future
-was traded, since every one pays 27 days or more out, where 100% a year
-needs 6.9 cents, and 50% needed 3.6.
+UTC; live on a game under way, `LIVE_IN_PLAY_MIN_EDGE`, five cents from
+2026-10-05 and two again from 2026-10-06), for live a payout at least 24
+hours away (`MIN_PAYOUT_HOURS`), and a return of at least 100% a year on
+the money it ties up until then (`MIN_ANNUAL_PCT`, 50% until 2026-10-06),
+which is what weighs an edge against the time it ties the money up; the two
+cents only keep out the noise of a cent or so. From 2026-10-05 a game under
+way is asked no return a year: it pays within a day, where two cents
+returns over 700% a year, so the rate would never turn one down. Two cents
+clears 100% a year for a bet paying within 7 days, five cents within 19,
+ten within 40, twenty within 91. One limit order is sent per leg, live's
+Polymarket US order first with a leg on each venue, below. Both ladders are
+walked together and each leg's limit is set at the deepest level that still
+leaves the minimum edge, so an order sweeps every level above the floor
+rather than only the top one. A trade asks for all of what those levels
+show (`FILL_SHARE`, half until 2026-10-04), as far as the cash free on each
+venue pays for, both legs from one venue's cash when they share it, live as
+on paper, with no cap on contracts but live's in play, below. No cash is
+held back: trades may spend all that is free. Since 2026-10-05 live's
+orders on a future sweep only the levels that themselves return
+`MIN_ANNUAL_PCT` a year until it pays, as the top must, not every level
+down to `MIN_EDGE`: for a future four months out that stops at about 14
+cents (`LiveExecutor.min_edge`, `pricing.edge_for_annual`). The two cents
+never decided whether a future was traded, since every one pays 27 days or
+more out, where 100% a year needs 6.9 cents, and 50% needed 3.6.
 
 In **paper.py** each order goes the way a live one does. It takes a trip
 to its venue and a trip back, each drawn from a lognormal with the median
@@ -684,7 +688,8 @@ once it had stayed at `MIN_EDGE` or more for half a second, unbroken, as
 the scanner's episode timed it, and the scanner offered it again when the
 half second was up. In its first hours no in-play edge passed, the largest
 lasting 6 to 110 ms, and the user dropped it with the in-play rules below:
-live takes an edge the moment it sees it, as paper does.
+live takes a future's edge the moment it sees it, as paper does. From
+2026-10-06 it is back for games under way alone, below.
 
 **Games in play.** With `--live-in-play` live also trades the games,
 matches, races, and windows under way, of every sport, Bitcoin's windows
@@ -739,25 +744,30 @@ seconds, without a change. Since 2026-10-05 every live order stores when
 its book last changed, and the summary shows how often orders took
 something by how long the book had been quiet, to tell.
 
-**In-play rules.** Since 2026-10-05, at the user's asking, live on a game
-under way takes an edge of five cents or more (`LIVE_IN_PLAY_MIN_EDGE`),
-and sweeps the levels down to that, at once, but only on the signal a
-change of the Polymarket US leg's book brings (`just_quoted`): not on one a
-change of the Kalshi book brings, nor a recheck, nor the tick, since in
-play a Polymarket US price that has stood still may be one no order can
-fill, above. `LIVE_IN_PLAY_PM_SECONDS`, 0, set higher would let in a book
-that reached us within that many seconds. The Polymarket US book must still
-be current (`confirm_wait`), so one the venue made before the Kalshi book's
-last change is passed over, and its next change may be traded instead.
-Every in-play Polymarket US order now goes out on a book that has just
-changed, so the book times compare the orders before the rule with those
-after it. A trade asks for no more than 5 contracts
-(`LIVE_IN_PLAY_CONTRACTS`), its limits going no deeper than the levels that
-hold them, and after 200 such trades (`LIVE_IN_PLAY_TRADES`) live takes no
-more on games under way, while futures go on. Each trade now says whether
-its game was under way at the signal (the trades table's `in_play`, null
-before), and those of live are counted from there, so a restart goes on
-counting; to run more, raise the limit.
+**In-play rules.** Since 2026-10-06, at the user's asking, live on a game
+under way takes an edge of two cents or more (`LIVE_IN_PLAY_MIN_EDGE`), and
+sweeps the levels down to that, but only once the edge has stayed at
+`MIN_EDGE` or more, unbroken, for half a second
+(`LIVE_IN_PLAY_HOLD_SECONDS`), as the scanner's episode times it
+(`LiveExecutor.hold`, `Scanner.edge_since`): one that ends sooner is never
+traded, and one still there when the half second is up is priced again
+then (`recheck`) and traded, whichever venue's book changed last. The
+Polymarket US book must still be current (`confirm_wait`). A trade asks
+for no more than 10 contracts (`LIVE_IN_PLAY_CONTRACTS`), its limits going
+no deeper than the levels that hold them, and a whole one or more, with no
+limit on how many such trades. Each trade says whether its game was under
+way at the signal (the trades table's `in_play`, null before 2026-10-05).
+Lasting does not make an edge real: the two Bitcoin window episodes of
+2026-10-05 that showed $5,304 stayed at two cents or more for one and two
+minutes, likely a book left standing on a market no longer trading; when
+that book is Polymarket US's, its order going first fills nothing and no
+Kalshi order is sent.
+
+From 2026-10-05 to 10-06 the rules were others: five cents at once, but
+only on the signal a change of the Polymarket US leg's book brought, not
+one a change of the Kalshi book brought, a recheck, or the tick, at most 5
+contracts a trade, for 200 trades. In seven hours of games they let one
+episode through, an MLB game winner at five cents, and no trade was made.
 
 Live trading has brakes, in **brakes.py**, sized for a test with about $100
 on each venue. An order whose outcome cannot be known (a timeout, a dropped
@@ -844,48 +854,47 @@ the futures under a heading of its own, then everything on the games in
 play, or one of them with `--market futures` or `--market in-play`. Each
 market starts with its opportunities as live takes them, at once: an
 episode counts when one order could have had a whole contract or more on
-the levels at live's least edge or more, the levels
-returning `MIN_ANNUAL_PCT` a year on a future paying `MIN_PAYOUT_HOURS` or
-more out, and those at `LIVE_IN_PLAY_MIN_EDGE` or more on a game, match,
-race, or window under way paying within `MAX_PAYOUT_HOURS`, when that
-moment came with a change of the Polymarket US leg's book, as live needs,
-the moment being the scanner's (`Scanner.weigh_take`): a book
-standing still there in play may be on a market no longer trading, as two
-episodes of one Bitcoin window on 2026-10-05 seemed to be, showing $5,304
-to be locked in at 18.7 and 51.8 cents though both venues settle it on the
-same index. It shows what those orders could have taken and locked in at
-full size, how long the edge stayed at `MIN_EDGE` or more, in seconds to
-the thousandth, at the median, the 90th percentile, and the longest, the
-same by sport and kind, and the largest five. An edge on less than a
-contract, a sliver of a Polymarket US level that can last minutes, is left
-out, since a trade opens a whole contract or more and so could never take
-it. Until 2026-10-05 an episode counted only with a whole contract fillable
-through all of its longest stretch at `MIN_EDGE`, which left out the very
-episodes live traded, since its own fill empties the levels it takes: of
-the two futures it traded in the hour after the 15:14 UTC restart, one
-stretch kept 0.29 contracts and the other 0.01. Episodes from before the
-scanner kept what one order could have had, and ones still open, which are
-stored only once they end, are left out. The market then shows, for paper
-and then live, or one of them with `--mode paper` or `--mode live`, the
-trades by outcome, filled, partial, then failed, and by sport and kind in
-the window, the five holding the most capital, the legs settled in it by
-venue, and the open trades: in a few lines, how many, how many of them
-opened in the last hour, day, and week and the capital those still hold,
-the capital they all hold on each venue and the profit they are expected to
-return with its rate a year weighted by capital, and the first, average,
-and last dates they resolve, the first maybe past and waiting on a venue,
-the average weighted by capital; then a table of each open trade opened in
-the window, newest first, with what it holds, its capital, expected profit
-and rates, and when it pays. Live's trades end with its real orders sent by
-venue and what came back, then its orders to open by venue, the side they
-bought, and how long the venue had sent nothing for the market when each
-went out (0-1, 1-5, 5-30, 30+ seconds), with how many took something. The
-paper money from the ledger and the live balances read from the venues now,
-with Kalshi's shards, come last. Each section is a title line with its
-details on indented lines under it, and a long list, such as the pairs of
-each sport, wraps at 100 characters. `--hours` sets the window, `--sport
-nfl,ncaaf` narrows everything to some sports, and `--no-live` leaves out
-the live balances.
+the levels at live's least edge or more, the levels returning
+`MIN_ANNUAL_PCT` a year on a future paying `MIN_PAYOUT_HOURS` or more out,
+and those at `LIVE_IN_PLAY_MIN_EDGE` or more on a game, match, race, or
+window under way paying within `MAX_PAYOUT_HOURS`, once the edge has lasted
+`LIVE_IN_PLAY_HOLD_SECONDS`, as live waits for it to, the moment being the
+scanner's (`Scanner.weigh_take`). Lasting does not make an edge real: two
+episodes of one Bitcoin window on 2026-10-05 showed $5,304 to be locked in
+at 18.7 and 51.8 cents for one and two minutes, though both venues settle
+it on the same index. It shows what those orders could have taken and
+locked in at full size, how long the edge stayed at `MIN_EDGE` or more, in
+seconds to the thousandth, at the median, the 90th percentile, and the
+longest, the same by sport and kind, and the largest five. An edge on less
+than a contract, a sliver of a Polymarket US level that can last minutes,
+is left out, since a trade opens a whole contract or more and so could
+never take it. Until 2026-10-05 an episode counted only with a whole
+contract fillable through all of its longest stretch at `MIN_EDGE`, which
+left out the very episodes live traded, since its own fill empties the
+levels it takes: of the two futures it traded in the hour after the 15:14
+UTC restart, one stretch kept 0.29 contracts and the other 0.01. Episodes
+from before the scanner kept what one order could have had, and ones still
+open, which are stored only once they end, are left out. The market then
+shows, for paper and then live, or one of them with `--mode paper` or
+`--mode live`, the trades by outcome, filled, partial, then failed, and by
+sport and kind in the window, the five holding the most capital, the legs
+settled in it by venue, and the open trades: in a few lines, how many, how
+many of them opened in the last hour, day, and week and the capital those
+still hold, the capital they all hold on each venue and the profit they are
+expected to return with its rate a year weighted by capital, and the first,
+average, and last dates they resolve, the first maybe past and waiting on a
+venue, the average weighted by capital; then a table of each open trade
+opened in the window, newest first, with what it holds, its capital,
+expected profit and rates, and when it pays. Live's trades end with its
+real orders sent by venue and what came back, then its orders to open by
+venue, the side they bought, and how long the venue had sent nothing for
+the market when each went out (0-1, 1-5, 5-30, 30+ seconds), with how many
+took something. The paper money from the ledger and the live balances read
+from the venues now, with Kalshi's shards, come last. Each section is a
+title line with its details on indented lines under it, and a long list,
+such as the pairs of each sport, wraps at 100 characters. `--hours` sets
+the window, `--sport nfl,ncaaf` narrows everything to some sports, and
+`--no-live` leaves out the live balances.
 
 `src/tools/live_check.py` reads both venues' balances with the keys in
 `data/` and says when the Kalshi key's location attestation lapses, and
@@ -1189,6 +1198,11 @@ older rules, and the 9% returning 100% or more made 22% of the profit),
 a future's Polymarket US order goes first, a future's legs may again be
 Polymarket US's two listings of a win total, and the scanner counts what
 one order could have had at more than the peak's first moment, all above.
+Later that day the games in play came back, at two cents once the edge
+had lasted half a second, whichever book changed last, at most 10
+contracts a trade, with no limit on trades. On the Sunday of October 4,
+2,035 NFL episodes in play stayed at two cents or more for half a second,
+62 of them with a whole contract fillable throughout.
 
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.

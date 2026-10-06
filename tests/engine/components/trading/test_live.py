@@ -577,17 +577,17 @@ def signal(ex, pair=GAME, members=(YES, NO), now=UNDER_WAY, edge=0.08):
 
 
 @pytest.mark.full_share
-def test_live_trades_a_game_under_way_at_most_five_contracts_polymarket_us_first(tmp_path):
+def test_live_trades_a_game_under_way_at_most_ten_contracts_polymarket_us_first(tmp_path):
     venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
     latest = books(size=100)
     latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [[0.44, 20]], [[0.45, 3], [0.46, 20], [0.48, 20]])
     conn, ex = in_play(tmp_path, venues, latest)
     assert signal(ex)
     t = stored(conn)[0]
-    # Five contracts need the second level, so the limit goes no deeper, though the third keeps five cents too.
-    assert (t["quantity"], t["yes_limit"], t["no_limit"], t["status"], t["in_play"]) == (5, 0.46, 0.47, "filled", 1)
+    # Ten contracts need the second level, so the limit goes no deeper, though the third keeps two cents too.
+    assert (t["quantity"], t["yes_limit"], t["no_limit"], t["status"], t["in_play"]) == (10, 0.46, 0.47, "filled", 1)
     # Polymarket US's order goes first, and Kalshi's once it has answered, for what it filled.
-    assert venues.orders == [("polymarket_us", "buy", "yes", 5, 0.46), ("kalshi", "buy", "no", 5, 0.47)]
+    assert venues.orders == [("polymarket_us", "buy", "yes", 10, 0.46), ("kalshi", "buy", "no", 10, 0.47)]
 
 
 def test_in_play_a_game_not_yet_under_way_and_one_paying_too_late_are_not_traded(tmp_path):
@@ -620,12 +620,12 @@ def test_polymarket_us_first_sends_kalshi_only_what_it_filled_and_nothing_when_i
     conn, ex = in_play(tmp_path, venues, books(size=100))
     assert signal(ex)
     t = stored(conn)[0]
-    assert venues.orders == [("polymarket_us", "buy", "yes", 5, 0.45), ("kalshi", "buy", "no", 3, 0.47)]
-    assert (t["quantity"], t["yes_filled"], t["no_filled"], t["matched"], t["status"]) == (5, 3, 3, 3, "partial")
+    assert venues.orders == [("polymarket_us", "buy", "yes", 10, 0.45), ("kalshi", "buy", "no", 3, 0.47)]
+    assert (t["quantity"], t["yes_filled"], t["no_filled"], t["matched"], t["status"]) == (10, 3, 3, 3, "partial")
     assert signal(ex, {**GAME, "id": 2})
     t = stored(conn)[1]
     # Polymarket US filled nothing, so Kalshi was never sent and nothing is held: there is nothing to sell back.
-    assert venues.orders[2:] == [("polymarket_us", "buy", "yes", 5, 0.45)]
+    assert venues.orders[2:] == [("polymarket_us", "buy", "yes", 10, 0.45)]
     assert (t["yes_filled"], t["no_filled"], t["yes_held"], t["no_held"], t["status"]) == (0, 0, 0, 0, "failed")
     assert t["hedge"] == "no leg not sent, as polymarket_us filled nothing first"
     assert ex.cash.reserved == {} or not any(ex.cash.reserved.values())
@@ -650,16 +650,16 @@ def test_live_trades_a_future_by_its_return_a_year_and_sweeps_only_the_levels_th
     assert [(t["quantity"], t["yes_limit"], t["in_play"]) for t in stored(conn)] == [(20, 0.515, 0), (20, 0.45, 0)]
 
 
-# IN PLAY RULES, live trading a game under way at five cents, at once, as Polymarket US's book changes, 5 contracts, 200 trades
+# IN PLAY RULES, live trading a game under way at two cents once it has lasted half a second, 10 contracts a trade
 
-def test_in_play_live_takes_an_edge_of_five_cents_or_more_at_once(tmp_path):
+def test_in_play_live_takes_an_edge_of_two_cents_or_more(tmp_path):
     venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
-    latest = books(pm_ask=0.49)                                         # Yes at 0.49 and no at 0.47, four cents.
+    latest = books(pm_ask=0.52)                                         # Yes at 0.52 and no at 0.47, a cent.
     conn, ex = in_play(tmp_path, venues, latest)
-    assert not signal(ex, edge=0.04) and venues.orders == []
-    latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", UNDER_WAY, [[0.47, 20]], [[0.48, 20]])    # Five cents.
-    assert signal(ex, edge=0.05)
-    assert venues.orders == [("polymarket_us", "buy", "yes", 5, 0.48), ("kalshi", "buy", "no", 5, 0.47)]
+    assert not signal(ex, edge=0.01) and venues.orders == []
+    latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", UNDER_WAY, [[0.50, 20]], [[0.51, 20]])    # Two cents.
+    assert signal(ex, edge=0.02)
+    assert venues.orders == [("polymarket_us", "buy", "yes", 10, 0.51), ("kalshi", "buy", "no", 10, 0.47)]
 
 
 def test_in_play_live_asks_no_return_a_year_of_a_game_under_way(tmp_path, monkeypatch):
@@ -670,31 +670,44 @@ def test_in_play_live_asks_no_return_a_year_of_a_game_under_way(tmp_path, monkey
     assert signal(ex) and [t["in_play"] for t in stored(conn)] == [1]
 
 
-def test_in_play_live_stops_after_its_trades_on_games_under_way_and_a_restart_goes_on_counting(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "LIVE_IN_PLAY_TRADES", 2)
+def test_in_play_live_takes_as_many_trades_on_games_under_way_as_come(tmp_path):
     venues = Venues(polymarket_us=[fills()] * 3, kalshi=[fills()] * 3)
-    logs = []
-    latest = books()
-    conn, ex = in_play(tmp_path, venues, latest, logs)
-    assert signal(ex) and signal(ex) and not signal(ex)
-    assert "live has made 2 trades on games under way, so it makes no more; futures go on" in logs
-    assert signal(ex, FUTURE, SURE)                                     # Futures go on.
+    conn, ex = in_play(tmp_path, venues, books())
+    assert signal(ex) and signal(ex) and signal(ex, FUTURE, SURE)
     assert [t["in_play"] for t in stored(conn)] == [1, 1, 0]
-    conn, ex = in_play(tmp_path, venues, latest)                        # A restart.
-    assert ex.in_play_trades == 2 and not signal(ex) and len(venues.orders) == 6
 
 
-def test_in_play_live_trades_only_on_the_signal_a_change_of_polymarket_us_book_brings(tmp_path, monkeypatch):
-    venues = Venues(polymarket_us=[fills()] * 3, kalshi=[fills()] * 3)
+def test_in_play_live_trades_an_edge_only_once_it_has_lasted_and_asks_to_be_offered_it_again_then(tmp_path):
+    venues = Venues(polymarket_us=[fills()] * 2, kalshi=[fills()] * 2)
+    conn, ex = in_play(tmp_path, venues, books())
+    since, asked = {}, []
+    ex.edge_since = since.get
+    ex.recheck = lambda pair_id, seconds: asked.append((pair_id, round(seconds, 3)))
+    since[GAME["id"]] = "2026-09-22T17:59:59.800000+00:00"             # At 2c or more for two tenths of a second.
+    assert not signal(ex) and venues.orders == [] and stored(conn) == []
+    assert asked == [(GAME["id"], 0.3)]                                # Offered again once it has lasted half a second.
+    assert "; 1 pairs' edges held until they lasted" in ex.summary()
+    since[GAME["id"]] = "2026-09-22T17:59:59.500000+00:00"             # Half a second.
+    assert signal(ex) and len(venues.orders) == 2 and asked == [(GAME["id"], 0.3)]
+    since[FUTURE["id"]] = UNDER_WAY                                     # A future's edge, just begun, is taken at once.
+    assert signal(ex, FUTURE, SURE) and len(venues.orders) == 4
+
+
+def test_in_play_live_trades_a_lasting_edge_whichever_book_changed_last(tmp_path):
+    venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
     latest = books()
     conn, ex = in_play(tmp_path, venues, latest)
+    ex.edge_since = lambda pair_id: "2026-09-22T17:59:59+00:00"         # A second at 2c or more.
     pm, k = latest[("polymarket_us", "pm")], latest[("kalshi", "k")]
-    changed = "2026-09-22T17:59:59.900000+00:00"                        # When Polymarket US's book reached us, a tenth of a second ago.
-    latest[("polymarket_us", "pm")] = Book(pm.venue, pm.contract_id, changed, pm.bids, pm.asks)
-    latest[("kalshi", "k")] = Book(k.venue, k.contract_id, "2026-09-22T17:59:50+00:00", k.bids, k.asks)
-    assert not signal(ex) and venues.orders == []                       # Brought by Kalshi's book, another member's, a recheck, or the tick.
-    assert signal(ex, now=changed)                                      # Brought by that change.
-    assert signal(ex, FUTURE, SURE)                                     # A future is traded on any.
-    monkeypatch.setattr(config, "LIVE_IN_PLAY_PM_SECONDS", 0.2)
-    assert signal(ex)                                                   # Within 0.2s of the change, when that is allowed.
-    assert len(stored(conn)) == 3
+    latest[("polymarket_us", "pm")] = Book(pm.venue, pm.contract_id, "2026-09-22T17:59:50+00:00", pm.bids, pm.asks)
+    latest[("kalshi", "k")] = Book(k.venue, k.contract_id, "2026-09-22T17:59:59.600000+00:00", k.bids, k.asks)
+    # Kalshi's change came last, 0.4s ago, longer than a Polymarket US book takes to catch up, see Executor.confirm_wait().
+    assert signal(ex)
+
+
+def test_in_play_live_trades_an_edge_at_once_when_no_scanner_says_when_it_began(tmp_path):
+    venues = Venues(polymarket_us=[fills()] * 2, kalshi=[fills()] * 2)
+    conn, ex = in_play(tmp_path, venues, books())
+    assert ex.edge_since is None and signal(ex)
+    ex.edge_since = lambda pair_id: None
+    assert signal(ex, {**GAME, "id": 2})

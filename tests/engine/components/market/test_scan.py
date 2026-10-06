@@ -136,19 +136,31 @@ def test_an_episode_never_at_the_minimum_edge_has_no_stretch(tmp_path):
     assert stretches(conn) == [(0.0, 0.0, 0.0)]
 
 
-def test_an_episode_keeps_what_an_order_at_its_peak_could_have_had_on_the_levels_live_takes(tmp_path):
+def test_an_episode_keeps_what_one_order_could_have_had_on_the_levels_live_takes(tmp_path):
     # Yes costs 0.40 on Polymarket US. At the peak no costs 0.47 on Kalshi for 40, 13 cents, 0.57 for 60 more, 3 cents,
-    # and 0.59 for 50 more, 1 cent. A future paying in 10 days takes the levels at 2.7 cents or more, 100% a year, and a
-    # game under way those at 5 cents or more.
+    # and 0.59 for 50 more, 1 cent. A future paying in 10 days takes the levels at 2.7 cents or more, 100% a year, at
+    # once, so 10 cents on 500 a second after the peak counts for nothing. A game under way takes those at 2 cents or
+    # more once the edge has lasted half a second, so the peak, at once, counts for nothing, and the 500 for all.
     at = "2026-09-19T12:00:%02d+00:00"
-    for kickoff, take in ((None, (100, 7.0)), ("2026-09-19T11:00:00+00:00", (40, 5.2))):
+    for kickoff, take in ((None, (100, 7.0)), ("2026-09-19T11:00:00+00:00", (500, 50.0))):
         conn = make_db(tmp_path / str(kickoff is None), [member("kalshi", "k", start_time=kickoff),
                                                          member("polymarket_us", "pm", start_time=kickoff)], future=kickoff is None)
         replay(conn, [Book("polymarket_us", "pm", at % 0, [[0.39, 500]], [[0.40, 500]]),
                       Book("kalshi", "k", at % 1, [[0.53, 40], [0.43, 60], [0.41, 50]], [[0.99, 1]]),
-                      Book("kalshi", "k", at % 2, [[0.50, 500]], [[0.99, 1]]),    # 10 cents on 500 after the peak counts for nothing.
+                      Book("kalshi", "k", at % 2, [[0.50, 500]], [[0.99, 1]]),
                       Book("kalshi", "k", at % 3, [[0.40, 100]], [[0.99, 1]])])
         assert takes(conn) == [pytest.approx(take)], kickoff
+
+
+def test_a_games_episode_whose_edge_never_lasted_half_a_second_keeps_nothing_one_order_could_have_had(tmp_path):
+    kickoff = "2026-09-19T11:00:00+00:00"
+    conn = make_db(tmp_path, [member("kalshi", "k", start_time=kickoff), member("polymarket_us", "pm", start_time=kickoff)])
+    replay(conn, [Book("polymarket_us", "pm", "2026-09-19T12:00:00+00:00", [[0.39, 500]], [[0.40, 500]]),
+                  Book("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 40]], [[0.99, 1]]),                 # 13 cents.
+                  Book("kalshi", "k", "2026-09-19T12:00:01.400000+00:00", [[0.41, 40]], [[0.99, 1]]),          # 1 cent.
+                  Book("kalshi", "k", "2026-09-19T12:00:02+00:00", [[0.53, 40]], [[0.99, 1]]),                 # 13 again.
+                  Book("kalshi", "k", "2026-09-19T12:00:02.300000+00:00", [[0.40, 40]], [[0.99, 1]])])         # Gone.
+    assert takes(conn) == [(0.0, 0.0)] and stretches(conn) == [(pytest.approx(0.4), 40.0, pytest.approx(5.2))]
 
 
 def test_an_episode_keeps_what_one_order_could_have_had_once_its_peak_offered_a_whole_contract(tmp_path):
@@ -340,6 +352,21 @@ def test_recorder_prices_only_top_of_book_changes(tmp_path):
     r.on_book("kalshi", "k", [[0.5, 10], [0.48, 5]], [[0.52, 7]])     # Only a deeper level moved.
     r.on_book("kalshi", "k", [[0.5, 11]], [[0.52, 7]])                # Size at the top moved.
     assert calls == [("kalshi", "k"), ("kalshi", "k")]
+
+
+def test_edge_since_says_when_the_open_episode_last_reached_the_minimum_edge(tmp_path):
+    conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket_us", "pm")], future=True)
+    latest = {("kalshi", "k"): book("kalshi", "k", T0, 0.53, 0.54)}
+    s = scan.Scanner(conn, ("nfl",), lambda m: None)
+    times = ["2026-09-19T12:00:00+00:00", "2026-09-19T12:00:01+00:00", "2026-09-19T12:00:02+00:00", "2026-09-19T12:00:03+00:00",
+             "2026-09-19T12:00:04+00:00"]
+    seen = []
+    for ts, (bid, ask) in zip(times, [(0.40, 0.41), (0.40, 0.41), (0.51, 0.52), (0.40, 0.41), (0.45, 0.55)]):
+        latest[("polymarket_us", "pm")] = book("polymarket_us", "pm", ts, bid, ask)
+        s.on_book("polymarket_us", "pm", latest, ts)
+        seen.append(s.edge_since(next(iter(s.pairs))))
+    # 12c, still 12c, 1c (under the minimum, the episode goes on), 12c again, then no edge, so the episode ends.
+    assert seen == [times[0], times[0], None, times[3], None] and s.episodes == {}
 
 
 def test_a_pair_a_desk_waits_on_is_priced_again_once_the_wait_ends(tmp_path):

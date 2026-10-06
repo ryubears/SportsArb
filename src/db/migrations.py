@@ -231,9 +231,9 @@ def step_11_order_book_times(conn):
 def step_12_trades_in_play(conn):
     """
     Trades now say whether their game was under way at the signal, which
-    counts the live trades on games under way toward
-    config.LIVE_IN_PLAY_TRADES. Older trades did not, so theirs is null and
-    none of them counts.
+    counted the live trades on games under way toward the 200 the build of
+    2026-10-05 made. Older trades did not, so theirs is null and none of
+    them counted.
     """
     add_columns(conn, "trades", ["in_play"], "INTEGER")
 

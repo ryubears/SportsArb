@@ -66,15 +66,14 @@ PAPER_START_BALANCE = 10000.0   # Paper dollars per venue at the start.
 # LIVE, trading/live.py, trading/brakes.py, and money/live.py. A live trade is sized as a paper one is, by the books and the cash
 # alone. The brakes are sized for a test with about 100 dollars on each venue.
 
-LIVE_IN_PLAY_MIN_EDGE = 0.05    # The least edge live trades on a game under way, in place of MIN_EDGE, and the floor for the deeper
-                                # levels its orders sweep there, from 2026-10-05 at the user's asking.
-LIVE_IN_PLAY_CONTRACTS = 5      # The most contracts a live trade on a game under way asks for, from 2026-10-05 at the user's asking.
-LIVE_IN_PLAY_TRADES = 200       # The live trades on games under way after which live takes no more, from 2026-10-05 at the user's
-                                # asking. Counted by the trades table's in_play column, which trades before then lack, so a restart
-                                # goes on from there; raise it to run more. Futures go on.
-LIVE_IN_PLAY_PM_SECONDS = 0.0   # On a game under way, how long before a signal the Polymarket US leg's book may have reached us for
-                                # live to trade it, from 2026-10-05 at the user's asking. At 0 only the signal that book's own change
-                                # brings is traded, since in play a price that has stood still there may be one no order can fill.
+LIVE_IN_PLAY_MIN_EDGE = 0.02    # The least edge live trades on a game under way, and the floor for the deeper levels its orders sweep
+                                # there: five cents from 2026-10-05, two, as MIN_EDGE, from 2026-10-06, at the user's asking.
+LIVE_IN_PLAY_HOLD_SECONDS = 0.5 # How long a game's edge must have stayed at MIN_EDGE or more, unbroken, as the scanner times it,
+                                # before live trades it, from 2026-10-06 at the user's asking, so only an edge that lasts is taken.
+                                # Futures are taken at once. From 2026-10-05 to 10-06 live took a game's edge only on the signal
+                                # a change of the Polymarket US leg's book brought, which in seven hours let one episode through.
+LIVE_IN_PLAY_CONTRACTS = 10     # The most contracts a live trade on a game under way asks for: 5 from 2026-10-05, for 200 trades, and
+                                # 10 from 2026-10-06, for as many as come, at the user's asking.
 LIVE_BALANCE_SECONDS = 15   # Between readings of the venues' balances. Under http.IDLE_SECONDS, so each reading also keeps the
                             # venue's kept connection open for the next order: one opened afresh took Polymarket US 11 ms longer.
 LIVE_LOW_CASH = 5.0         # Dollars on a live venue, or on one of its shards in LIVE_SHARDS, under which a human is emailed, once until

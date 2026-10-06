@@ -139,7 +139,6 @@ def test_step_12_gives_older_trades_no_in_play_so_none_of_them_counts(tmp_path):
 )"""
     conn = database.connect(older(tmp_path, 11, trades, "INSERT INTO trades (id, mode, signal_ts, pays_at) VALUES (1, 'live', 's', 'p')"))
     assert [tuple(r) for r in conn.execute("SELECT id, in_play FROM trades")] == [(1, None)]
-    assert database.count_in_play_trades(conn, "live") == 0
     assert version(conn) == len(migrations.STEPS)
 
 
