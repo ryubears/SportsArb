@@ -52,11 +52,18 @@ def test_the_edge_for_a_return_a_year_returns_just_that():
         assert pricing.annual_pct(pricing.edge_for_annual(50, days), days) == pytest.approx(50)
 
 
-def test_live_takes_five_cents_on_a_game_under_way_and_on_a_future_the_edge_returning_its_rate_a_year():
+def test_live_takes_its_in_play_edge_on_a_game_under_way_and_on_a_future_the_edge_returning_its_rate_a_year():
     assert pricing.live_min_edge(True, 0.1) == config.LIVE_IN_PLAY_MIN_EDGE
     assert pricing.live_min_edge(False, 27.25) == pytest.approx(0.0695, abs=0.0001)    # 6.95 cents returns 100% a year over 27 days.
     assert pricing.annual_pct(pricing.live_min_edge(False, 27.25), 27.25) == pytest.approx(config.MIN_ANNUAL_PCT)
     assert pricing.live_min_edge(False, None) == config.MIN_EDGE          # A bet that gives no payout.
+
+
+def test_live_holds_a_games_edge_until_it_has_lasted_half_a_second():
+    since = "2026-09-22T17:59:59.800000+00:00"                        # When the edge reached two cents.
+    assert pricing.live_hold(since, "2026-09-22T18:00:00+00:00") == pytest.approx(0.3)
+    assert pricing.live_hold(since, "2026-09-22T18:00:00.300000+00:00") == 0             # Half a second on.
+    assert pricing.live_hold(since, "2026-09-22T18:00:05+00:00") == 0
 
 
 def test_polymarket_us_just_changed_only_when_its_book_reached_us_at_the_pricing():

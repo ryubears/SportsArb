@@ -130,7 +130,7 @@ def test_step_11_gives_older_orders_null_book_times(tmp_path):
     assert version(conn) == len(migrations.STEPS)
 
 
-def test_step_12_gives_older_trades_no_in_play_so_none_of_them_counts(tmp_path):
+def test_step_12_gives_older_trades_no_in_play(tmp_path):
     trades = """CREATE TABLE trades (
     id             INTEGER PRIMARY KEY,
     mode           TEXT NOT NULL DEFAULT 'paper',
@@ -155,7 +155,7 @@ def test_step_13_gives_older_episodes_no_take_so_the_summary_leaves_them_out(tmp
     assert version(conn) == len(migrations.STEPS)
 
 
-def test_step_14_gives_older_episodes_no_polymarket_us_change_so_the_summary_leaves_those_in_play_out(tmp_path):
+def test_step_14_gives_older_episodes_no_polymarket_us_change(tmp_path):
     opportunities = """CREATE TABLE opportunities (
     id             INTEGER PRIMARY KEY,
     start_ts       TEXT NOT NULL,   -- When the net edge first went positive.

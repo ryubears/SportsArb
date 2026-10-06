@@ -27,11 +27,11 @@ Live trades the futures, see executor.py, and with run.py --live-in-play
 also the games, matches, races, and windows under way that pay within
 config.MAX_PAYOUT_HOURS, by its own rules below. With its legs on two
 venues, Polymarket US's order goes first and Kalshi's only once that has
-answered, for what it filled, see Executor.fill_legs(). From 2026-10-04 to 10-05 the in-play test traded
-200 of them at no more than 5 contracts, each beside a paper twin on the
-same signal, see tools/in_play_test.py. When paper trades the same games,
-each live order leaves a footprint of what it took, which paper adds back,
-see footprints.py.
+answered, for what it filled, see Executor.fill_legs(). From 2026-10-04 to
+10-05 the in-play test traded 200 of them at no more than 5 contracts,
+each beside a paper twin on the same signal, see tools/in_play_test.py.
+When paper trades the same games, each live order leaves a footprint of
+what it took, which paper adds back, see footprints.py.
 
 Live takes a future's edge the moment it sees it, as paper does, its
 orders sweeping only the levels that return config.MIN_ANNUAL_PCT a year
@@ -65,14 +65,14 @@ from concurrent.futures import ThreadPoolExecutor
 from api import kalshi, orders, polymarket_us
 from common import jsonutil
 from common.periodic import Periodic
-from common.timeutil import at_seconds, now_iso, seconds_between
+from common.timeutil import at_seconds, now_iso
 from common.venues import VENUES, is_maintenance
 from db import database
 from db.models import Order
 from engine.components.trading.brakes import Brakes
 from engine.components.trading.executor import Executor, Fill
 from engine.helper import config, game
-from engine.helper.pricing import live_min_edge
+from engine.helper.pricing import live_hold, live_min_edge
 
 PLACE = {"kalshi": kalshi.place_order, "polymarket_us": polymarket_us.place_order}   # How each venue takes an order.
 POSITIONS = {"kalshi": kalshi.positions, "polymarket_us": polymarket_us.positions}    # How each venue reports what the account holds.
@@ -184,11 +184,18 @@ class LiveExecutor(Executor):
 
     # SIGNALS
 
+    def by_game_rules(self, pair):
+        """
+        Whether live judges the pair by its rules for a game, match, race, or window, which it has only with in_play,
+        rather than by the shared Executor's, as it does a future.
+        """
+        return self.in_play and pair.get("game_date") is not None
+
     def in_game(self, pair, yes, no, now):
         """
         Whether live trades the pair now as a game under way, which it does only with in_play, see plays().
         """
-        return self.in_play and pair.get("game_date") is not None and self.under_way(pair, yes, no, now)
+        return self.by_game_rules(pair) and self.under_way(pair, yes, no, now)
 
     def min_edge(self, pair, yes, no, now):
         """
@@ -212,13 +219,12 @@ class LiveExecutor(Executor):
         """
         On a game under way, how many seconds until the pair's edge has
         stayed at config.MIN_EDGE or more for config.LIVE_IN_PLAY_HOLD_SECONDS,
-        by the scanner's episode, 0 once it has, or without a scanner to say
-        when it began, as in tests. 0 on a future, taken at once.
+        by the scanner's episode, see pricing.live_hold(), 0 once it has, or
+        without a scanner to say when it began, as in tests. 0 on a future,
+        taken at once.
         """
         since = self.edge_since(pair["id"]) if self.edge_since and self.in_game(pair, yes, no, now) else None
-        if since is None:
-            return 0.0
-        return max(0.0, config.LIVE_IN_PLAY_HOLD_SECONDS - seconds_between(since, now))
+        return 0.0 if since is None else live_hold(since, now)
 
     def plays(self, pair, yes, no, now):
         """
@@ -227,7 +233,7 @@ class LiveExecutor(Executor):
         contract gives no kickoff. Otherwise as the shared Executor says:
         live's desk offers it only futures then, see run.py.
         """
-        if not self.in_play or pair.get("game_date") is None:
+        if not self.by_game_rules(pair):
             return super().plays(pair, yes, no, now)
         return self.under_way(pair, yes, no, now)
 
@@ -236,7 +242,7 @@ class LiveExecutor(Executor):
         With in_play, a game paying within config.MAX_PAYOUT_HOURS, as on paper. Otherwise a bet paying
         config.MIN_PAYOUT_HOURS or more out.
         """
-        if not self.in_play or pair.get("game_date") is None:
+        if not self.by_game_rules(pair):
             return super().pays_in_time(hours, pair)
         return hours <= config.MAX_PAYOUT_HOURS
 

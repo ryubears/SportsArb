@@ -127,9 +127,9 @@ class Opportunity:
                                         # pricing.live_min_edge(): what one order could have had at the best moment the scanner
                                         # weighed, see Scanner.weigh_take(), at the peak alone to 2026-10-06. Null before 2026-10-05.
     take_profit: float | None = None    # Net dollars from filling them.
-    pm_changed: int | None = None       # 1 when that moment came with a change of the Polymarket US leg's book, which live needs
-                                        # to trade a game under way, see pricing.polymarket_us_just_changed(), 0 otherwise.
-                                        # Null before 2026-10-05.
+    pm_changed: int | None = None       # 1 when that moment came with a change of the Polymarket US leg's book, which live needed
+                                        # to trade a game under way from 2026-10-05 to 10-06, see pricing.polymarket_us_just_changed(),
+                                        # 0 otherwise. Null before 2026-10-05.
 
 
 @dataclass

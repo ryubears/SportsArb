@@ -13,21 +13,21 @@ or more out, the levels returning config.MIN_ANNUAL_PCT a year, and on a
 game under way paying within config.MAX_PAYOUT_HOURS, those at
 config.LIVE_IN_PLAY_MIN_EDGE or more once the edge has lasted
 config.LIVE_IN_PLAY_HOLD_SECONDS, as live waits for it to. Which moment
-is the scanner's, see Opportunity.take_size.
-Each market shows what those orders could have taken at full size and
-what that locks in, overall, by sport and kind, and the largest, and how
-long the edge stayed at config.MIN_EDGE or more, in seconds to the
-thousandth. A market's trades show by outcome and by kind for the window,
-the largest, the legs settled in it, and the open trades: in a few lines,
-how many, how many of them opened in the last hour, day, and week and the
-capital those hold, the capital they all hold and the profit they are
-expected to return, its rate a year, and when they resolve, then each one
-opened in the window. Live's orders follow its trades, then its orders to
-open by how long the venue's book had sent nothing when each went out,
-and how many of those took something. The paper money and the live money
-come last. --market narrows everything to the futures or the games in
-play, and --sport to some sports. Reads only, so it is safe to run while
-the live process is writing.
+is the scanner's, see Opportunity.take_size. Each market shows what those
+orders could have taken at full size and what that locks in, overall, by
+sport and kind, and the largest, and how long the edge stayed at
+config.MIN_EDGE or more, in seconds to the thousandth. A market's trades
+show by outcome and by kind for the window, the largest, the legs settled
+in it, and the open trades: in a few lines, how many, how many of them
+opened in the last hour, day, and week and the capital those hold, the
+capital they all hold and the profit they are expected to return, its
+rate a year, and when they resolve, then each one opened in the window.
+Live's orders follow its trades, then its orders to open by how long the
+venue's book had sent nothing when each went out, and how many of those
+took something. The paper money and the live money come last. --market
+narrows everything to the futures or the games in play, and --sport to
+some sports. Reads only, so it is safe to run while the live process is
+writing.
 
 The script sets its own import path, so it runs from any folder. The live
 money is not in the database but on the venues, so it is read from each
@@ -253,7 +253,7 @@ def print_market_opportunities(conn, since, hours, sports, market):
     where, params = in_sports(sports)
     rule, rule_params, levels = opportunity_rules(market)
     print(f"\n{market} opportunities ({MIN_CONTRACTS}+ contracts in one order on {levels}), last {hours} hours")
-    if not {"take_size", "pm_changed"} <= set(table_columns(conn, "opportunities")):
+    if "take_size" not in table_columns(conn, "opportunities"):
         print("  not kept yet, until the live process restarts on this code")
         return
     rows = query_rows(conn, f"""

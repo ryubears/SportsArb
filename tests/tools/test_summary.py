@@ -55,7 +55,7 @@ def episode(start, days, edge, size, live=0, pair_id=1, lasted=600.0, take=None,
     """
     An episode of the pair at start, paying days out, edge at its peak, and size fillable at the minimum edge or more for
     lasted seconds, ten minutes unless given. One order could have had take on live's levels, size unless given,
-    and the peak came with a change of Polymarket US's book unless pm_changed is 0.
+    and that moment came with a change of Polymarket US's book unless pm_changed is 0.
     """
     take = size if take is None else take
     return Opportunity(pair_id=pair_id, trade="t", yes_venue="kalshi", yes_contract="k", no_venue="polymarket_us", no_contract="pm",
@@ -311,3 +311,11 @@ def test_opportunities_on_a_database_the_live_process_has_not_brought_up_to_date
         conn.execute("ALTER TABLE opportunities DROP COLUMN take_size")     # As before step 13.
     out = report(tmp_path, monkeypatch, capsys, fill, markets=summary.MARKET_CHOICES["futures"])
     assert "), last 12 hours\n  not kept yet, until the live process restarts on this code\n\nlive futures trades: " in out
+
+
+def test_opportunities_on_a_database_from_before_step_14_are_shown_without_its_polymarket_us_change(tmp_path, monkeypatch, capsys):
+    def fill(conn):
+        database.insert_opportunities(conn, [episode("2026-09-27T13:00:00+00:00", 2, 0.06, 100)])
+        conn.execute("ALTER TABLE opportunities DROP COLUMN pm_changed")    # As before step 14.
+    out = report(tmp_path, monkeypatch, capsys, fill, markets=summary.MARKET_CHOICES["futures"])
+    assert "), last 12 hours\n  1 episodes could have taken 94$ in one order each and locked in 6.00$\n" in out

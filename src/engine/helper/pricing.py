@@ -348,9 +348,19 @@ def live_min_edge(under_way, days):
     sweep: config.LIVE_IN_PLAY_MIN_EDGE on a game under way, otherwise the
     edge that returns config.MIN_ANNUAL_PCT a year over the days until the
     bet pays, or config.MIN_EDGE when it gives no payout. The live executor
-    trades by it, and the scanner keeps what an order at an episode's peak
-    could have had by it.
+    trades by it, and the scanner keeps what one order could have had by it,
+    see Scanner.weigh_take().
     """
     if under_way:
         return config.LIVE_IN_PLAY_MIN_EDGE
     return config.MIN_EDGE if days is None else edge_for_annual(config.MIN_ANNUAL_PCT, days)
+
+
+def live_hold(since, now):
+    """
+    How many seconds more an edge at config.MIN_EDGE or more from since on,
+    by our clock, must last at now before live trades it on a game under
+    way, 0 once it has lasted config.LIVE_IN_PLAY_HOLD_SECONDS. The live
+    executor waits by it, and the scanner counts a game's moments by it.
+    """
+    return max(0.0, config.LIVE_IN_PLAY_HOLD_SECONDS - seconds_between(since, now))
