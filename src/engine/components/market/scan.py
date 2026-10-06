@@ -3,12 +3,12 @@ Find arbitrage episodes in pairs as the recorder's books change.
 
 Whenever a member's book changes, the scanner finds the cheapest way to
 hold yes and the cheapest way to hold no across the pair's members, on two
-different venues, and prices buying both. An episode is a stretch where
-that net edge stays above zero after fees. Each episode becomes an
-Opportunity with its two legs, its duration, its peak edge, how many
-contracts could have been filled at the peak by walking the books' depth,
-and the return on the capital tied up, annualized as if held until the bet
-pays out.
+different venues, or on a future two contracts of one venue with the same
+rules, and prices buying both. An episode is a stretch where that net edge
+stays above zero after fees. Each episode becomes an Opportunity with its
+two legs, its duration, its peak edge, how many contracts could have been
+filled at the peak by walking the books' depth, and the return on the
+capital tied up, annualized as if held until the bet pays out.
 
 Within an episode the edge worth trading, config.MIN_EDGE or more, may
 come and go. The Opportunity also keeps the longest unbroken stretch of it,
@@ -48,8 +48,8 @@ from db import database
 from db.models import Opportunity
 from engine.helper import config
 from engine.helper.game import days_until, pays_at as payout_time, started
-from engine.helper.pricing import (Priced, annual_pct, best_trade, fillable, fresh, live_min_edge, polymarket_us_just_changed, return_pct,
-                                   trade_words)
+from engine.helper.pricing import (Priced, annual_pct, best_trade, fillable, fresh, live_hold, live_min_edge, polymarket_us_just_changed,
+                                   return_pct, trade_words)
 
 RECHECK_MARGIN = 0.005      # Seconds past a wait's end that a recheck prices the pair, so the wait is surely over by our clock.
 
@@ -213,11 +213,10 @@ class Scanner:
         or more, the fewest a trade opens, then the most profit. On a game
         under way a moment counts only once the episode's edge has stayed at
         config.MIN_EDGE or more for config.LIVE_IN_PLAY_HOLD_SECONDS, as
-        live waits for it to, see LiveExecutor.hold().
+        live waits for it to, see pricing.live_hold().
         """
         under_way = started(pair["game_date"], pair["members"], now)
-        if under_way and (episode.worth_since is None
-                          or seconds_between(episode.worth_since, now) < config.LIVE_IN_PLAY_HOLD_SECONDS):
+        if under_way and (episode.worth_since is None or live_hold(episode.worth_since, now) > 0):
             return
         pays_at = payout_time((priced.yes, priced.no), pair["sport"])
         floor = live_min_edge(under_way, days_until(now, pays_at))

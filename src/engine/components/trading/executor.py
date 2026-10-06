@@ -413,16 +413,14 @@ class Executor:
         recent = self.done
         self.done = []
         counts = {s: sum(1 for t in recent if t.status == s) for s in ("filled", "partial", "failed")}
-        waiting = ""
-        if self.held:
-            waiting += f"; {len(self.held)} pairs' edges held until they lasted"
-            self.held = set()
-        if self.waiting:
-            waiting += f"; {len(self.waiting)} pairs' edges waited for a book to catch up"
-            self.waiting = set()
+        waits = ""
+        for pairs, why in ((self.held, "held until they lasted"), (self.waiting, "waited for a book to catch up")):
+            if pairs:
+                waits += f"; {len(pairs)} pairs' edges {why}"
+                pairs.clear()
         return (f"{self.mode}: {len(recent)} trades ({counts['filled']} filled, {counts['partial']} partial, {counts['failed']} failed), "
                 f"locked in {sum(t.profit for t in recent):.2f}$, hedges {sum(t.hedge_pnl for t in recent):+.2f}$; "
-                f"total {self.totals['trades']} trades, {self.totals['profit'] + self.totals['hedge']:.2f}$; balances {self.cash.summary()}{waiting}")
+                f"total {self.totals['trades']} trades, {self.totals['profit'] + self.totals['hedge']:.2f}$; balances {self.cash.summary()}{waits}")
 
     # SIGNALS
 
@@ -524,6 +522,18 @@ class Executor:
                 wait = max(wait, other + config.CONFIRM_SECONDS.get(member["venue"], 0) - clock)
         return wait
 
+    def put_off(self, pair_id, seconds, pairs):
+        """
+        Turn a pair's edge down for now, adding the pair to pairs, held or
+        waiting, which the summary counts, and, when seconds says how long
+        until it may be taken, have the scanner price the pair again then.
+        Returns False, as signal() does for an edge it does not take.
+        """
+        pairs.add(pair_id)
+        if seconds and self.recheck:
+            self.recheck(pair_id, seconds)
+        return False
+
     def quantity_for(self, legs, least, most=None):
         """
         Set each leg's limit and return how many contracts to ask for. The
@@ -578,16 +588,10 @@ class Executor:
             return False
         hold = self.hold(pair, yes, no, now)
         if hold > 0:
-            self.held.add(pair["id"])
-            if self.recheck:
-                self.recheck(pair["id"], hold)
-            return False
+            return self.put_off(pair["id"], hold, self.held)
         wait = self.confirm_wait(yes, no, now)
         if wait is None or wait > 0:
-            self.waiting.add(pair["id"])
-            if wait and self.recheck:
-                self.recheck(pair["id"], wait)
-            return False
+            return self.put_off(pair["id"], wait, self.waiting)
         legs = [Leg(side, m["venue"], m["contract_id"], m["polarity"], fee_info=fee_infos[(m["venue"], m["contract_id"])])
                 for side, m in (("yes", yes), ("no", no))]
         if any(self.is_maintenance(leg.venue, now) for leg in legs):

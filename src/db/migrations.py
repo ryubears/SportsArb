@@ -250,9 +250,9 @@ def step_13_opportunities_take(conn):
 def step_14_opportunities_pm_changed(conn):
     """
     Episodes now say whether their peak came with a change of the
-    Polymarket US leg's book, which the summary counts an episode in play
-    by. Older episodes did not, so theirs is null and the summary leaves
-    those in play out.
+    Polymarket US leg's book, which the summary counted an episode in play
+    by from 2026-10-05 to 10-06. Older episodes did not, so theirs is null
+    and the summary left those in play out.
     """
     add_columns(conn, "opportunities", ["pm_changed"], "INTEGER")
 

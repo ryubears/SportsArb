@@ -60,7 +60,7 @@ def stretches(conn):
 
 def takes(conn):
     """
-    What an order at each stored episode's peak could have had as live takes it, as (contracts, profit), oldest first.
+    What one order could have had in each stored episode as live takes it, as (contracts, profit), oldest first.
     """
     return [tuple(r) for r in conn.execute("SELECT take_size, take_profit FROM opportunities ORDER BY start_ts")]
 

@@ -8,8 +8,8 @@ the same legs, the same limits, the same size, giving back what our live
 orders took from the books, see trading/footprints.py. The twins table
 pairs them. Where the two did alike, paper's fills in play are ones live
 gets; where live did worse, paper is optimistic there. Since then live
-trades games under way at full size with engine.run --live-in-play, and
-nothing adds to the table.
+trades games under way with engine.run --live-in-play, by the rules in
+trading/live.py, and nothing adds to the table.
 
 The trades with a leg on each venue take turns sending both orders at
 once and Polymarket US's first, Kalshi's only once that has answered, so
