@@ -81,10 +81,11 @@ LIVE_LOW_CASH = 5.0         # Dollars on a live venue, or on one of its shards i
 LIVE_SHARDS = {"kalshi": {0: 80, 2: 10, 3: 10}}     # The exchange shards a venue splits its cash by that live trading keeps
                                                     # cash on, each with its own low cash email, and the whole percent of the
                                                     # cash each keeps. Kalshi trades football, hockey, soccer, motorsport, UFC,
-                                                    # darts, and politics on shard 0, Bitcoin on 2, and baseball, basketball,
-                                                    # and tennis on 3, and tools/kalshi_shards.py splits its cash between them
-                                                    # by these percents. 90 to 10 between 0 and 3 until 2026-10-05, when the
-                                                    # user gave Bitcoin's shard 10%: with none, live had traded no Bitcoin market.
+                                                    # darts, esports, and politics on shard 0, Bitcoin on 2, and baseball,
+                                                    # basketball, and tennis on 3, and tools/kalshi_shards.py splits its cash
+                                                    # between them by these percents. 90 to 10 between 0 and 3 until 2026-10-05,
+                                                    # when the user gave Bitcoin's shard 10%: with none, live had traded no
+                                                    # Bitcoin market.
 LIVE_POSITION_SECONDS = 300 # Between readings of the venues' positions, which are compared with what the live trades hold, so records
                             # gone wrong are logged, see LiveExecutor.check_positions().
 LIVE_ORDER_WINDOW = 20      # The newest orders the unknown outcome brake looks at.
@@ -109,7 +110,8 @@ GAME_HOURS = {              # How long a game is expected to last, kickoff to fi
     **{league: 2.0 for league in sports.SOCCER},   # sets, a
     "tennis": 3.0, "ufc": 1.0, "darts": 1.5,     # UFC fight's walk out and five rounds with the card running late, a race's,
     "f1": 2.0, "nascar": 4.0, "crypto": 0.25,   # and a Bitcoin window's 15 minutes. Politics has no game, but every sport
-    "politics": 0.0,                            # needs a length.
+    "politics": 0.0,                            # needs a length. An esports match's best of three maps, with the breaks
+    **{title: 3.0 for title in sports.ESPORTS},  # between them and a start running late, also an allowance.
 }
 SETTLE_HOURS = 0.5          # Final whistle to the venues settling. A game's money is back SETTLE_HOURS after it ends.
 RECORD_HOURS = 5            # Kickoff to when a game's contracts stop being recorded, whatever their close time says. The kickoff

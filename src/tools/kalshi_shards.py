@@ -3,11 +3,11 @@ Split the Kalshi cash across the exchange shards live trading uses, by the
 percents config.LIVE_SHARDS gives them.
 
 Kalshi keeps the cash on each exchange shard apart, and an order spends
-only its market's shard's: football, hockey, soccer, motorsport, UFC,
-darts, and politics trade on shard 0, Bitcoin on 2, and baseball,
-basketball, and tennis on 3. Most of the cash goes to football's, 80%,
-as the football futures are where the long-lasting edges are, and 10%
-each to the other two. Until 2026-10-05 it was 90 to 10 between 0 and 3,
+only its market's shard's: football, hockey, soccer, national teams'
+too, motorsport, UFC, darts, esports, and politics trade on shard 0,
+Bitcoin on 2, and baseball, basketball, and tennis on 3. Most of the cash
+goes to football's, 80%, as the football futures are where the
+long-lasting edges are, and 10% each to the other two. Until 2026-10-05 it was 90 to 10 between 0 and 3,
 and with nothing on 2 live traded no Bitcoin market. This reads
 the cash on each shard, moves what is over a shard's share to the shards
 under theirs, and then sets Kalshi's own target split to the same shares,

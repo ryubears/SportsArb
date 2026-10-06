@@ -7,7 +7,7 @@ match.py adds a pair's notes to its flags, see for_pair(). A note is a
 warning to read, not a bar: a pair trades whatever its notes say.
 """
 
-from common.sports import SOCCER
+from common.sports import ESPORTS, SOCCER
 
 # GAMES, by sport and kind, from both venues' rules text. Football, baseball, hockey, and basketball as of 2026-09.
 FOOTBALL_POSTPONED = ("If the game does not start within 48 hours, Kalshi settles at a fair price. Polymarket US waits up to two weeks "
@@ -45,6 +45,15 @@ MATCH_NOTES = {
     "darts": {"match_winner": "A match not played, or a walkover, settles at a fair price on Kalshi and at 50 cents on Polymarket "
                               "US, which also pays 50 cents if the match moves more than two days."},
 }
+# Esports, as of 2026-10, the same for every title.
+ESPORTS_MOVED = ("A match not started within 48 hours, or forfeited before play, settles at a fair price on Kalshi, while Polymarket "
+                 "US waits up to two weeks for it and then settles at its last price.")
+ESPORTS_NOTES = {
+    "match_winner": "Polymarket US pays 50 cents on a drawn match, as a best of two can end, which Kalshi's rules leave unsaid. "
+                    + ESPORTS_MOVED,
+    **{f"map_{n}_winner": "A map not played settles at a fair price on both venues, each its own. " + ESPORTS_MOVED for n in range(1, 6)},
+    "total_maps": ESPORTS_MOVED,
+}
 RACING_NOTE = ("A driver who retires or is not classified loses on both venues. Kalshi pays on the FIA's final classification and "
                "settles at a fair price if the race does not start within 48 hours; Polymarket US waits up to two weeks for it.")
 # Bitcoin, as of 2026-10: both settle on CF Benchmarks' Bitcoin Real-Time Index, but read it apart.
@@ -62,7 +71,7 @@ KIND_NOTES = {"nfl": FOOTBALL_NOTES, "ncaaf": FOOTBALL_NOTES, "mlb": BASEBALL_NO
               "wnba": BASKETBALL_NOTES, "ncaab": BASKETBALL_NOTES,
               **{league: SOCCER_NOTES for league in SOCCER},
               **MATCH_NOTES, "f1": {"race_winner": RACING_NOTE, "race_constructor": RACING_NOTE}, "nascar": {"race_winner": RACING_NOTE},
-              "crypto": CRYPTO_NOTES}
+              "crypto": CRYPTO_NOTES, **{title: ESPORTS_NOTES for title in ESPORTS}}
 FOOTBALL_PLAYER_NOTE = ("Both venues settle to the pre-game fair price if the player never takes a snap and count overtime. Polymarket US "
                         "ignores stat corrections made after the game.")
 BASKETBALL_PLAYER_NOTE = ("Both venues count overtime, and Polymarket US ignores stat corrections made after the game. A player who is "

@@ -34,9 +34,9 @@ the only file that knows Polymarket US's slug layout.
 import math
 import re
 from catalog.classify.teams import (ALIASES, STATES, TOP_TWO_STATES, match_sides, person, player_key, race, side_key, team_from_code,
-                                    venue_codes)
+                                    team_key, team_sides, venue_codes)
 from collections import defaultdict
-from common.sports import MATCH_SPORTS, RACING, SOCCER, TEAM_SPORTS
+from common.sports import ESPORTS, MATCH_SPORTS, RACING, SOCCER, TEAM_SPORTS
 from common.timeutil import days_between, eastern_date, last_day, season_from_date, written_date
 from common.venues import VENUES
 from db.models import Bet
@@ -47,6 +47,8 @@ EVENT_PREFIX = {
     "nfl": ("nfl",), "ncaaf": ("cfb",), "mlb": ("mlb",), "nhl": ("nhl",), "nba": ("nba",), "wnba": ("wnba",), "ncaab": ("cbb",),
     "epl": ("epl",), "laliga": ("lal",), "seriea": ("sea",), "bundesliga": ("bun",), "ligue1": ("lg1",), "ligamx": ("lmx",),
     "mls": ("mls",), "ucl": ("ucl", "uefa"), "uel": ("uel",),
+    "intl": ("intf", "unl", "cnl", "afcq"), "intlw": ("uwwcq",),
+    **{title: (title,) for title in ESPORTS},
     "f1": ("f1",), "nascar": ("nascar",), "ufc": ("ufc",), "tennis": ("atp", "wta"), "darts": ("pdc", "pdcdarts"),
     "politics": ("usho", "usse", "usgub", "ushr"), "crypto": (),
 }
@@ -99,6 +101,13 @@ SET_TITLE = re.compile(r"^Will (.+?) win set (\d)")         # 'Will Valentin Vac
 SETS_SLUG = re.compile(r"-es-(\d)-(\d)$")                   # The first player's sets, then the second's.
 ROUND_SLUG = re.compile(r"-rov-f([12])-r(\d)$")             # The first or second fighter winning in a round.
 DISTANCE_SLUG = re.compile(r"-gtd-(yes|no)$")
+# ESPORTS MATCHES, 'cs2-st0ny-masq-2026-10-05', dated as first scheduled, as Kalshi does, though the match may have moved.
+# The event title names both teams, 'struggletony vs. MASQ', and a winner's market is the first side named winning; a map's
+# title names whom it is on, 'Will ENCE Prospects win Map 1 vs Passion Academy?', League of Legends' and Dota 2's a game.
+ESPORTS_KINDS = {"esports_match_winner": "match_winner", "esports_series_total_maps": "total_maps",
+                 "esports_series_total_games": "total_maps",
+                 **{f"esports_{part}_winner_{n}": "map_winner" for part in ("map", "game") for n in range(1, 6)}}
+MAP_TITLE = re.compile(r"^Will (.+?) win (?:Map|Game) (\d) vs ")
 RACING_EVENT = re.compile(r"^(f1|nascar)-([a-z0-9]+)-(\d{4}-\d{2}-\d{2})-(w|cons)$")     # 'f1-gabgpim-2026-10-04-w', a race's winner.
 
 # BITCOIN. A window's direction, 'btc-updown-15m-2026-10-04-0530z' its start in UTC, Yes being up. A price future's rules
@@ -512,6 +521,30 @@ def classify_match(row, sport, base):
     return Bet(kind=kind, subject=None, line=row["line"], polarity="yes", **common)
 
 
+def classify_esports(row, sport, base):
+    """
+    The Bet an esports match's contract describes, or None. The two teams are kept in order of their keys, as on Kalshi,
+    and a winner's market, of the match or of a map, is the first of them winning or its complement.
+    """
+    found = game_event(row, sport)
+    kind = ESPORTS_KINDS.get(row["market_type"])
+    sides = team_sides(row["event_title"]) if found and kind else None
+    if not sides:
+        return None
+    first, second = sorted(sides)
+    common = dict(season=int(found[2][:4]), game_date=found[2], team_a=first, team_b=second, **base)
+    if kind == "total_maps":
+        return Bet(kind=kind, subject=None, line=row["line"], polarity="yes", **common) if row["line"] is not None else None
+    if kind == "match_winner":
+        picked = team_key(row["outcome"])
+    else:
+        m = MAP_TITLE.match(row["title"] or "")
+        if not m or m.group(2) != row["market_type"][-1]:
+            return None
+        picked, kind = team_key(m.group(1)), f"map_{m.group(2)}_winner"
+    return Bet(kind=kind, subject=first, line=None, polarity="yes" if picked == first else "no", **common) if picked in sides else None
+
+
 def classify_race(row, sport, base):
     """
     The Bet on a race's winner, 'f1-gabgpim-2026-10-04-w', whose market title is the driver, or its winning constructor,
@@ -578,11 +611,12 @@ def doubleheaders(rows):
     The contracts on games the same teams play twice on one date, which a
     bet cannot tell apart yet, since a game is its date and teams. Their
     event slugs end in -dh1 and -dh2, though a first game may come without,
-    so a date and teams with two events counts too.
+    so a date and teams with two events counts too, as when two esports
+    teams meet again in a tournament's lower bracket.
     """
     events, games = defaultdict(set), {}
     for row in rows:
-        m = GAME_EVENT.match(row["event_id"]) if row["sport"] in TEAM_SPORTS else None
+        m = GAME_EVENT.match(row["event_id"]) if row["sport"] in (*TEAM_SPORTS, *ESPORTS) else None
         if m and m.group(1) in EVENT_PREFIX[row["sport"]]:
             game = (row["sport"], *m.group(2, 3, 4))
             events[game].add(row["event_id"])
@@ -610,4 +644,6 @@ def classify(row, outcomes=None):
         return classify_soccer(row, sport, base)
     if sport in MATCH_SPORTS:
         return classify_match(row, sport, base)
+    if sport in ESPORTS:
+        return classify_esports(row, sport, base)
     return None

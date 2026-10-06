@@ -27,21 +27,28 @@ def test_table_covers_every_sport(name, table):
     ("sports.SOCCER", sports.SOCCER),
     ("sports.MATCH_SPORTS", sports.MATCH_SPORTS),
     ("sports.RACING", sports.RACING),
+    ("sports.ESPORTS", sports.ESPORTS),
+    ("sports.NATIONAL_TEAMS", sports.NATIONAL_TEAMS),
 ])
 def test_sports_named_apart_are_ones_the_catalog_fetches(name, named):
     assert set(named) <= set(fetch.SPORTS), name
 
 
-def test_each_soccer_league_has_its_kalshi_code_and_no_sport_is_in_two_groups():
-    assert set(kalshi.SOCCER_LEAGUES) == set(sports.SOCCER)
-    groups = [*sports.TEAM_SPORTS, *sports.SOCCER, *sports.MATCH_SPORTS, *sports.RACING]
+def test_each_soccer_league_and_esports_title_has_its_kalshi_code_and_no_sport_is_in_two_groups():
+    assert set(kalshi.SOCCER_LEAGUES) == set(sports.SOCCER) and set(kalshi.ESPORTS_TITLES) == set(sports.ESPORTS)
+    groups = [*sports.TEAM_SPORTS, *sports.SOCCER, *sports.MATCH_SPORTS, *sports.RACING, *sports.ESPORTS]
     assert len(groups) == len(set(groups))
+
+
+def test_the_national_teams_are_soccer_and_the_womens_go_by_the_mens_codes():
+    assert set(sports.NATIONAL_TEAMS) <= set(sports.SOCCER)
+    assert teams.ALIASES["intlw"] is teams.ALIASES["intl"] and teams.team_from_code("CHI", "intlw", "kalshi") == "CHI"
 
 
 def test_the_kalshi_series_fetched_are_the_ones_the_kalshi_classifier_reads():
     fetched = [ticker for venues in fetch.SPORTS.values() for ticker in venues["kalshi"]["tickers"]]
     events = {*kalshi.GAME_SERIES, *kalshi.PLAYER_SERIES, *kalshi.SOCCER_SERIES, *kalshi.MATCH_SERIES, *kalshi.RACING_SERIES,
-              *kalshi.CRYPTO_SERIES}
+              *kalshi.CRYPTO_SERIES, *kalshi.ESPORTS_SERIES}
     assert sorted(fetched) == sorted({*kalshi.FUTURE_SERIES, *events})
     patterns = [p for venues in fetch.SPORTS.values() for p in venues["kalshi"].get("patterns", ())]
     assert sorted(p.pattern for p in patterns) == sorted(p.pattern for p in kalshi.SERIES_PATTERNS)

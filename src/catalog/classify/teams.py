@@ -10,7 +10,9 @@ share them, as in the NFL, or a list for each venue when they clash, as
 in college football, where SDST is South Dakota State on Kalshi and San
 Diego State on Polymarket US. Codes are matched only against slug and
 ticker pieces, never inside free text. A sport whose futures name only
-people, a driver or a fighter, has an empty file. Players have no alias
+people, a driver or a fighter, has an empty file, and so does an esports
+title, whose teams are keyed by name, see team_key(). The women's national
+teams go by the men's file, see SHARED_ALIASES. Players have no alias
 file. Both venues print the full name in the market title, so a name
 reduced to its letters is the key, and the few names the venues spell
 apart are in PLAYER_ALIASES.
@@ -30,6 +32,9 @@ PLAYER_ALIASES = {"andrea kimi antonelli": "kimi antonelli", "yeremy pino": "yer
 NOT_PEOPLE = {"vacant", "other", "any other", "field", "tie", "none", "no one", "nobody"}
 
 ALIAS_DIR = Path(__file__).resolve().parent / "aliases"
+SHARED_ALIASES = {"intlw": "intl"}      # A sport whose teams are another's, by that sport: women's national teams, the men's codes.
+# Words an esports team's name may carry on one venue and not the other, 'Team Falcons' and 'Falcons', 'Aurora Gaming' and 'Aurora'.
+TEAM_FILLER = {"team", "esports", "esport", "gaming", "club", "gg"}
 
 # ELECTIONS, which both venues hold by state.
 STATES = {"AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI",
@@ -51,9 +56,11 @@ def race(state, district=None):
 
 def load_aliases():
     """
-    Every sport's alias file, as {sport: {team code: {"names": [...], "codes": [...] or {venue: [...]}}}}.
+    Every sport's alias file, as {sport: {team code: {"names": [...], "codes": [...] or {venue: [...]}}}}, a sport in
+    SHARED_ALIASES given its other sport's.
     """
-    return {path.stem: jsonutil.read_file(path) for path in sorted(ALIAS_DIR.glob("*.json"))}
+    aliases = {path.stem: jsonutil.read_file(path) for path in sorted(ALIAS_DIR.glob("*.json"))}
+    return {**aliases, **{sport: aliases[other] for sport, other in SHARED_ALIASES.items()}}
 
 
 def venue_codes(entry, venue):
@@ -108,6 +115,32 @@ def side_key(name):
     """
     key = person(name)
     return " ".join(sorted(key.split())) if key else None
+
+
+def team_key(name):
+    """
+    An esports team's name as a matching key: its lower case letters and
+    digits, without accents or the words in TEAM_FILLER, a dot read as a
+    space. 'Team Falcons' and 'Falcons' both become 'falcons', and
+    'Rounds.gg' and 'Rounds' both 'rounds', while 'MOUZ NXT', 'mouznxt', is
+    not MOUZ. None when the name has nothing else.
+    """
+    plain = "".join(ch for ch in unicodedata.normalize("NFKD", (name or "").lower().translate(LETTERS)) if not unicodedata.combining(ch))
+    words = re.findall(r"[a-z0-9]+", plain.replace(".", " "))
+    return "".join(w for w in words if w not in TEAM_FILLER) or None
+
+
+def team_sides(title):
+    """
+    The keys of the two esports teams a title names, in its order, or None: the part of it that pits two, 'XI Esport vs.
+    struggletony', before a map's or a total's ': Map 2', or after a tournament's 'OCS Korea Stage 3 2026: '.
+    """
+    for part in (title or "").split(": "):
+        names = re.split(r"\s+vs\.?\s+", part)
+        if len(names) == 2:
+            keys = tuple(team_key(n) for n in names)
+            return keys if all(keys) and keys[0] != keys[1] else None
+    return None
 
 
 def match_sides(title):

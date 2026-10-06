@@ -11,9 +11,9 @@ Run with:
 import argparse
 import time
 from api import kalshi, polymarket_us
-from catalog.classify.kalshi import (CONFERENCES, CONTROL_SERIES, CRYPTO_SERIES, GAME_SERIES, HOUSE_RACE_SERIES, MATCH_SERIES,
-                                    NFL_DIVISIONS, NHL_DIVISIONS, PLAYER_SERIES, RACING_SERIES, SERIES_PATTERNS, SOCCER_LEAGUES, SOCCER_SERIES,
-                                    TITLE_FUTURES)
+from catalog.classify.kalshi import (CONFERENCES, CONTROL_SERIES, CRYPTO_SERIES, ESPORTS_SERIES, ESPORTS_TITLES, GAME_SERIES,
+                                    HOUSE_RACE_SERIES, MATCH_SERIES, NFL_DIVISIONS, NHL_DIVISIONS, PLAYER_SERIES, RACING_SERIES,
+                                    SERIES_PATTERNS, SOCCER_LEAGUES, SOCCER_SERIES, TITLE_FUTURES)
 from common.timeutil import now_iso
 from common.venues import VENUES
 from db import database
@@ -83,6 +83,10 @@ SPORTS = {
         "polymarket_us": {"tags": ["ucl"]},       # The Ballon d'Or's event carries this tag.
     },
     "uel": {"kalshi": {"tickers": ["KXUEL"]}, "polymarket_us": {"tags": ["uel"]}},
+    # National teams' matches, the men's in friendlies, the Nations Leagues, and the Africa Cup of Nations qualifiers, and the
+    # women's World Cup qualifiers. Their tournaments' winners are on Kalshi alone, so they have no futures here.
+    "intl": {"kalshi": {"tickers": []}, "polymarket_us": {"tags": ["intf", "unl", "cnl", "afcq"]}},
+    "intlw": {"kalshi": {"tickers": []}, "polymarket_us": {"tags": ["uwwcq"]}},
     "f1": {"kalshi": {"tickers": ["KXF1", "KXF1CONSTRUCTORS"]}, "polymarket_us": {"tags": ["f1"]}},
     "nascar": {"kalshi": {"tickers": ["KXNASCARCUPSERIES", "KXNASCARAUTOPARTSSERIES", "KXNASCARTRUCKSERIES"]}, "polymarket_us": {"tags": ["nascar"]}},
     "ufc": {"kalshi": {"tickers": [t for t in TITLE_FUTURES if t.startswith("KXUFC")]}, "polymarket_us": {"tags": ["ufc"]}},
@@ -93,13 +97,16 @@ SPORTS = {
         "polymarket_us": {"tags": ["politics"]},
     },
     "crypto": {"kalshi": {"tickers": []}, "polymarket_us": {"tags": ["crypto", "up-or-down"]}},   # Bitcoin's futures, then its windows.
+    # Esports matches, one sport a title. Its tournaments' winners are not read yet, nothing in their tickers or slugs naming
+    # the same tournament on both venues.
+    **{title: {"kalshi": {"tickers": []}, "polymarket_us": {"tags": [title]}} for title in ESPORTS_TITLES},
 }
 # Each sport's Kalshi series on one game, match, race, or window, by the prefix of their tickers.
 GAME_PREFIXES = {"nfl": ("KXNFL",), "ncaaf": ("KXNCAAF",), "mlb": ("KXMLB",), "nhl": ("KXNHL",), "nba": ("KXNBA",), "wnba": ("KXWNBA",),
-                 "ncaab": ("KXNCAAMB",), **{sport: (f"KX{code}",) for sport, code in SOCCER_LEAGUES.items()},
+                 "ncaab": ("KXNCAAMB",), **{sport: tuple(f"KX{code}" for code in codes) for sport, codes in SOCCER_LEAGUES.items()},
                  "tennis": ("KXATP", "KXWTA"), "ufc": ("KXUFC",), "darts": ("KXDARTS",), "f1": ("KXF1",), "nascar": ("KXNASCAR",),
-                 "crypto": ("KXBTC",)}
-EVENT_SERIES = {*GAME_SERIES, *PLAYER_SERIES, *SOCCER_SERIES, *MATCH_SERIES, *RACING_SERIES, *CRYPTO_SERIES}
+                 "crypto": ("KXBTC",), **{sport: (f"KX{code}",) for sport, code in ESPORTS_TITLES.items()}}
+EVENT_SERIES = {*GAME_SERIES, *PLAYER_SERIES, *SOCCER_SERIES, *MATCH_SERIES, *RACING_SERIES, *CRYPTO_SERIES, *ESPORTS_SERIES}
 for _sport, _prefixes in GAME_PREFIXES.items():
     SPORTS[_sport]["kalshi"]["tickers"] = [*SPORTS[_sport]["kalshi"]["tickers"], *sorted(s for s in EVENT_SERIES if s.startswith(_prefixes))]
 

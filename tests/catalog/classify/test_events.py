@@ -5,7 +5,7 @@ and on which side each contract holds.
 """
 
 from catalog import match
-from catalog.classify import kalshi, polymarket_us
+from catalog.classify import kalshi, polymarket_us, teams
 
 
 def kalshi_bet(series, event, ticker, sport, outcomes=None, **fields):
@@ -113,6 +113,66 @@ def test_one_tennis_match_dated_a_day_apart_is_one_pair():
     rows = [dict(vars(b), close_time=None) for b in (k, p)]
     pairs, unmatched = match.match(rows, "tennis")
     assert [(pair.game_date, len(pair.members)) for pair in pairs] == [("2026-10-02", 2)] and unmatched == []
+
+
+def test_a_national_teams_match_reads_alike_by_each_venues_codes_and_is_one_pair_a_day_apart():
+    # Kalshi's Chile is CHI and Polymarket US's chl, and Kalshi dates the match at 02:30 UTC October 6, Polymarket US October 5.
+    k = kalshi_bet("KXINTLFRIENDLYGAME", "KXINTLFRIENDLYGAME-26OCT06MEXCHI", "KXINTLFRIENDLYGAME-26OCT06MEXCHI-CHI", "intl")
+    p = pm_bet("intf-mex-chl-2026-10-05", "atc-intf-mex-chl-2026-10-05-chl", "intl", "soccer_team_full_time_winner")
+    assert (k.kind, k.team_a, k.team_b, k.subject, k.game_date, p.game_date) == ("result", "CHI", "MEX", "CHI", "2026-10-06", "2026-10-05")
+    pairs, unmatched = match.match([dict(vars(b), close_time=None) for b in (k, p)], "intl")
+    assert [(pair.label, len(pair.members)) for pair in pairs] == [("intl result 2026-10-05 CHI@MEX CHI", 2)] and unmatched == []
+    # The women's go by the same codes, a sport of their own so their matches never pair with the men's.
+    same(kalshi_bet("KXFIFAWGAME", "KXFIFAWGAME-26OCT09KAZIRL", "KXFIFAWGAME-26OCT09KAZIRL-TIE", "intlw"),
+         pm_bet("uwwcq-kaz-irl-2026-10-09", "atc-uwwcq-kaz-irl-2026-10-09-draw", "intlw", "soccer_team_full_time_winner"))
+    same(kalshi_bet("KXUEFANLSPREAD", "KXUEFANLSPREAD-26OCT06ALBSMR", "KXUEFANLSPREAD-26OCT06ALBSMR-SMR2", "intl", line=1.5),
+         pm_bet("unl-alb-smr-2026-10-06", "asc-unl-alb-smr-2026-10-06-pos-1pt5", "intl", "soccer_team_full_game_spread", line=1.5),
+         ("yes", "no"))
+
+
+def test_an_esports_matchs_winner_maps_and_total_read_alike_by_the_teams_names():
+    k_game, pm_event, pm_title = "26OCT061000GOTMEL", "cs2-mel-goth-2026-10-06", "mellren vs. Gothic"
+    # Polymarket US's winner is mellren, named first, winning, Kalshi's Gothic winning: the same bet's two sides.
+    assert same(kalshi_bet("KXCS2GAME", f"KXCS2GAME-{k_game}", f"KXCS2GAME-{k_game}-GOT", "cs2", outcome="Gothic",
+                           event_title="Gothic vs. mellren"),
+                pm_bet(pm_event, f"aec-{pm_event}", "cs2", "esports_match_winner", outcome="mellren", event_title=pm_title),
+                ("yes", "no")) == ("match_winner", 2026, "2026-10-06", "gothic", "mellren", "gothic", None)
+    same(kalshi_bet("KXCS2MAP", f"KXCS2MAP-{k_game}-2", f"KXCS2MAP-{k_game}-2-MEL", "cs2", outcome="mellren",
+                    event_title="Gothic vs. mellren: Map 2"),
+         pm_bet(pm_event, f"astatc-{pm_event}-map2", "cs2", "esports_map_winner_2", outcome="Yes", title="Will mellren win Map 2 vs Gothic?",
+                event_title=pm_title), ("no", "no"))
+    same(kalshi_bet("KXCS2TOTALMAPS", f"KXCS2TOTALMAPS-{k_game}", f"KXCS2TOTALMAPS-{k_game}-3", "cs2", line=2.5,
+                    event_title="Gothic vs. mellren: Total Maps"),
+         pm_bet(pm_event, f"tsc-{pm_event}-tot-2pt5", "cs2", "esports_series_total_maps", line=2.5, event_title=pm_title))
+    # A League of Legends game is a map, and 'Cupid Esports' and 'Cupid' the same team.
+    assert same(kalshi_bet("KXLOLMAP", "KXLOLMAP-26OCT061600FUECPD-1", "KXLOLMAP-26OCT061600FUECPD-1-FUE", "lol", outcome="Fuego",
+                           event_title="Fuego vs. Cupid Esports: Map 1"),
+                pm_bet("lol-cpd-fue-2026-10-06", "astatc-lol-cpd-fue-2026-10-06-game1", "lol", "esports_game_winner_1", outcome="Yes",
+                       title="Will Cupid Esports win Game 1 vs Fuego?", event_title="Cupid Esports vs. Fuego"), ("no", "yes"))[0] == "map_1_winner"
+    # Overwatch's title leads with its tournament, and a code may hold digits, 'O2B'.
+    same(kalshi_bet("KXOWGAME", "KXOWGAME-26OCT090400O2BFAL", "KXOWGAME-26OCT090400O2BFAL-FAL", "ow", outcome="Falcons",
+                    event_title="OCS Korea Stage 3 2026: O2 Blast vs. Falcons"),
+         pm_bet("ow-fal-o2b-2026-10-09", "aec-ow-fal-o2b-2026-10-09", "ow", "esports_match_winner", outcome="Falcons",
+                event_title="Falcons vs. O2 Blast"))
+    # A map whose number is not the market's, or a winner named in neither team, is no bet.
+    assert pm_bet(pm_event, f"astatc-{pm_event}-map2", "cs2", "esports_map_winner_1", outcome="Yes", title="Will mellren win Map 2 vs Gothic?",
+                  event_title=pm_title) is None
+    assert kalshi_bet("KXCS2GAME", f"KXCS2GAME-{k_game}", f"KXCS2GAME-{k_game}-X", "cs2", outcome="Someone",
+                      event_title="Gothic vs. mellren") is None
+
+
+def test_an_esports_teams_key_is_its_name_without_the_words_one_venue_adds():
+    assert teams.team_key("Team Falcons") == teams.team_key("Falcons") == "falcons"
+    assert teams.team_key("Rounds.gg") == teams.team_key("Rounds") == "rounds"
+    assert teams.team_key("Movistar KOI Fénix") == "movistarkoifenix" and teams.team_key("MOUZ NXT") != teams.team_key("MOUZ")
+    assert teams.team_sides("Gothic vs. mellren: Map 2") == ("gothic", "mellren") and teams.team_sides("Gothic vs. Gothic") is None
+
+
+def test_an_esports_rematch_on_one_date_is_left_out_on_both_venues():
+    rows = [{"sport": "cs2", "series_id": "KXCS2GAME", "event_id": f"KXCS2GAME-26OCT07{t}MOUNXT", "contract_id": f"k{t}"} for t in ("1000", "1800")]
+    assert kalshi.doubleheaders(rows) == {"k1000", "k1800"}
+    pm = [{"sport": "cs2", "event_id": e, "contract_id": e} for e in ("cs2-mou-nxt-2026-10-07", "cs2-mou-nxt-2026-10-07-dh2")]
+    assert polymarket_us.doubleheaders(pm) == {"cs2-mou-nxt-2026-10-07", "cs2-mou-nxt-2026-10-07-dh2"}
 
 
 def test_a_fights_winner_distance_and_round_read_alike_whichever_way_a_name_is_written():

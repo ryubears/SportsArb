@@ -128,3 +128,12 @@ def test_a_day_with_a_near_day_either_side_on_the_other_venue_is_left_alone():
     # Which of Polymarket US's two matches Kalshi's is cannot be told from the dates.
     pairs, unmatched = match.match([meeting("kalshi", 3), meeting("polymarket_us", 2), meeting("polymarket_us", 4)], "tennis")
     assert pairs == [] and len(unmatched) == 3
+
+
+def test_an_esports_winner_pair_notes_a_drawn_match_and_a_maps_one_not_played():
+    rows = [bet(venue, venue[0], kind=kind, team_a="falcons", team_b="vitality", subject="falcons") for venue in ("kalshi", "polymarket_us")
+            for kind in ("match_winner", "map_3_winner")]
+    winner, map_3 = (match.make_pair([r for r in rows if r["kind"] == kind], "cs2") for kind in ("match_winner", "map_3_winner"))
+    assert winner.flags == [notes.ESPORTS_NOTES["match_winner"]] and "draw" in winner.flags[0]
+    assert map_3.flags == [notes.ESPORTS_NOTES["map_3_winner"]] and "not played" in map_3.flags[0]
+

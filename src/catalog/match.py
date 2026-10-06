@@ -14,7 +14,7 @@ Run with:
 import argparse
 from collections import Counter, defaultdict
 from catalog import notes
-from common.sports import MATCH_SPORTS
+from common.sports import ESPORTS, MATCH_SPORTS, NATIONAL_TEAMS
 from common.timeutil import days_between, now_iso
 from db import database
 from db.models import Bet, Pair
@@ -24,9 +24,11 @@ IDENTITY = ("kind", "season", "game_date", "team_a", "team_b", "subject", "line"
 # Flag a pair when its members stop trading more than this many days apart.
 CLOSE_GAP_LIMIT_DAYS = 60
 # Sports whose venues may date one match a day apart: Kalshi and Polymarket US date a tennis match in Asia by different
-# clocks, 'Lu vs Li' October 3 on one and October 2 on the other. The same two people can also meet on days in a row, as
-# in a darts round robin, so only a date one venue alone lists moves to a near one, see near_dates().
-NEAR_DATE_SPORTS = MATCH_SPORTS
+# clocks, 'Lu vs Li' October 3 on one and October 2 on the other, an esports match late in the American evening, Kalshi
+# by Eastern time, and a national team's, Kalshi by UTC, Mexico against Chile at 02:30 UTC being October 6 there and
+# October 5 on Polymarket US. The same two sides can also meet on days in a row, as in a darts round robin, so only a date
+# one venue alone lists moves to a near one, see near_dates().
+NEAR_DATE_SPORTS = (*MATCH_SPORTS, *ESPORTS, *NATIONAL_TEAMS)
 NEAR_DATE_DAYS = 1
 
 

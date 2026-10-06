@@ -5,9 +5,9 @@ Games, matches, races, and Bitcoin's 15 minute windows are bets on one
 event, which paper trades: the series says the kind, the event ticker the
 date and the two sides, and the market ticker or subtitle whom the market
 is on, see the tables below for each sport's layout. A game of teams keeps
-them away then home, as the venues list them, and a soccer match or a
-match between two people keeps its sides in order of their keys, so a
-market names whom it is on by its subject.
+them away then home, as the venues list them, and a soccer match, an
+esports match, or a match between two people keeps its sides in order of
+their keys, so a market names whom it is on by its subject.
 
 Futures are bets on a season, a title, an award, a season's leader, a price
 by a deadline, or an election, which live trades. Each kind has a series of
@@ -31,7 +31,8 @@ Kalshi's ticker layout.
 """
 
 import re
-from catalog.classify.teams import STATES, TOP_TWO_STATES, match_sides, person, player_key, race, side_key, team_from_code
+from catalog.classify.teams import (STATES, TOP_TWO_STATES, match_sides, person, player_key, race, side_key, team_from_code, team_key,
+                                    team_sides)
 from collections import defaultdict
 from common.timeutil import last_day, season_from_date, shift, written_date
 from datetime import datetime
@@ -70,9 +71,12 @@ PLAYER_TITLE = re.compile(r"^(.+?): ")
 # SOCCER MATCHES, each league's series named alike, 'KXEPLGAME' and 'KXEPL1HTOTAL', the event ticker the date and the clubs,
 # home then away, 'KXEPLGAME-26OCT10ARSLEE'. A result's market is a club or 'TIE', a spread's a club and its rounded margin,
 # 'ARS2', a score's each club's goals, 'FUL0MUN1', and a total's or the corners' its line. Every one counts 90 minutes and
-# stoppage time, a half's 45 and its stoppage, but the corners count any extra time too.
-SOCCER_LEAGUES = {"epl": "EPL", "laliga": "LALIGA", "seriea": "SERIEA", "bundesliga": "BUNDESLIGA", "ligue1": "LIGUE1",
-                  "ligamx": "LIGAMX", "mls": "MLS", "ucl": "UCL", "uel": "UEL"}
+# stoppage time, a half's 45 and its stoppage, but the corners count any extra time too. National teams play in several
+# competitions, each with its series, the men's friendlies, Nations Leagues, and Africa Cup of Nations qualifiers, and the
+# women's World Cup qualifiers: 'KXUEFANLGAME-26OCT06ALBSMR'.
+SOCCER_LEAGUES = {"epl": ("EPL",), "laliga": ("LALIGA",), "seriea": ("SERIEA",), "bundesliga": ("BUNDESLIGA",), "ligue1": ("LIGUE1",),
+                  "ligamx": ("LIGAMX",), "mls": ("MLS",), "ucl": ("UCL",), "uel": ("UEL",),
+                  "intl": ("INTLFRIENDLY", "UEFANL", "CONCACAFNL", "AFCON"), "intlw": ("FIFAW",)}
 SOCCER_KINDS = {
     "GAME": "result", "1H": "first_half_result", "2H": "second_half_result",
     "SPREAD": "spread", "1HSPREAD": "first_half_spread", "2HSPREAD": "second_half_spread",
@@ -80,7 +84,8 @@ SOCCER_KINDS = {
     "BTTS": "btts", "1HBTTS": "first_half_btts", "2HBTTS": "second_half_btts",
     "SCORE": "exact_score", "1HSCORE": "first_half_exact_score", "CORNERS": "total_corners",
 }
-SOCCER_SERIES = {f"KX{league}{suffix}": kind for league in SOCCER_LEAGUES.values() for suffix, kind in SOCCER_KINDS.items()}
+SOCCER_SERIES = {f"KX{league}{suffix}": kind for leagues in SOCCER_LEAGUES.values() for league in leagues
+                 for suffix, kind in SOCCER_KINDS.items()}
 SCORE_TAIL = re.compile(r"^([A-Z]+?)(\d+)([A-Z]+?)(\d+)$")
 
 # MATCHES between two people, in tennis, darts, and the UFC. The event ticker holds the date and both short names,
@@ -103,6 +108,15 @@ MATCH_EVENT = re.compile(r"^(\d{2})([A-Z]{3})(\d{2})(\d{4})?([A-Z]+)(?:-(\d))?$"
 SPREAD_SIDE = re.compile(r"^(.+?) -\d+(?:\.\d+)? (?:games|sets)$")      # 'Arthur Fils -6.5 games'.
 SCORE_SIDE = re.compile(r"^(.+) wins (\d)-(\d)$")                       # 'Valentin Vacherot wins 2-0'.
 ROUND_SIDE = re.compile(r"^(.+) to win in Round (\d)$")                 # 'Natalia Silva to win in Round 1'.
+
+# ESPORTS MATCHES, each title's series named alike, 'KXCS2GAME', 'KXCS2MAP', and 'KXCS2TOTALMAPS', the event ticker the
+# date, the Eastern start time, and both teams' codes, 'KXCS2GAME-26OCT051500XISTR', a map's its number too,
+# 'KXCS2MAP-26OCT061000GOTMEL-2'. The codes are the venue's own, so the teams are read from the event title, 'XI Esport vs.
+# struggletony', and a winner's market from its subtitle, 'XI Esport'. A League of Legends or Dota 2 game is a map here.
+ESPORTS_TITLES = {"cs2": "CS2", "lol": "LOL", "valorant": "VALORANT", "dota2": "DOTA2", "r6": "R6", "ow": "OW"}
+ESPORTS_KINDS = {"GAME": "match_winner", "MAP": "map_winner", "TOTALMAPS": "total_maps"}
+ESPORTS_SERIES = {f"KX{title}{suffix}": kind for title in ESPORTS_TITLES.values() for suffix, kind in ESPORTS_KINDS.items()}
+ESPORTS_EVENT = re.compile(r"^(\d{2})([A-Z]{3})(\d{2})(\d{4})([A-Z0-9]+?)(?:-(\d))?$")
 
 # RACES, one event a race, 'KXF1RACE-BAH26', a market per driver, named in its subtitle, or per constructor, by its code.
 # The date is the one the rules give the race, 'originally scheduled for October 4, 2026'.
@@ -483,6 +497,28 @@ def classify_match(row, series, event_tail, base, outcomes):
     return Bet(kind=kind, subject=None, line=row["line"], polarity="yes", **common) if row["line"] is not None else None
 
 
+def classify_esports(row, series, event_tail, base):
+    """
+    The Bet an esports match's contract describes, or None. The two teams are kept in order of their keys, and a
+    winner's market, of the match or of a map, is stated as the first of them winning, the other's being its complement.
+    """
+    m = ESPORTS_EVENT.match(event_tail)
+    sides = team_sides(row["event_title"]) if m else None
+    if not sides:
+        return None
+    game_date = ticker_date(*m.group(1, 2, 3))
+    first, second = sorted(sides)
+    kind = ESPORTS_SERIES[series]
+    common = dict(season=int(game_date[:4]), game_date=game_date, team_a=first, team_b=second, **base)
+    if kind == "total_maps":
+        return Bet(kind=kind, subject=None, line=row["line"], polarity="yes", **common) if row["line"] is not None else None
+    picked = team_key(row["outcome"])
+    if picked not in sides or (kind == "map_winner") != bool(m.group(6)):
+        return None
+    kind = f"map_{m.group(6)}_winner" if kind == "map_winner" else kind
+    return Bet(kind=kind, subject=first, line=None, polarity="yes" if picked == first else "no", **common)
+
+
 def classify_race(row, series, market_tail, sport, base):
     """
     The Bet on a race's winner, or its top constructor, describes, or None. A race is its date.
@@ -544,15 +580,16 @@ def doubleheaders(rows):
     """
     The contracts on games the same teams play twice on one date, which a
     bet cannot tell apart yet, since a game is its date and teams. Kalshi's
-    baseball event tickers give each game's start time, so a date and teams
-    with two start times is a doubleheader.
+    baseball and esports event tickers give each game's start time, so a
+    date and teams with two start times is a doubleheader, as when two
+    esports teams meet again in a tournament's lower bracket.
     """
     starts, games = defaultdict(set), {}
     for row in rows:
         series = row["series_id"]
-        if series not in GAME_SERIES and series not in PLAYER_SERIES:
+        if series not in GAME_SERIES and series not in PLAYER_SERIES and series not in ESPORTS_SERIES:
             continue
-        m = GAME_DATE.match(row["event_id"][len(series) + 1:])
+        m = (ESPORTS_EVENT if series in ESPORTS_SERIES else GAME_DATE).match(row["event_id"][len(series) + 1:])
         if m and m.group(4):
             game = (row["sport"], *m.group(1, 2, 3, 5))
             starts[game].add(m.group(4))
@@ -591,6 +628,8 @@ def classify(row, outcomes=None):
         return classify_soccer(row, series, event_tail, market_tail, sport, base)
     if series in MATCH_SERIES:
         return classify_match(row, series, event_tail, base, outcomes or {})
+    if series in ESPORTS_SERIES:
+        return classify_esports(row, series, event_tail, base)
     if series in RACING_SERIES:
         return classify_race(row, series, market_tail, sport, base)
     if series in CRYPTO_SERIES:

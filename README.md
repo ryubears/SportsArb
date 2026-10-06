@@ -5,15 +5,17 @@ markets, Kalshi and Polymarket US, and trades what it finds, on paper, with
 real money, or both at once. It covers the NFL, college football, MLB, NHL,
 NBA, WNBA, and men's college basketball, the Premier League, La Liga, Serie
 A, the Bundesliga, Ligue 1, Liga MX, MLS, the Champions League and Europa
-League, Formula 1, NASCAR, UFC, tennis, darts, the 2026 US elections, and
-Bitcoin. It follows two kinds of bet: futures, titles, awards, a season's
-leaders, season totals, election races, and Bitcoin's price by a date,
-which live trades, and the bets on one event, games, matches, fights,
-races, and Bitcoin's 15 minute windows, which live trades once they are
-under way and paper before and while they are played. When the cheapest way
-to hold *yes* on one venue and the cheapest way to hold *no* on the other
-add up to less than a dollar after fees, buying both locks in the
-difference whatever happens.
+League, national teams' soccer, men's and women's, Formula 1, NASCAR, UFC,
+tennis, darts, esports, Counter-Strike 2, League of Legends, Valorant, Dota
+2, Rainbow Six Siege, and Overwatch, the 2026 US elections, and Bitcoin. It
+follows two kinds of bet: futures, titles, awards, a season's leaders,
+season totals, election races, and Bitcoin's price by a date, which live
+trades, and the bets on one event, games, matches, fights, races, and
+Bitcoin's 15 minute windows, which live trades once they are under way and
+paper before and while they are played. When the cheapest way to hold *yes*
+on one venue and the cheapest way to hold *no* on the other add up to less
+than a dollar after fees, buying both locks in the difference whatever
+happens.
 
 The whole thing runs on an EC2 instance in us-east-1, as one process with
 each venue's feed in a child process of its own: it follows every order
@@ -275,8 +277,10 @@ and writes.
 `contracts` table, its futures and its games, matches, races, or windows.
 Our sport keys are `nfl`, `ncaaf`, `mlb`, `nhl`, `nba`, `wnba`, `ncaab`,
 `epl`, `laliga`, `seriea`, `bundesliga`, `ligue1`, `ligamx`, `mls`, `ucl`,
-`uel`, `f1`, `nascar`, `ufc`, `tennis`, `darts`, `politics`, and `crypto`,
-which is Bitcoin, the one coin Polymarket US lists. Of the thousands of
+`uel`, `intl` and `intlw`, the men's and women's national teams, `f1`,
+`nascar`, `ufc`, `tennis`, `darts`, `cs2`, `lol`, `valorant`, `dota2`,
+`r6`, and `ow`, an esports title each, `politics`, and `crypto`, which is
+Bitcoin, the one coin Polymarket US lists. Of the thousands of
 series Kalshi lists it takes only those classified, by ticker, each sport's
 futures listed in `SPORTS` and its event series added from the classifier's
 tables by their prefix, and for elections, which have a series per state or
@@ -285,11 +289,16 @@ Kalshi's list of series, every category of it, is read once and kept ten
 minutes, so a refresh of every sport reads it once. Kalshi is read through
 its public REST catalog, paged under the rate limit, and each series brings
 the exchange shard its markets trade on: shard 0 for football, hockey,
-soccer, motorsport, UFC, darts, and elections, shard 3 for baseball,
-basketball, and tennis, shard 2 for Bitcoin. Polymarket US is read through
+soccer, national teams' too, motorsport, UFC, darts, esports, and
+elections, shard 3 for baseball, basketball, and tennis, shard 2 for
+Bitcoin. Polymarket US is read through
 its gateway, one call per tag, deduplicated across tags, baseball through
 the `mlb` tag, since `baseball` brings Korean and Japanese league games
-too, and Bitcoin through `crypto` and `up-or-down`. A game's contract
+too, the men's national teams through `intf`, `unl`, `cnl`, and `afcq`,
+the friendlies, the UEFA and CONCACAF Nations Leagues, and the Africa Cup
+of Nations qualifiers, the women's through `uwwcq`, their World Cup
+qualifiers, each esports title through its own, and Bitcoin through
+`crypto` and `up-or-down`. A game's contract
 starts at its event's kickoff: an event is a game when it has a game id,
 the venue's own or Sportradar's, and a futures market on one is a race's
 when the event runs two days or less, and otherwise an award's, which has
@@ -317,7 +326,27 @@ The bets on one event:
 - Soccer matches, in every league: the result, a club or the tie, the
   spread, the total, both teams to score, the exact score, each for the
   match and its halves, and the corners, all over 90 minutes and stoppage
-  time on both venues.
+  time on both venues. National teams' matches read the same, though Kalshi
+  gives each competition its series, `KXINTLFRIENDLY`, `KXUEFANL`,
+  `KXCONCACAFNL`, and `KXAFCON` for the men and `KXFIFAW` for the women,
+  and Polymarket US its tag. Their tournaments' winners are on Kalshi
+  alone, so they have no futures here.
+- Esports matches, a sport for each title: the match's winner, a map's, a
+  League of Legends or Dota 2 game being a map, and the total maps played.
+  Kalshi's series are named alike, `KXCS2GAME`, `KXCS2MAP`, and
+  `KXCS2TOTALMAPS`, the event ticker the date, the Eastern start time, and
+  both teams' codes, `KXCS2MAP-26OCT061000GOTMEL-2`, and Polymarket US's
+  event slug `cs2-mel-goth-2026-10-06`, both dated as the match was first
+  scheduled. The teams change too often for code files, so a team is its
+  name, `teams.team_key`, lower case letters and digits without the words
+  one venue adds, *Team Falcons* being *Falcons* and *Rounds.gg* *Rounds*,
+  read from the event title and a winner's subtitle on Kalshi and the event
+  title and a map's title on Polymarket US. A name a venue spells apart,
+  *Betclic Apogee* for *Apogee*, is not paired. Two meetings of the same
+  teams on one date, as a tournament's lower bracket can bring, are left
+  out like a doubleheader. The tournaments' winners are not read yet, since
+  nothing in their tickers and slugs names the same tournament on both
+  venues.
 - Matches between two people, in tennis, darts, and the UFC: the winner,
   the games and sets spreads and totals, a set's winner, the score in sets,
   whether a fight goes the distance, and the round it is won in. The two
@@ -367,45 +396,55 @@ shape that means different things, `ucl-D-lastplace`. The kinds:
 
 Team aliases are resolved through `teams.py` and `aliases/`, which has a
 file for each sport, since leagues reuse codes (DAL is the Cowboys and the
-Mavericks), and an empty one for a sport whose futures name only people.
-The new leagues' files list each venue's codes apart, and the Champions
-League and Europa League are two sports, since Kalshi's VIK is Viking in
-one and Plzen in the other. Player names are normalized to a key that
-ignores accents, punctuation, and suffixes, reads a hyphen as a space, and
-turns letters like ø into o, so Kalshi's *Ronald Acuña Jr.* is Polymarket
-US's *Ronald Acuna* and *Martin Ødegaard* is *Martin Odegaard*, and the few
-names the venues spell apart are in `PLAYER_ALIASES`. A market on no one,
-Kalshi's *Vacant* title, is never paired. Lines are made strict, so *1000+*
-on one venue and *over 999.5* on the other become the same bet. The venues
-number seasons differently, so a future's season is the one it settles in,
-or on Polymarket US its event's end when the slug's date is half a year
-earlier, since the Champions League final's slug carries the wrong year.
-Polymarket US's futures do not always use its games' team codes, gluing
-city and nickname, `bufbil`, or borrowing Kalshi's, `gsw`, so a future's
-team is the code whose team its market title could name. Contracts no
-parser understands are counted and left out.
+Mavericks), and an empty one for a sport whose futures name only people,
+and for an esports title, whose teams go by name. The new leagues' files
+list each venue's codes apart, and the Champions League and Europa League
+are two sports, since Kalshi's VIK is Viking in one and Plzen in the other.
+The national teams' file, `intl.json`, which the women's share
+(`SHARED_ALIASES`), was built from both venues' own team lists, open and
+settled, joined by country: 163 countries both list, each with every code
+each venue has used, Croatia being CRO and HRV on both, Chile CHI on Kalshi
+and chl on Polymarket US, Malawi maw and mala there, and Malta mal. A
+country only one venue has listed is left out until both do. Player names
+are normalized to a key that ignores accents, punctuation, and suffixes,
+reads a hyphen as a space, and turns letters like ø into o, so Kalshi's
+*Ronald Acuña Jr.* is Polymarket US's *Ronald Acuna* and *Martin Ødegaard*
+is *Martin Odegaard*, and the few names the venues spell apart are in
+`PLAYER_ALIASES`. A market on no one, Kalshi's *Vacant* title, is never
+paired. Lines are made strict, so *1000+* on one venue and *over 999.5* on
+the other become the same bet. The venues number seasons differently, so a
+future's season is the one it settles in, or on Polymarket US its event's
+end when the slug's date is half a year earlier, since the Champions League
+final's slug carries the wrong year. Polymarket US's futures do not always
+use its games' team codes, gluing city and nickname, `bufbil`, or borrowing
+Kalshi's, `gsw`, so a future's team is the code whose team its market title
+could name. Contracts no parser understands are counted and left out.
 
 **match.py** groups a sport's bets whose identity agrees into a `Pair`,
-whose label starts with the sport, for example `nfl champion 2027 KC`,
-`nfl spread 2026-09-20 CAR@ATL ATL 3.5`, or
-`politics senate_race 2026 GA D`. A pair only exists when both venues list
-the bet, and it carries every contract that expresses it. In tennis, darts,
-and the UFC the venues may date one match a day apart, Kalshi and
-Polymarket US reading a match in Asia by different clocks. A date only one
-venue lists for two people then joins the one a day off that only the other
-lists. Two people can also meet on days in a row, as in a darts round
-robin, so a date both venues list, and two dates one lists, stay matches of
-their own. Kinds with settlement rules that differ between venues carry a
-note from **notes.py**: how each venue treats a postponed game, overtime, a
-retired tennis player, a fight's draw, a darts walkover, a driver who does
-not finish, and Bitcoin's index, Polymarket US reading a trimmed mean of
-its last minute where Kalshi reads the index itself; Polymarket US divides
-the dollar among players or teams that tie for an award, a lead, or a
-record, where Kalshi's rules do not always say; Kalshi reads a UFC title
-holder and a tennis ranking at noon Eastern on December 31 and Polymarket
-US at 11:59 PM; and Kalshi pays a race on the party of whoever is sworn in,
-in January, and control of a house on February 1, Polymarket US on the
-election. A note is a warning to read, not a bar.
+whose label starts with the sport, for example `nfl champion 2027 KC`, `nfl
+spread 2026-09-20 CAR@ATL ATL 3.5`, or `politics senate_race 2026 GA D`. A
+pair only exists when both venues list the bet, and it carries every
+contract that expresses it. In tennis, darts, the UFC, esports, and
+national teams' soccer the venues may date one match a day apart, Kalshi
+and Polymarket US reading a match in Asia by different clocks, an esports
+match late in the American evening Kalshi by Eastern time, and a national
+team's Kalshi by UTC, Mexico against Chile at 02:30 UTC being October 6
+there and October 5 on Polymarket US. A date only one venue lists for two
+people then joins the one a day off that only the other lists. Two people
+can also meet on days in a row, as in a darts round robin, so a date both
+venues list, and two dates one lists, stay matches of their own. Kinds with
+settlement rules that differ between venues carry a note from **notes.py**:
+how each venue treats a postponed game, overtime, a retired tennis player,
+a fight's draw, a darts walkover, a drawn esports match, which Polymarket
+US pays at 50 cents and Kalshi's rules leave unsaid, a driver who does not
+finish, and Bitcoin's index, Polymarket US reading a trimmed mean of its
+last minute where Kalshi reads the index itself; Polymarket US divides the
+dollar among players or teams that tie for an award, a lead, or a record,
+where Kalshi's rules do not always say; Kalshi reads a UFC title holder and
+a tennis ranking at noon Eastern on December 31 and Polymarket US at 11:59
+PM; and Kalshi pays a race on the party of whoever is sworn in, in January,
+and control of a house on February 1, Polymarket US on the election. A note
+is a warning to read, not a bar.
 
 **pipeline.py** runs fetch, classify, and match in one call. The live
 process runs it every hour in a child process, so new games and futures
@@ -673,8 +712,9 @@ on a venue in its window (`venues.is_maintenance`). A pause at any other
 time is met by the brakes: the venue refuses the orders, and three refusals
 in a row halt live trading. Live trading takes every sport the run does. A
 Kalshi leg spends only the cash on its market's shard: football's,
-hockey's, soccer's, motorsport's, UFC's, darts', and politics' on shard 0,
-Bitcoin's on 2, and baseball's, basketball's, and tennis' on 3. So
+hockey's, soccer's, the national teams' too, motorsport's, UFC's, darts',
+esports', and politics' on shard 0, Bitcoin's on 2, and baseball's,
+basketball's, and tennis' on 3. So
 `tools/kalshi_shards.py` splits the Kalshi cash between them, 80% to shard
 0, where the football futures with the long-lasting edges are, and 10% each
 to shards 2 and 3 (`LIVE_SHARDS`). Until 2026-10-05 it was 90% to shard 0
@@ -1204,6 +1244,16 @@ contracts a trade, with no limit on trades. On the Sunday of October 4,
 2,035 NFL episodes in play stayed at two cents or more for half a second,
 62 of them with a whole contract fillable throughout.
 
+**National teams and esports.** On October 6 the catalog took national
+teams' soccer, the men's and the women's, and esports, a sport each for
+Counter-Strike 2, League of Legends, Valorant, Dota 2, Rainbow Six Siege,
+and Overwatch. That day's markets made 487 national team pairs, 394 of the
+men's and 93 of the women's, and 342 esports pairs, 239 of them CS2's, 43
+League of Legends', 22 Rainbow Six's, 18 Dota 2's, 17 Valorant's, and 3
+Overwatch's: 125 of the 139 matches Kalshi listed had a Polymarket US match
+by the teams' names and the date. All of them trade on Kalshi's shard 0.
+Live trades them as any sport, their matches once under way.
+
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.
 The paper edge is real. Whether it is reachable is a question of whether
@@ -1312,7 +1362,7 @@ Where to look to change something:
 | how an edge is priced | `engine/helper/pricing.py` |
 | game timing | `engine/helper/game.py` |
 | when each venue is in maintenance | `common/venues.py` |
-| which sports are treated alike: team sports, soccer, matches, races | `common/sports.py` |
+| which sports are treated alike: team sports, soccer, national teams, matches, races, esports | `common/sports.py` |
 | every tunable number | `engine/helper/config.py` |
 | when a trade is taken and sized | `engine/components/trading/executor.py` |
 | the Kalshi cash on each shard | `tools/kalshi_shards.py` |
