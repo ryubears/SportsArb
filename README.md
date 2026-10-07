@@ -1463,11 +1463,13 @@ python3 -m tools.feed_check --seconds 300 --markets 100
 ```
 
 To follow MLB and NHL games beside the bot for the event probe, at a lower
-priority, and read what it found, from `src/`:
+priority, read what it found, and stop it, from `src/`. `-u` has each log
+line reach the file at once, rather than when Python's buffer fills:
 
 ```bash
-nohup nice -n 10 python3 -m tools.event_probe.probe >> ../data/event_probe.log 2>&1 &
+nohup nice -n 10 python3 -u -m tools.event_probe.probe >> ../data/event_probe.log 2>&1 &
 python3 -m tools.event_probe.report
+pkill -f tools.event_probe.probe
 ```
 
 ## Layout

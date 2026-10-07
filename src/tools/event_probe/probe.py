@@ -14,10 +14,11 @@ see markets.statement(). The first read of a game is the baseline, since
 what was settled before then was settled before the probe watched.
 
 Run it on the instance beside the bot, at a lower priority so it never
-holds up the bot's feeds, from src/:
-    nohup nice -n 10 python3 -m tools.event_probe.probe >> ../data/event_probe.log 2>&1 &
-Stop it with kill. Rows are written each second, so at most the last
-second is lost.
+holds up the bot's feeds, from src/, with -u so each log line reaches the
+file at once rather than when Python's buffer fills:
+    nohup nice -n 10 python3 -u -m tools.event_probe.probe >> ../data/event_probe.log 2>&1 &
+Stop it with pkill -f tools.event_probe.probe. Rows are written each
+second, so at most the last second is lost.
 """
 
 import argparse
