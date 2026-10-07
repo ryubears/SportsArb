@@ -34,9 +34,9 @@ venues, trading/ makes the trades, and money/ keeps the cash.
   once it has lasted LIVE_HOLD_SECONDS, the scanner offering a held edge
   again once it has lasted, through Scanner.edge_since() and recheck(),
   and counts a leg's wait for its book to catch up from the other's change
-  as the edge began, through Scanner.edge_books(). When paper runs too it trades
-  the same games, given back what our live orders took from the books, see
-  trading/footprints.py.
+  as the edge began, through Scanner.edge_books(). When paper runs too it
+  trades the same games, given back what our live orders took from the
+  books, see trading/footprints.py.
   - Paper: trading/paper.py fills against the same books with the paper
     money of money/paper.py.
   - Live: trading/live.py sends real orders with the money the venues
@@ -279,8 +279,8 @@ class Session:
             self.desks.append(Desk(mode, conn, lambda: self.recorder.books, self.notifier, **rules[mode]))
         self.scanner = scan.Scanner(conn, sports, log, [d.signal for d in self.desks], books=lambda: self.recorder.books) if with_scanner else None
         for desk in self.desks:
-            desk.executor.recheck, desk.executor.edge_since, desk.executor.edge_books = (self.scanner.recheck, self.scanner.edge_since,
-                                                                                         self.scanner.edge_books)
+            ex = desk.executor
+            ex.recheck, ex.edge_since, ex.edge_books = self.scanner.recheck, self.scanner.edge_since, self.scanner.edge_books
         self.recorder = Recorder(conn, self.scanner, self.tapes)
         self.streams = Streams(self.recorder)
         self.last_status = self.last_summary = time.time()

@@ -244,7 +244,7 @@ class LiveExecutor(Executor):
         way, where Kalshi's books change many times a second, an edge could
         wait as long as it lasted.
         """
-        return (self.edge_books(pair["id"]) if self.edge_books else None) or {}
+        return self.edge_books(pair["id"]) if self.edge_books else {}
 
     def plays(self, pair, yes, no, now):
         """

@@ -136,4 +136,3 @@ def test_an_esports_winner_pair_notes_a_drawn_match_and_a_maps_one_not_played():
     winner, map_3 = (match.make_pair([r for r in rows if r["kind"] == kind], "cs2") for kind in ("match_winner", "map_3_winner"))
     assert winner.flags == [notes.ESPORTS_NOTES["match_winner"]] and "draw" in winner.flags[0]
     assert map_3.flags == [notes.ESPORTS_NOTES["map_3_winner"]] and "not played" in map_3.flags[0]
-

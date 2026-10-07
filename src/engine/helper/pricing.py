@@ -348,7 +348,8 @@ def live_min_edge(under_way, days):
     sweep: config.LIVE_IN_PLAY_MIN_EDGE on a game under way, otherwise the
     edge that returns config.MIN_ANNUAL_PCT a year over the days until the
     bet pays, or config.MIN_EDGE when it gives no payout. The live executor
-    trades by it, and the scanner keeps what one order could have had by it,
+    trades by it, and the scanner times how long the edge has stayed at it,
+    see Scanner.edge_since(), and keeps what one order could have had by it,
     see Scanner.weigh_take().
     """
     if under_way:

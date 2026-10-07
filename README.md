@@ -432,7 +432,7 @@ and Polymarket US reading a match in Asia by different clocks, an esports
 match late in the American evening Kalshi by Eastern time, and a national
 team's Kalshi by UTC, Mexico against Chile at 02:30 UTC being October 6
 there and October 5 on Polymarket US. A date only one venue lists for two
-people then joins the one a day off that only the other lists. Two people
+sides then joins the one a day off that only the other lists. Two sides
 can also meet on days in a row, as in a darts round robin, so a date both
 venues list, and two dates one lists, stay matches of their own. Kinds with
 settlement rules that differ between venues carry a note from **notes.py**:
@@ -739,7 +739,7 @@ once it had stayed at `MIN_EDGE` or more for half a second, unbroken, as
 the scanner's episode timed it, and the scanner offered it again when the
 half second was up. In its first hours no in-play edge passed, the largest
 lasting 6 to 110 ms, and the user dropped it with the in-play rules below:
-live takes a future's edge the moment it sees it, as paper does. From
+live took a future's edge the moment it saw it, as paper does. From
 2026-10-06 it is back for games under way, and from 2026-10-07, a tenth of
 a second, for futures too, each at live's least edge on it, the rate a
 year on a future and two cents on a game, below.
