@@ -38,15 +38,16 @@ orders sweeping only the levels that return config.MIN_ANNUAL_PCT a year
 until it pays, not every level down to config.MIN_EDGE, see min_edge().
 On a game under way it takes an edge of config.LIVE_IN_PLAY_MIN_EDGE or
 more, two cents, only once it has stayed at config.MIN_EDGE or more for
-config.LIVE_IN_PLAY_HOLD_SECONDS, half a second, by the scanner's episode:
-one that ends sooner is never traded, and one still there when the time
-is up is priced again then and traded, see hold(). It asks for no more
-than config.LIVE_IN_PLAY_CONTRACTS a trade, ten, with no limit on how many
-such trades. All from 2026-10-06, at the user's asking. From 2026-10-05
-04:07 UTC to that day's 15:14 UTC build every edge, futures' too, waited
-half a second; then a game's was taken at five cents, five contracts a
-trade, for 200 trades, only on the signal a change of the Polymarket US
-leg's book brought, which in seven hours let one episode through.
+config.LIVE_IN_PLAY_HOLD_SECONDS, a tenth of a second, by the scanner's
+episode: one that ends sooner is never traded, and one still there when
+the time is up is priced again then and traded, see hold(). It asks for no
+more than config.LIVE_IN_PLAY_CONTRACTS a trade, ten, with no limit on how
+many such trades. All from 2026-10-06, at the user's asking, the wait half
+a second until 2026-10-07. From 2026-10-05 04:07 UTC to that day's 15:14
+UTC build every edge, futures' too, waited half a second; then a game's
+was taken at five cents, five contracts a trade, for 200 trades, only on
+the signal a change of the Polymarket US leg's book brought, which in
+seven hours let one episode through.
 
 An order whose outcome cannot be known, because no answer came, the venue
 failed on its side, or its answer cannot be read, leaves what its trade

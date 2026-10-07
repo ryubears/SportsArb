@@ -28,7 +28,8 @@ may take the edges first, to see how they would do, its orders timed as
 live ones are. By default the orders are paper. With `--execute live` or
 `--execute both` it sends real ones, and with `--live-in-play` live trades
 the games under way too, Polymarket US's order first, an edge of two cents
-or more once it has lasted half a second, at most 10 contracts a trade.
+or more once it has lasted a tenth of a second, at most 10 contracts a
+trade.
 From October 4 to 5 the service on the instance
 traded every sport's futures and the elections live, with paper on every
 event beside it, and the in-play test below. From October 5 it is set to
@@ -37,7 +38,7 @@ included, and every game under way
 (`--execute live --live-in-play --not-live none`). On October 6 live
 traded the futures alone for a time, the games in play switched off
 (`--execute live --not-live none`), until the games came back under the
-half second rules below.
+in-play rules below.
 
 ## How it works
 
@@ -787,12 +788,18 @@ something by how long the book had been quiet, to tell.
 **In-play rules.** Since 2026-10-06, at the user's asking, live on a game
 under way takes an edge of two cents or more (`LIVE_IN_PLAY_MIN_EDGE`), and
 sweeps the levels down to that, but only once the edge has stayed at
-`MIN_EDGE` or more, unbroken, for half a second
-(`LIVE_IN_PLAY_HOLD_SECONDS`), as the scanner's episode times it
-(`LiveExecutor.hold`, `Scanner.edge_since`): one that ends sooner is never
-traded, and one still there when the half second is up is priced again
-then (`recheck`) and traded, whichever venue's book changed last. The
-Polymarket US book must still be current (`confirm_wait`). A trade asks
+`MIN_EDGE` or more, unbroken, for a tenth of a second
+(`LIVE_IN_PLAY_HOLD_SECONDS`, half a second until 2026-10-07), as the
+scanner's episode times it (`LiveExecutor.hold`, `Scanner.edge_since`):
+one that ends sooner is never traded, and one still there when the time
+is up is priced again then (`recheck`) and traded, whichever venue's book
+changed last. The Polymarket US book must still be current
+(`confirm_wait`), a separate wait timed from Kalshi's last change, not
+from the edge's start: when Kalshi's change opened the edge, or changed it
+since, the Polymarket US leg waits until that change is 0.3 seconds old
+(`CONFIRM_SECONDS`), unless a newer Polymarket US book still shows the
+price. So an edge Polymarket US's change opened is taken at a tenth of a
+second, and one Kalshi's opened at about 0.3. A trade asks
 for no more than 10 contracts (`LIVE_IN_PLAY_CONTRACTS`), its limits going
 no deeper than the levels that hold them, and a whole one or more, with no
 limit on how many such trades. Each trade says whether its game was under
@@ -1243,6 +1250,24 @@ had lasted half a second, whichever book changed last, at most 10
 contracts a trade, with no limit on trades. On the Sunday of October 4,
 2,035 NFL episodes in play stayed at two cents or more for half a second,
 62 of them with a whole contract fillable throughout.
+
+**A tenth of a second.** In its first eleven hours, from 15:37 UTC on
+October 6, the half second let through 6 in-play trades. Of 44,351
+episodes in play, 3,525 reached two cents, 2,069 stayed there for half a
+second, and only 12 of those had a whole contract left after it, the rest
+fractions of one, 0.09 on average on the NHL's, which last because no one
+takes them. Polymarket US filled 2 of the 6, 11 contracts for 0.44$,
+and missed 4, two of them on a Moldova and Slovakia exact score whose
+Polymarket US book had sent nothing for 16 seconds, likely frozen after a
+goal. Kalshi's orders went only after a fill, so nothing was left on one
+leg. Of the episodes with a whole contract at two cents, 660 ended within
+a tenth of a second, 205 between a tenth and a half, and 32 lasted
+longer. In the in-play test of October 4, trades sending Polymarket US's
+order first matched nothing on edges that ended within a tenth of a
+second (17 trades, -1.00$), and made 1.92$ on those that lasted a tenth
+to a half (26) and 3.01$ on a half to five seconds (15), while those past
+five seconds, mostly frozen books, matched 1 contract of 37. So on October
+7, at the user's asking, the wait became a tenth of a second.
 
 **National teams and esports.** On October 6 the catalog took national
 teams' soccer, the men's and the women's, and esports, a sport each for

@@ -68,8 +68,15 @@ PAPER_START_BALANCE = 10000.0   # Paper dollars per venue at the start.
 
 LIVE_IN_PLAY_MIN_EDGE = 0.02    # The least edge live trades on a game under way, and the floor for the deeper levels its orders sweep
                                 # there: five cents from 2026-10-05, two, as MIN_EDGE, from 2026-10-06, at the user's asking.
-LIVE_IN_PLAY_HOLD_SECONDS = 0.5 # How long a game's edge must have stayed at MIN_EDGE or more, unbroken, as the scanner times it,
-                                # before live trades it, from 2026-10-06 at the user's asking, so only an edge that lasts is taken.
+LIVE_IN_PLAY_HOLD_SECONDS = 0.1 # How long a game's edge must have stayed at MIN_EDGE or more, unbroken, as the scanner times it,
+                                # before live trades it, so only an edge that lasts is taken: half a second from 2026-10-06, a
+                                # tenth from 2026-10-07, at the user's asking. In eleven hours the half second let through 12
+                                # episodes with a whole contract left, of 2,069 that lasted it, the rest fractions of one, while
+                                # 205 more with a contract or more ended between a tenth and a half; in the in-play test, trades
+                                # sent Polymarket US's order first on edges that went on to last a tenth to a half a second made
+                                # 1.92$ and those on edges ending sooner matched nothing. A Polymarket US leg still waits for its
+                                # book to catch up with a Kalshi change, see CONFIRM_SECONDS, so an edge Kalshi's change opened
+                                # is taken a few tenths after that change, unless a newer Polymarket US book still shows it.
                                 # Futures are taken at once. From 2026-10-05 to 10-06 live took a game's edge only on the signal
                                 # a change of the Polymarket US leg's book brought, which in seven hours let one episode through.
 LIVE_IN_PLAY_CONTRACTS = 10     # The most contracts a live trade on a game under way asks for: 5 from 2026-10-05, for 200 trades, and

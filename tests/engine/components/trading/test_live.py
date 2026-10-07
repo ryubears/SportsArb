@@ -650,7 +650,7 @@ def test_live_trades_a_future_by_its_return_a_year_and_sweeps_only_the_levels_th
     assert [(t["quantity"], t["yes_limit"], t["in_play"]) for t in stored(conn)] == [(20, 0.515, 0), (20, 0.45, 0)]
 
 
-# IN PLAY RULES, live trading a game under way at two cents once it has lasted half a second, 10 contracts a trade
+# IN PLAY RULES, live trading a game under way at two cents once it has lasted a tenth of a second, 10 contracts a trade
 
 def test_in_play_live_takes_an_edge_of_two_cents_or_more(tmp_path):
     venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
@@ -683,12 +683,12 @@ def test_in_play_live_trades_an_edge_only_once_it_has_lasted_and_asks_to_be_offe
     since, asked = {}, []
     ex.edge_since = since.get
     ex.recheck = lambda pair_id, seconds: asked.append((pair_id, round(seconds, 3)))
-    since[GAME["id"]] = "2026-09-22T17:59:59.800000+00:00"             # At 2c or more for two tenths of a second.
+    since[GAME["id"]] = "2026-09-22T17:59:59.960000+00:00"             # At 2c or more for four hundredths of a second.
     assert not signal(ex) and venues.orders == [] and stored(conn) == []
-    assert asked == [(GAME["id"], 0.3)]                                # Offered again once it has lasted half a second.
+    assert asked == [(GAME["id"], 0.06)]                               # Offered again once it has lasted a tenth of a second.
     assert "; 1 pairs' edges held until they lasted" in ex.summary()
-    since[GAME["id"]] = "2026-09-22T17:59:59.500000+00:00"             # Half a second.
-    assert signal(ex) and len(venues.orders) == 2 and asked == [(GAME["id"], 0.3)]
+    since[GAME["id"]] = "2026-09-22T17:59:59.900000+00:00"             # A tenth of a second.
+    assert signal(ex) and len(venues.orders) == 2 and asked == [(GAME["id"], 0.06)]
     since[FUTURE["id"]] = UNDER_WAY                                     # A future's edge, just begun, is taken at once.
     assert signal(ex, FUTURE, SURE) and len(venues.orders) == 4
 
@@ -703,6 +703,24 @@ def test_in_play_live_trades_a_lasting_edge_whichever_book_changed_last(tmp_path
     latest[("kalshi", "k")] = Book(k.venue, k.contract_id, "2026-09-22T17:59:59.600000+00:00", k.bids, k.asks)
     # Kalshi's change came last, 0.4s ago, longer than a Polymarket US book takes to catch up, see Executor.confirm_wait().
     assert signal(ex)
+
+
+def test_in_play_live_still_waits_for_polymarket_us_to_catch_up_with_a_kalshi_change_once_the_edge_has_lasted(tmp_path):
+    venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
+    latest = books()
+    conn, ex = in_play(tmp_path, venues, latest)
+    asked = []
+    ex.edge_since = lambda pair_id: "2026-09-22T17:59:59+00:00"         # A second at 2c or more, so no longer held.
+    ex.recheck = lambda pair_id, seconds: asked.append((pair_id, round(seconds, 3)))
+    pm, k = latest[("polymarket_us", "pm")], latest[("kalshi", "k")]
+    latest[("polymarket_us", "pm")] = Book(pm.venue, pm.contract_id, "2026-09-22T17:59:50+00:00", pm.bids, pm.asks)
+    latest[("kalshi", "k")] = Book(k.venue, k.contract_id, "2026-09-22T17:59:59.900000+00:00", k.bids, k.asks)
+    # Kalshi changed a tenth of a second ago, and Polymarket US's book is older, so its leg waits out the rest of 0.3s.
+    assert not signal(ex) and venues.orders == [] and asked == [(GAME["id"], 0.2)]
+    assert "; 1 pairs' edges waited for a book to catch up" in ex.summary()
+    # A Polymarket US book newer than Kalshi's change, still showing the price, is current, and the edge is taken.
+    latest[("polymarket_us", "pm")] = Book(pm.venue, pm.contract_id, "2026-09-22T17:59:59.950000+00:00", pm.bids, pm.asks)
+    assert signal(ex) and len(venues.orders) == 2
 
 
 def test_in_play_live_trades_an_edge_at_once_when_no_scanner_says_when_it_began(tmp_path):

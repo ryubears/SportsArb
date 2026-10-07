@@ -140,7 +140,7 @@ def test_an_episode_keeps_what_one_order_could_have_had_on_the_levels_live_takes
     # Yes costs 0.40 on Polymarket US. At the peak no costs 0.47 on Kalshi for 40, 13 cents, 0.57 for 60 more, 3 cents,
     # and 0.59 for 50 more, 1 cent. A future paying in 10 days takes the levels at 2.7 cents or more, 100% a year, at
     # once, so 10 cents on 500 a second after the peak counts for nothing. A game under way takes those at 2 cents or
-    # more once the edge has lasted half a second, so the peak, at once, counts for nothing, and the 500 for all.
+    # more once the edge has lasted a tenth of a second, so the peak, at once, counts for nothing, and the 500 for all.
     at = "2026-09-19T12:00:%02d+00:00"
     for kickoff, take in ((None, (100, 7.0)), ("2026-09-19T11:00:00+00:00", (500, 50.0))):
         conn = make_db(tmp_path / str(kickoff is None), [member("kalshi", "k", start_time=kickoff),
@@ -152,15 +152,15 @@ def test_an_episode_keeps_what_one_order_could_have_had_on_the_levels_live_takes
         assert takes(conn) == [pytest.approx(take)], kickoff
 
 
-def test_a_games_episode_whose_edge_never_lasted_half_a_second_keeps_nothing_one_order_could_have_had(tmp_path):
+def test_a_games_episode_whose_edge_never_lasted_a_tenth_of_a_second_keeps_nothing_one_order_could_have_had(tmp_path):
     kickoff = "2026-09-19T11:00:00+00:00"
     conn = make_db(tmp_path, [member("kalshi", "k", start_time=kickoff), member("polymarket_us", "pm", start_time=kickoff)])
     replay(conn, [Book("polymarket_us", "pm", "2026-09-19T12:00:00+00:00", [[0.39, 500]], [[0.40, 500]]),
                   Book("kalshi", "k", "2026-09-19T12:00:01+00:00", [[0.53, 40]], [[0.99, 1]]),                 # 13 cents.
-                  Book("kalshi", "k", "2026-09-19T12:00:01.400000+00:00", [[0.41, 40]], [[0.99, 1]]),          # 1 cent.
+                  Book("kalshi", "k", "2026-09-19T12:00:01.040000+00:00", [[0.41, 40]], [[0.99, 1]]),          # 1 cent.
                   Book("kalshi", "k", "2026-09-19T12:00:02+00:00", [[0.53, 40]], [[0.99, 1]]),                 # 13 again.
-                  Book("kalshi", "k", "2026-09-19T12:00:02.300000+00:00", [[0.40, 40]], [[0.99, 1]])])         # Gone.
-    assert takes(conn) == [(0.0, 0.0)] and stretches(conn) == [(pytest.approx(0.4), 40.0, pytest.approx(5.2))]
+                  Book("kalshi", "k", "2026-09-19T12:00:02.030000+00:00", [[0.40, 40]], [[0.99, 1]])])         # Gone.
+    assert takes(conn) == [(0.0, 0.0)] and stretches(conn) == [(pytest.approx(0.04), 40.0, pytest.approx(5.2))]
 
 
 def test_an_episode_keeps_what_one_order_could_have_had_once_its_peak_offered_a_whole_contract(tmp_path):

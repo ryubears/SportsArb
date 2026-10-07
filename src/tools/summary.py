@@ -214,7 +214,9 @@ def opportunity_rules(market):
     config.MIN_EDGE or more for config.LIVE_IN_PLAY_HOLD_SECONDS, as live
     waits for it to, see LiveExecutor.hold(). The scanner counts a game's
     moments only from then, so the stretch condition leaves out only the
-    episodes of before 2026-10-06, kept by the rules of then. Lasting does
+    episodes of before 2026-10-06, kept by the rules of then. Until
+    2026-10-07 live waited half a second, and the scanner counted a game's
+    moments only from half a second, so those days show fewer. Lasting does
     not make an edge real: two episodes of one Bitcoin window on 2026-10-05
     showed 5,304$ to be locked in at 18.7 and 51.8 cents for one and two
     minutes, unlikely when both venues settle it on the same index, likely

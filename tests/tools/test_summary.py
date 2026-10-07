@@ -83,21 +83,21 @@ def test_only_episodes_within_the_rules_are_shown(tmp_path, monkeypatch, capsys)
     assert [r[:3] for r in table(out, "futures opportunities by kind")] == [["nfl", "winner", "4"]]
     assert [r[2:4] + r[5:7] for r in table(out, "futures largest opportunities")] == [
         ["6.0", "600.000s", "94", "6.00"], ["3.0", "0.004s", "97", "3.00"], ["1.5", "600.000s", "98", "1.50"], ["14.0", "600.000s", "1", "0.14"]]
-    assert ("\nin-play opportunities (1+ contracts in one order on levels at 2c+ once the edge lasted 0.5s, games, matches, races, and windows under way, "
+    assert ("\nin-play opportunities (1+ contracts in one order on levels at 2c+ once the edge lasted 0.1s, games, matches, races, and windows under way, "
             "paying within 24h), last 12 hours\n  none\n") in out
 
 
 def test_in_play_opportunities_are_the_games_under_way_paying_within_a_day(tmp_path, monkeypatch, capsys):
     def fill(conn):
         database.insert_opportunities(conn, [
-            episode("2026-09-27T13:00:00+00:00", 0.1, 0.06, 100, live=1, pair_id=3, lasted=0.25),   # In play, but gone in 0.25s.
+            episode("2026-09-27T13:00:00+00:00", 0.1, 0.06, 100, live=1, pair_id=3, lasted=0.05),   # In play, but gone in 0.05s.
             episode("2026-09-27T13:10:00+00:00", 0.2, 0.08, 50, live=1, pair_id=3, lasted=1.5),     # In play, paying in 5 hours.
             episode("2026-09-27T13:20:00+00:00", 0.2, 0.50, 900, live=1, pair_id=3, lasted=2.0, pm_changed=0),  # On Kalshi's change too.
             episode("2026-09-27T13:30:00+00:00", 0.9, 0.06, 100, pair_id=3, lasted=1.5),            # Before it, paying in 22 hours.
             episode("2026-09-27T14:00:00+00:00", 2, 0.10, 100, pair_id=3),                          # Paying in two days.
             episode("2026-09-27T15:00:00+00:00", 0.5, 0.10, 100, live=1, pair_id=1)])    # A future that pays too soon.
     out = report(tmp_path, monkeypatch, capsys, fill, modes=summary.MODES["all"])
-    assert ("\nin-play opportunities (1+ contracts in one order on levels at 2c+ once the edge lasted 0.5s, games, matches, races, and windows under way, "
+    assert ("\nin-play opportunities (1+ contracts in one order on levels at 2c+ once the edge lasted 0.1s, games, matches, races, and windows under way, "
             "paying within 24h), last 12 hours\n") in out
     assert "  at 2c or more for 2.000s at the median, 2.000s at the 90th percentile, 2.000s at the longest\n" in out
     assert [r[:5] for r in table(out, "in-play opportunities by kind")] == [["nfl", "spread", "2", "2.000s", "2.000s"]]
