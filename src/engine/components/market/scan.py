@@ -14,7 +14,7 @@ Within an episode the edge worth trading, config.MIN_EDGE or more, may
 come and go. The Opportunity also keeps the longest unbroken stretch of it,
 and the contracts that stayed fillable at that edge through all of it,
 which is what an order sent any time in the stretch could have had, and
-so what an edge that lasts is worth. Live takes an edge at once, though,
+so what an edge that lasts is worth. Live takes it in one order, though,
 and its own fill empties the levels it takes, so the Opportunity keeps
 too what one order could have had as live takes it: the contracts
 fillable on the levels at live's least edge or more, see

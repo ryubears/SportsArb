@@ -35,6 +35,7 @@ ALIAS_DIR = Path(__file__).resolve().parent / "aliases"
 SHARED_ALIASES = {"intlw": "intl"}      # A sport whose teams are another's, by that sport: women's national teams, the men's codes.
 # Words an esports team's name may carry on one venue and not the other, 'Team Falcons' and 'Falcons', 'Aurora Gaming' and 'Aurora'.
 TEAM_FILLER = {"team", "esports", "esport", "gaming", "club", "gg"}
+VERSUS = re.compile(r"\s+vs\.?\s+")      # Between the two sides a match's title names, 'Gothic vs. mellren'.
 
 # ELECTIONS, which both venues hold by state.
 STATES = {"AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI",
@@ -83,6 +84,15 @@ def team_from_code(piece, sport, venue):
     return CODE_TO_TEAM.get(sport, {}).get(venue, {}).get((piece or "").upper())
 
 
+def plain(name):
+    """
+    A name in lower case without accents, a letter with no accent to drop,
+    like ø, written as its plain letters, see LETTERS: 'Martin Ødegaard'
+    becomes 'martin odegaard' and 'Movistar KOI Fénix' 'movistar koi fenix'.
+    """
+    return "".join(ch for ch in unicodedata.normalize("NFKD", name.lower().translate(LETTERS)) if not unicodedata.combining(ch))
+
+
 def player_key(name):
     """
     A player's name as a matching key: lower case letters and digits, without
@@ -93,8 +103,7 @@ def player_key(name):
     'Kiernan Dewsbury Hall' both 'kiernan dewsbury hall'. A name in
     PLAYER_ALIASES becomes the other venue's spelling.
     """
-    plain = "".join(ch for ch in unicodedata.normalize("NFKD", name.lower().translate(LETTERS)) if not unicodedata.combining(ch))
-    words = re.sub(r"[^a-z0-9 ]", "", plain.replace(".", "").replace("-", " ")).split()
+    words = re.sub(r"[^a-z0-9 ]", "", plain(name).replace(".", "").replace("-", " ")).split()
     key = " ".join(w for w in words if w not in SUFFIXES)
     return PLAYER_ALIASES.get(key, key)
 
@@ -125,8 +134,7 @@ def team_key(name):
     'Rounds.gg' and 'Rounds' both 'rounds', while 'MOUZ NXT', 'mouznxt', is
     not MOUZ. None when the name has nothing else.
     """
-    plain = "".join(ch for ch in unicodedata.normalize("NFKD", (name or "").lower().translate(LETTERS)) if not unicodedata.combining(ch))
-    words = re.findall(r"[a-z0-9]+", plain.replace(".", " "))
+    words = re.findall(r"[a-z0-9]+", plain(name or "").replace(".", " "))
     return "".join(w for w in words if w not in TEAM_FILLER) or None
 
 
@@ -136,7 +144,7 @@ def team_sides(title):
     struggletony', before a map's or a total's ': Map 2', or after a tournament's 'OCS Korea Stage 3 2026: '.
     """
     for part in (title or "").split(": "):
-        names = re.split(r"\s+vs\.?\s+", part)
+        names = VERSUS.split(part)
         if len(names) == 2:
             keys = tuple(team_key(n) for n in names)
             return keys if all(keys) and keys[0] != keys[1] else None
@@ -148,7 +156,7 @@ def match_sides(title):
     The keys of the two people a match's title names, 'Valentin Vacherot vs. Arthur Fils', in the title's order, or None
     unless it names two people by their full names, as some of Kalshi's titles do only by the last.
     """
-    parts = re.split(r"\s+vs\.?\s+", title or "")
+    parts = VERSUS.split(title or "")
     if len(parts) != 2 or any(len(p.split()) < 2 for p in parts):
         return None
     keys = tuple(side_key(p) for p in parts)

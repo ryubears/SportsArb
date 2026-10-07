@@ -21,17 +21,17 @@ leg's change as of when the edge reached its least edge, from 2026-10-07,
 so a change since that leaves the edge there does not start the wait
 again, see opened(). The scanner offers the edge again at the next
 change, or as soon as the wait ends, through recheck, so one that is real
-is taken then. Once it is taken, both legs' orders go
-out at once, on a game not yet started, on a future on paper, and with
-both legs on one venue, see pricing.best_trade(). On a game under way,
-and on live's futures, see LiveExecutor.lead(), Polymarket US's goes
-first, and Kalshi's only once it has answered, for no more than it filled,
-see fill_legs(). Faster traders often take the Polymarket US quote before
-our order lands, while Kalshi's fills, and a leg that misses first leaves
-nothing to sell back. In the in-play test of 2026-10-04 live trades sent
-that way made 3.84$ on 69 trades, and those sending both at once lost
-3.84$ on 78: they matched about as many contracts, but 52 of them were
-left on one leg to sell back, against 12.
+is taken then. Once it is taken, both legs' orders go out at once, on a
+game not yet started, on a future on paper, and with both legs on one
+venue, see pricing.best_trade(). On a game under way, and on live's
+futures, see LiveExecutor.lead(), Polymarket US's goes first, and Kalshi's
+only once it has answered, for no more than it filled, see fill_legs().
+Faster traders often take the Polymarket US quote before our order lands,
+while Kalshi's fills, and a leg that misses first leaves nothing to sell
+back. In the in-play test of 2026-10-04 live trades sent that way made
+3.84$ on 69 trades, and those sending both at once lost 3.84$ on 78: they
+matched about as many contracts, but 52 of them were left on one leg to
+sell back, against 12.
 
 When the two legs fill unevenly the executor goes flat at once by selling
 the excess back on its own venue, and records the result with fees. A

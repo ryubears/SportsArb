@@ -59,8 +59,8 @@ def test_live_takes_its_in_play_edge_on_a_game_under_way_and_on_a_future_the_edg
     assert pricing.live_min_edge(False, None) == config.MIN_EDGE          # A bet that gives no payout.
 
 
-def test_live_holds_a_games_edge_until_it_has_lasted_a_tenth_of_a_second():
-    since = "2026-09-22T17:59:59.960000+00:00"                        # When the edge reached two cents.
+def test_live_holds_an_edge_until_it_has_lasted_a_tenth_of_a_second():
+    since = "2026-09-22T17:59:59.960000+00:00"                        # When the edge reached live's least edge.
     assert pricing.live_hold(since, "2026-09-22T18:00:00+00:00") == pytest.approx(0.06)
     assert pricing.live_hold(since, "2026-09-22T18:00:00.060000+00:00") == 0             # A tenth of a second on.
     assert pricing.live_hold(since, "2026-09-22T18:00:05+00:00") == 0

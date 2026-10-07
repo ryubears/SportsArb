@@ -13,21 +13,21 @@ there, as live waits for it to: on a future paying
 config.MIN_PAYOUT_HOURS or more out, the levels returning
 config.MIN_ANNUAL_PCT a year, and on a game under way paying within
 config.MAX_PAYOUT_HOURS, those at config.LIVE_IN_PLAY_MIN_EDGE or more.
-Which moment is the scanner's, see Opportunity.take_size. Each market shows what those
-orders could have taken at full size and what that locks in, overall, by
-sport and kind, and the largest, and how long the edge stayed at
-config.MIN_EDGE or more, in seconds to the thousandth. A market's trades
-show by outcome and by kind for the window, the largest, the legs settled
-in it, and the open trades: in a few lines, how many, how many of them
-opened in the last hour, day, and week and the capital those hold, the
-capital they all hold and the profit they are expected to return, its
-rate a year, and when they resolve, then each one opened in the window.
-Live's orders follow its trades, then its orders to open by how long the
-venue's book had sent nothing when each went out, and how many of those
-took something. The paper money and the live money come last. --market
-narrows everything to the futures or the games in play, and --sport to
-some sports. Reads only, so it is safe to run while the live process is
-writing.
+Which moment is the scanner's, see Opportunity.take_size. Each market
+shows what those orders could have taken at full size and what that locks
+in, overall, by sport and kind, and the largest, and how long the edge
+stayed at config.MIN_EDGE or more, in seconds to the thousandth. A
+market's trades show by outcome and by kind for the window, the largest,
+the legs settled in it, and the open trades: in a few lines, how many,
+how many of them opened in the last hour, day, and week and the capital
+those hold, the capital they all hold and the profit they are expected to
+return, its rate a year, and when they resolve, then each one opened in
+the window. Live's orders follow its trades, then its orders to open by
+how long the venue's book had sent nothing when each went out, and how
+many of those took something. The paper money and the live money come
+last. --market narrows everything to the futures or the games in play,
+and --sport to some sports. Reads only, so it is safe to run while the
+live process is writing.
 
 The script sets its own import path, so it runs from any folder. The live
 money is not in the database but on the venues, so it is read from each
@@ -219,14 +219,14 @@ def opportunity_rules(market):
     from half a second, so those days show fewer. A future's moments it
     counts only once the edge has lasted config.LIVE_HOLD_SECONDS at the
     rate a year from 2026-10-07, and those of the episodes before, counted
-    at once, stay as they were kept. Lasting does
-    not make an edge real: two episodes of one Bitcoin window on 2026-10-05
-    showed 5,304$ to be locked in at 18.7 and 51.8 cents for one and two
-    minutes, unlikely when both venues settle it on the same index, likely
-    a book left standing on a market no longer trading. When that book is
-    Polymarket US's, live, sending its order first, loses only an order
-    that fills nothing. Which levels count, and at which moment, is the
-    scanner's, see Opportunity.take_size.
+    at once, stay as they were kept. Lasting does not make an edge real:
+    two episodes of one Bitcoin window on 2026-10-05 showed 5,304$ to be
+    locked in at 18.7 and 51.8 cents for one and two minutes, unlikely when
+    both venues settle it on the same index, likely a book left standing on
+    a market no longer trading. When that book is Polymarket US's, live,
+    sending its order first, loses only an order that fills nothing. Which
+    levels count, and at which moment, is the scanner's, see
+    Opportunity.take_size.
     """
     if market == "futures":
         return ("live = 0 AND days_held * 24 >= ? AND annual_pct >= ?", (config.MIN_PAYOUT_HOURS, config.MIN_ANNUAL_PCT),
