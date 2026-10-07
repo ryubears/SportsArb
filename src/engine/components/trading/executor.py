@@ -69,13 +69,17 @@ they are played, paying within config.MAX_PAYOUT_HOURS, when first seen,
 see paper.py. The legs are on two venues, or on a future two contracts of
 one venue with the same rules, see pricing.best_trade(). Both venues
 must be trading, outside the weekly maintenance each publishes, see
-common/venues.py: while one has stopped, its feed may still show prices no
-order can trade at. A trade asks for config.FILL_SHARE of what the books
-show at that edge, the share we expect to get, as far as the cash free on
-each venue pays for, live as on paper. Every trade is stored in the trades
-table as soon as it is sent and updated when it is done, and every dollar
-moved goes through the cash the executor was given. Settling what was
-bought is money/settle.py's job.
+common/venues.py, and, as Kalshi last said, on the shard each market
+trades on, see market/exchange.py: while one has stopped, its feed may
+still show prices no order can trade at, see trading(). So must each
+leg's market: one its venue says is paused, closed, or decided, or that
+turned a live order away as not trading, is never offered, see
+market/record.py, from 2026-10-07. A trade asks for config.FILL_SHARE of
+what the books show at that edge, the share we expect to get, as far as
+the cash free on each venue pays for, live as on paper. Every trade is
+stored in the trades table as soon as it is sent and updated when it is
+done, and every dollar moved goes through the cash the executor was
+given. Settling what was bought is money/settle.py's job.
 """
 
 import asyncio
@@ -153,6 +157,10 @@ class Executor:
         self.recheck = None         # Called with (pair id, seconds) when an edge waits, to price the pair again once the wait ends.
         self.edge_since = None      # Called with a pair id, returns when its edge at live's least or more began, see Scanner.edge_since().
         self.edge_books = None      # Called with a pair id, returns when each member's book had changed then, see Scanner.edge_books().
+        self.venue_trading = None   # Called with (venue, shard), says whether the venue's exchange takes orders there, see
+                                    # market/exchange.py, or None to take its weekly maintenance as the only stop.
+        self.market_closed = None   # Called with (venue, contract id, now) when a market turned an order away as not trading, so it is
+                                    # left alone, see Recorder.refuse(), which only live trading does.
         self.retrying = None        # The task flattening exposed trades while one runs.
         self.totals = {"trades": 0, "profit": 0.0, "hedge": 0.0}
         self.reload_exposed()
@@ -176,6 +184,16 @@ class Executor:
         """
         book = self.book(key, when)
         return book if fresh(book, when or self.clock(), aging) else None
+
+    def trading(self, leg, now):
+        """
+        Whether a leg's venue takes orders at now: outside its weekly
+        maintenance, see common/venues.py, and, as the venue last said, on
+        the shard the leg's market trades on, see venue_trading.
+        """
+        if self.is_maintenance(leg.venue, now):
+            return False
+        return self.venue_trading is None or self.venue_trading(leg.venue, shard(leg))
 
     def aging(self, trade):
         """
@@ -260,7 +278,7 @@ class Executor:
         if trade.id in self.set_aside:
             return None
         long_leg, short_leg = sorted(legs, key=lambda leg: leg.held, reverse=True)
-        if self.is_maintenance(long_leg.venue, when or self.clock()):
+        if not self.trading(long_leg, when or self.clock()):
             return None
         excess = exact(long_leg.held - short_leg.held)
         average = long_leg.cost / long_leg.held         # What each contract the long leg holds cost.
@@ -610,7 +628,7 @@ class Executor:
             return self.put_off(pair["id"], wait, self.waiting)
         legs = [Leg(side, m["venue"], m["contract_id"], m["polarity"], fee_info=fee_infos[(m["venue"], m["contract_id"])])
                 for side, m in (("yes", yes), ("no", no))]
-        if any(self.is_maintenance(leg.venue, now) for leg in legs):
+        if not all(self.trading(leg, now) for leg in legs):
             return False
         quantity = self.quantity_for(legs, least, self.most(pair, yes, no, now))
         if quantity < 1:

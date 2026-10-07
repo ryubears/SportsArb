@@ -6,9 +6,10 @@ host, filtered by sport tag, turns every open market into a Contract, one
 per market, for the market's long side, and reads the account's balance.
 The streaming half opens the signed markets websocket and keeps a live
 book per market slug, replacing the whole book on every message because
-the feed sends full snapshots. The trading half sends signed orders for
-the live executor. This is the only file that knows Polymarket US field
-names and message formats.
+the feed sends full snapshots, and says when a market is not open for
+trading, from the state each message gives. The trading half sends
+signed orders for the live executor. This is the only file that knows
+Polymarket US field names and message formats.
 
 Requests to the API host must be signed with the account's key. The key
 id and secret live in the data folder, see KEY_ID_FILE and SECRET_KEY_FILE.
@@ -42,6 +43,9 @@ WS_TYPE = "SUBSCRIPTION_TYPE_MARKET_DATA"
 WS_FULL = "max subscriptions per connection reached"    # The error refusing a request past WS_SUBSCRIPTIONS.
 WS_DEBOUNCE = False     # Whether to ask the feed to batch updates. Batching cuts bandwidth by a third, but it can hold our view of the
                         # book behind the venue's: on the first live game, 2026-09-28, only 1 of 11 orders opening a trade here filled.
+OPEN_STATE = "MARKET_STATE_OPEN"    # The state a book message gives a market that trades. Others are suspended, halted, preopen,
+                                    # expired, terminated, and match_and_close_auction. On 2026-10-07, 109 of 3,000 markets the
+                                    # recorder followed came expired.
 KEY_ID_FILE = DATA_DIR / "polymarket_us_key_id.txt"
 SECRET_KEY_FILE = DATA_DIR / "polymarket_us_secret_key.txt"
 
@@ -214,10 +218,23 @@ def levels(entries, reverse):
     return sorted((lv for lv in parsed if lv[1] > 0), key=lambda lv: lv[0], reverse=reverse)
 
 
+def not_trading(state):
+    """
+    Why a market whose book message gives this state is not trading, in a
+    word, 'suspended' for MARKET_STATE_SUSPENDED, or None when it trades. A
+    message without a state counts as trading.
+    """
+    if not state or state == OPEN_STATE:
+        return None
+    return state.removeprefix("MARKET_STATE_").lower()
+
+
 class PolymarketUSBookStream(BookStream):
     """
     The signed markets websocket. Each book message carries a market's
-    whole book, so the local copy is replaced rather than patched.
+    whole book, so the local copy is replaced rather than patched, and the
+    market's state, so one that is not open is said to be not trading, see
+    not_trading().
 
     The feed allows WS_SUBSCRIPTIONS subscription requests on a connection,
     of up to WS_CHUNK slugs each. It documents no unsubscribe, so removed
@@ -316,6 +333,7 @@ class PolymarketUSBookStream(BookStream):
             return True
         at = epoch(data.get("transactTime"))
         self.books[slug] = {"bids": levels(data.get("bids"), reverse=True), "asks": levels(data.get("offers"), reverse=False), "at": at}
+        self.set_state(slug, not_trading(data.get("state")))
         self.show(slug, at if slug in self.seen else None)
         self.seen.add(slug)
         return True
@@ -337,7 +355,17 @@ STOPGAP = "Global Rate Limit Exceeded"
 # the venue keeps one position per market, so selling the No one trade holds where others hold more Yes is buying Yes.
 NO_FUNDS = "You don't have enough funds"
 NO_LIQUIDITY = "ORD_REJECT_REASON_NO_LIQUIDITY"     # A rejection for finding nothing to trade, which is also unfilled rather than refused.
+# What the venue says, in any case, of an order turned away because its market is not trading, which counts as closed rather
+# than refused: ORD_REJECT_REASON_EXCHANGE_CLOSED, the docs' "market is closed", and a market halted or suspended.
+NOT_TRADING = ("exchange_closed", "market is closed", "market_closed", "halted", "suspended")
 MAX_BLOCK_SECONDS = 5   # How long an order call waits for its order to end, as long as the latency stopgap gives it.
+
+
+def says_not_trading(text):
+    """
+    Whether what the venue said of an order means its market was not trading, see NOT_TRADING.
+    """
+    return any(word in (text or "").lower() for word in NOT_TRADING)
 
 
 def amount(value):
@@ -405,7 +433,8 @@ def read_answer(answer, action, outcome, quantity):
     0.1 then 0.89 then 0.01 for one, so the shares of every fill are added
     up and counted to the hundredth, see orders.exact(). An order turned
     away for having no liquidity or by the latency stopgap is unfilled, not
-    refused.
+    refused, and one turned away because its market is not trading is
+    closed, see orders.closed().
     """
     executions = answer.get("executions") or []
     if not any(e.get("type") in FINAL_TYPES for e in executions):
@@ -427,6 +456,8 @@ def read_answer(answer, action, outcome, quantity):
             return orders.Answer(answer.get("id"), "unfilled", 0, 0.0, 0.0, f"latency stopgap: {reason}", answer)
         if NO_LIQUIDITY in said:
             return orders.Answer(answer.get("id"), "unfilled", 0, 0.0, 0.0, f"no liquidity: {reason}", answer)
+        if says_not_trading(said):
+            return orders.Answer(answer.get("id"), "closed", 0, 0.0, 0.0, f"{orders.NOT_TRADING}: {reason}", answer)
         return orders.Answer(answer.get("id"), "rejected", 0, 0.0, 0.0, reason, answer)
     paid = traded + fees if action == "buy" else traded - fees
     return orders.Answer(answer.get("id"), orders.status(filled, quantity), filled, paid, fees, None, answer)
@@ -449,6 +480,8 @@ def place_order(slug, action, outcome, quantity, price, client_id):
             return orders.unfilled(e, "latency stopgap")
         if NO_FUNDS in e.body:
             return orders.unfunded(e)
+        if e.status < 500 and says_not_trading(e.body):
+            return orders.closed(e)
         return orders.refused(e) if e.status < 500 else orders.unknown(e)
     except Exception as e:
         return orders.unknown(e)

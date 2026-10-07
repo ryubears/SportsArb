@@ -70,6 +70,19 @@ def started(game_date, members, now):
     return start is None or start <= now
 
 
+def past_close(game_date, member, now):
+    """
+    Whether a future's member is past its close time at now, so its market
+    has stopped trading or its bet is expected to be decided, and is not
+    traded, from 2026-10-07. A game's member never is: Kalshi gives a game's
+    contract the time Kalshi expects it to end, which many games outlast,
+    and a game's markets say themselves when they close, see
+    market/record.py.
+    """
+    close = member.get("close_time")
+    return game_date is None and bool(close) and close <= now
+
+
 def days_until(now, pays_at):
     """
     Days from now until a bet paying at pays_at pays, at least an hour, for its return a year, or None for a bet that

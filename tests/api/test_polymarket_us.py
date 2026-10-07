@@ -31,6 +31,21 @@ def test_a_book_carries_its_transact_time_except_the_first_of_each_market_on_a_c
     assert sent == [None, 1790655316.288755, None]
 
 
+def test_a_market_whose_state_is_not_open_is_said_not_to_trade_until_it_is_again():
+    said, seen = [], []
+    stream = polymarket_us.PolymarketUSBookStream(["s"], lambda slug, bids, asks, sent: seen.append(slug))
+    stream.on_state = lambda slug, why: said.append((slug, why))
+    stream.reset()
+    book = '{"marketData": {"marketSlug": "s", "bids": [], "offers": [], "state": "%s"}}'
+    stream.handle(book % "MARKET_STATE_OPEN")
+    stream.handle(book % "MARKET_STATE_SUSPENDED")
+    stream.handle(book % "MARKET_STATE_SUSPENDED")
+    stream.handle('{"marketData": {"marketSlug": "s", "bids": [], "offers": []}}')      # No state, which counts as open.
+    stream.handle(book % "MARKET_STATE_EXPIRED")
+    assert said == [("s", "suspended"), ("s", None), ("s", "expired")] and len(seen) == 5      # Every book still goes on.
+    assert polymarket_us.not_trading("MARKET_STATE_MATCH_AND_CLOSE_AUCTION") == "match_and_close_auction"
+
+
 def test_levels_drop_empty_sizes_and_sort_best_first():
     entries = [{"px": {"value": "0.40"}, "qty": "0"}, {"px": {"value": "0.42"}, "qty": "3"}, {"px": {"value": "0.41"}, "qty": "1"}]
     assert polymarket_us.levels(entries, reverse=True) == [[0.42, 3.0], [0.41, 1.0]]
@@ -247,6 +262,15 @@ def test_an_order_turned_away_for_lack_of_cash_is_unfunded_rather_than_refused(m
     fake_api(monkeypatch, {("POST", "/orders"): RequestFailed(400, '{"code":9,"message":"You don\'t have enough funds for this order.","details":[]}')})
     answer = polymarket_us.place_order("slug", "sell", "no", 0.42, 0.13, "c17")
     assert (answer.status, answer.filled) == ("unfunded", 0) and answer.note.startswith("not enough funds: ")
+
+
+def test_an_order_turned_away_because_its_market_is_not_trading_is_closed_rather_than_refused(monkeypatch):
+    executions = [{"type": "EXECUTION_TYPE_REJECTED", "orderRejectReason": "ORD_REJECT_REASON_EXCHANGE_CLOSED"}]
+    fake_api(monkeypatch, {("POST", "/orders"): {"id": "p8", "executions": executions}})
+    answer = polymarket_us.place_order("slug", "buy", "yes", 3, 0.44, "c8")
+    assert (answer.status, answer.filled, answer.note) == ("closed", 0, "market not trading: ORD_REJECT_REASON_EXCHANGE_CLOSED")
+    fake_api(monkeypatch, {("POST", "/orders"): RequestFailed(400, '{"code": 9, "message": "market is closed"}')})
+    assert polymarket_us.place_order("slug", "buy", "yes", 3, 0.44, "c9").status == "closed"
 
 
 def test_an_order_waits_as_long_as_the_stopgap_for_its_answer():

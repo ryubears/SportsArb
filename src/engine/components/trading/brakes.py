@@ -26,11 +26,16 @@ Live trading halts, with every order stopped, when:
   the venue answering that it will not take an order, so nothing traded: an
   error status in the 400s, such as not authorized, not enough money on
   Kalshi, a bad price, or too many requests, or Polymarket US rejecting the
-  order, for example because the market has closed. An order it took that
-  found nothing at its price is unfilled, not refused, and so is one that
-  Polymarket US turned away for having no liquidity or for being slow. One
-  it turned away for lack of cash is unfunded, not refused either: the
-  venue works, and the low cash email tells a human, see live.py.
+  order. An order it took that found nothing at its price is unfilled, not
+  refused, and so is one that Polymarket US turned away for having no
+  liquidity or for being slow. One it turned away for lack of cash is
+  unfunded, not refused either: the venue works, and the low cash email
+  tells a human, see live.py. Nor is one it turned away because the market
+  was not trading, paused, closed, or decided, or the exchange had
+  stopped, which is closed: the venue works, and the market is left alone
+  until it trades again, see live.py. Until 2026-10-07 those were
+  refusals, so three paused markets in a row would have halted live
+  trading.
 
 Live trading halts, with flattening going on, when the live trades
 decided in the last config.LIVE_RESULT_HOURS lost more than

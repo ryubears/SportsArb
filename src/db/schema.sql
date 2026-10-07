@@ -162,7 +162,7 @@ CREATE TABLE IF NOT EXISTS orders (
     limit_price    REAL NOT NULL,      -- The worst price per contract accepted for the outcome, before fees.
     client_id      TEXT NOT NULL,      -- Our id for the order, sent with it, so an order whose answer was lost can be found at the venue.
     sent_at        TEXT NOT NULL,
-    status         TEXT NOT NULL,      -- 'sent' until the venue answers, then 'filled', 'partial', 'unfilled', 'unfunded', 'rejected', or 'error'.
+    status         TEXT NOT NULL,      -- 'sent' until the venue answers, then 'filled', 'partial', 'unfilled', 'unfunded', 'closed', 'rejected', or 'error'.
     venue_order_id TEXT,               -- The venue's id for the order, once it answered.
     answered_at    TEXT,
     latency_ms     INTEGER,            -- From sending the order to its answer.

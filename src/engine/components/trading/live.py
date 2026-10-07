@@ -53,6 +53,14 @@ at five cents, five contracts a trade, for 200 trades, only on the signal
 a change of the Polymarket US leg's book brought, which in seven hours let
 one episode through.
 
+An order its venue turned away because the market was not trading,
+paused, closed, or decided, or because the exchange had stopped, is
+closed, see orders.closed(). Nothing traded, and the market is left alone
+for config.CLOSED_MARKET_SECONDS, or until its venue says it trades, see
+Recorder.refuse(), so no more orders go to it, and from 2026-10-07 it is
+no refusal to the brakes. On 2026-10-07 a paused CS2 match's Kalshi leg
+was turned away so after its Polymarket US leg had filled.
+
 An order whose outcome cannot be known, because no answer came, the venue
 failed on its side, or its answer cannot be read, leaves what its trade
 holds unknown. That trade is set aside: no more orders are sent for it,
@@ -331,6 +339,8 @@ class LiveExecutor(Executor):
             self.footprints.answer(footprint, leg.venue, answer.response, answer.filled)
         if order.status == "error":
             self.set_trade_aside(trade, order)
+        elif order.status == "closed" and self.market_closed:
+            self.market_closed(leg.venue, leg.contract_id, order.answered_at)
         self.brakes.watch(order)
         note = f"{answer.status}: {answer.note}" if answer.note else ""
         return Fill(answer.filled, answer.dollars, order.latency_ms, order.answered_at, note, answer.status == "unfunded")

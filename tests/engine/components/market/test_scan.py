@@ -3,6 +3,7 @@ Tests for the scanner's episode detection over the recorder's in memory books.
 """
 
 import asyncio
+import dataclasses
 import pytest
 from common.timeutil import days_between, epoch
 from db import database
@@ -265,6 +266,23 @@ def test_scanner_ignores_a_book_from_before_its_venue_dropped(tmp_path):
     assert [o.start_ts for o in episodes] == ["2026-09-19T12:01:30+00:00"]     # Only once Polymarket is seen again.
 
 
+def test_a_future_past_a_members_close_is_not_priced_where_a_game_is(tmp_path):
+    conn = make_db(tmp_path, [member("kalshi", "k", close_time="2026-09-19T12:00:30+00:00"), member("polymarket_us", "pm")],
+                   future=True)
+    s = scan.Scanner(conn, ("nfl",), lambda m: None)
+    latest = {("kalshi", "k"): book("kalshi", "k", T0, 0.53, 0.54), ("polymarket_us", "pm"): book("polymarket_us", "pm", T0, 0.44, 0.45)}
+    s.on_book("polymarket_us", "pm", latest, T0)
+    assert len(s.episodes) == 1
+    s.tick(latest, "2026-09-19T12:00:30+00:00")            # Kalshi's market closes: the edge it showed is gone.
+    assert s.episodes == {}
+    conn = game_db(tmp_path / "game")                       # A game outlasts the close Kalshi expected, 21:00, and is priced on.
+    s = scan.Scanner(conn, ("nfl",), lambda m: None)
+    latest = {("kalshi", "k"): book("kalshi", "k", "2026-09-20T21:30:00+00:00", 0.53, 0.54),
+              ("polymarket_us", "pm"): book("polymarket_us", "pm", "2026-09-20T21:30:00+00:00", 0.44, 0.45)}
+    s.on_book("polymarket_us", "pm", latest, "2026-09-20T21:30:00+00:00")
+    assert len(s.episodes) == 1
+
+
 def test_scanner_ignores_time_before_two_members_have_books(tmp_path):
     conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket_us", "pm")])
     assert replay(conn, [Book("polymarket_us", "pm", T0, [[0.48, 100]], [[0.49, 100]])]) == []
@@ -283,6 +301,21 @@ def book(venue, cid, ts, bid, ask, size=100):
 def game_db(tmp_path):
     return make_db(tmp_path, [member("kalshi", "k", start_time=KICKOFF, close_time="2026-09-20T21:00:00+00:00"),
                               member("polymarket_us", "pm", start_time=KICKOFF, close_time="2026-09-20T21:00:00+00:00")])
+
+
+def test_a_member_whose_market_is_not_trading_is_left_out_so_its_episode_ends(tmp_path):
+    conn = game_db(tmp_path)
+    s = scan.Scanner(conn, ("nfl",), lambda m: None)
+    latest = {("kalshi", "k"): book("kalshi", "k", TL % (0, 1), 0.53, 0.54),
+              ("polymarket_us", "pm"): book("polymarket_us", "pm", TL % (0, 2), 0.44, 0.45)}
+    s.on_book("polymarket_us", "pm", latest, TL % (0, 2))
+    assert len(s.episodes) == 1
+    latest[("kalshi", "k")] = dataclasses.replace(latest[("kalshi", "k")], halted="paused")    # Its book stays up, as on 2026-10-07.
+    s.on_book("kalshi", "k", latest, TL % (0, 3))
+    assert s.episodes == {} and stored(conn)[0].end_ts == TL % (0, 3)
+    latest[("kalshi", "k")] = dataclasses.replace(latest[("kalshi", "k")], halted=None)
+    s.on_book("kalshi", "k", latest, TL % (0, 4))
+    assert len(s.episodes) == 1
 
 
 def test_episode_opens_peaks_and_closes_from_book_changes(tmp_path):
@@ -391,7 +424,8 @@ def test_edge_books_keeps_when_each_book_had_changed_as_the_edge_reached_live_s_
 
 
 def test_a_pair_a_desk_waits_on_is_priced_again_once_the_wait_ends(tmp_path):
-    conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket_us", "pm")], future=True)
+    later = "2099-09-29T12:00:00+00:00"           # Priced again at the clock's now, so the future closes after it.
+    conn = make_db(tmp_path, [member("kalshi", "k", close_time=later), member("polymarket_us", "pm", close_time=later)], future=True)
     latest = {("kalshi", "k"): book("kalshi", "k", T0, 0.53, 0.54), ("polymarket_us", "pm"): book("polymarket_us", "pm", T0, 0.40, 0.41)}
     offered = []
     s = scan.Scanner(conn, ("nfl",), lambda m: None, books=lambda: latest)

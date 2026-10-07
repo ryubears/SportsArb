@@ -139,6 +139,9 @@ def test_a_session_trading_both_modes_keeps_a_desk_for_each_and_offers_live_the_
     assert s.scanner.on_signals == [s.desks[0].signal, s.desks[1].signal]
     assert all(d.executor.recheck == s.scanner.recheck and d.executor.edge_since == s.scanner.edge_since
                and d.executor.edge_books == s.scanner.edge_books for d in s.desks)
+    # Both trade only where the exchange trades, and a market that turned a live order away as not trading is left alone.
+    assert all(d.executor.venue_trading == s.exchange.trading and d.executor.market_closed == s.recorder.refuse for d in s.desks)
+    assert s.exchange.readings.last is not None                                             # The first tick read it.
     assert s.desks[0].cash.amounts == {"kalshi": 800.0, "polymarket_us": 600.0}
     assert s.desks[1].cash.amounts == {"kalshi": 10000.0, "polymarket_us": 10000.0}         # Paper money is its own.
     out = [line[9:] for line in capsys.readouterr().out.splitlines()]                       # Past the timestamp.

@@ -241,3 +241,9 @@ def test_edges_use_the_unrounded_fee_per_contract():
     expected = 1 - 0.45 - 0.47 - 0.07 * 0.45 * 0.55 - 0.07 * 0.47 * 0.53
     assert edge == pytest.approx(expected)          # About 4.53 cents. Rounding each fee up to 2 cents would have said 4.
     assert (size, profit, worth_size) == (100, pytest.approx(100 * expected), 0)     # Under 5 cents.
+
+
+def test_a_book_whose_market_is_not_trading_is_no_book():
+    book = Book("kalshi", "K", "2026-10-07T08:41:50+00:00", [[0.5, 1]], [[0.6, 1]], halted="paused")
+    assert not pricing.fresh(book, "2026-10-07T08:41:51+00:00") and not pricing.fresh(book, "2026-10-07T08:41:51+00:00", aging=False)
+    assert pricing.fresh(Book("kalshi", "K", "2026-10-07T08:41:50+00:00", [[0.5, 1]], [[0.6, 1]]), "2026-10-07T08:41:51+00:00")

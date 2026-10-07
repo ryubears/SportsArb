@@ -8,6 +8,11 @@ wanted set, the queue of changes made while the connection runs, and the
 connect, subscribe, read, and reconnect loop. A venue subclass supplies
 how to connect, what to send to subscribe, how to turn a queued change
 into a frame, and how to apply one message.
+
+A venue can also stop a market trading while its book stays up: pause it,
+close it, or decide it. A stream that hears so from its venue says it
+through on_state, see set_state(), so that book is not traded until the
+venue says the market trades again.
 """
 
 import asyncio
@@ -65,9 +70,14 @@ class BookStream:
         self.on_gap = on_gap or (lambda start_ts, end_ts, contract_ids: None)  # Called with the gap's times and this connection's contracts.
         # Called with contracts the venue refused to add, already removed here, so the feed can put them on another connection.
         self.on_refused = lambda contract_ids: None
+        # Called with (contract id, why) when the venue says a market stopped trading, why in a word, or with why None when
+        # it says the market trades again, see set_state().
+        self.on_state = lambda contract_id, why: None
         self.down_since = None      # When the current gap began, or None while connected.
         self.num_failures = 0       # Failures in a row, reset once a connection is subscribed.
         self.books = {}
+        self.states = {}            # Contract id maps to why its market is not trading, as its venue last said. Kept across
+                                    # reconnects, since a venue may not say it again.
         self.commands = asyncio.Queue()     # Pending ("add" or "remove", [contract ids]) changes.
 
     def room(self):
@@ -95,8 +105,22 @@ class BookStream:
         self.wanted -= gone
         for contract_id in gone:
             self.books.pop(contract_id, None)
+            self.states.pop(contract_id, None)
         if gone:
             self.commands.put_nowait(("remove", sorted(gone)))
+
+    def set_state(self, contract_id, why):
+        """
+        Note what the venue says of a market: why it is not trading, in a
+        word, or None when it trades. Only a change goes on to on_state.
+        """
+        if self.states.get(contract_id) == why:
+            return
+        if why is None:
+            del self.states[contract_id]
+        else:
+            self.states[contract_id] = why
+        self.on_state(contract_id, why)
 
     # VENUE HOOKS
 

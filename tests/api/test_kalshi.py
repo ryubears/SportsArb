@@ -91,6 +91,96 @@ def test_stream_asks_to_reconnect_on_a_sequence_gap():
         stream.handle('{"type": "ok", "seq": 4, "msg": {}}')
 
 
+def test_each_subscription_counts_its_own_sequence_and_only_the_books_subscription_takes_update_commands():
+    stream = kalshi.KalshiBookStream(["T"], lambda *args: None)
+    stream.reset()
+    stream.handle('{"type": "subscribed", "id": 1, "msg": {"channel": "orderbook_delta", "sid": 1}}')
+    stream.handle('{"type": "subscribed", "id": 2, "msg": {"channel": "market_lifecycle_v2", "sid": 2}}')
+    assert stream.sid == 1
+    for sid, seq in ((1, 1), (2, 1), (1, 2), (2, 2), (2, 3)):
+        stream.handle(json.dumps({"type": "ok", "sid": sid, "seq": seq, "msg": {}}))
+    with pytest.raises(bookstream.Reconnect):
+        stream.handle('{"type": "ok", "sid": 1, "seq": 4, "msg": {}}')
+
+
+def lifecycle(ticker, event, **fields):
+    return json.dumps({"type": "market_lifecycle_v2", "sid": 2, "msg": {"market_ticker": ticker, "event_type": event, **fields}})
+
+
+def test_the_lifecycle_says_when_a_wanted_market_is_paused_closed_or_decided(monkeypatch):
+    monkeypatch.setattr(kalshi.time, "time", lambda: 1791382560.0)
+    said = []
+    stream = kalshi.KalshiBookStream(["T", "U", "V"], lambda *args: None)
+    stream.on_state = lambda ticker, why: said.append((ticker, why))
+    stream.reset()
+    stream.handle(lifecycle("OTHER", "deactivated", is_deactivated=True))       # Not a market we follow.
+    stream.handle(lifecycle("T", "deactivated", is_deactivated=True))
+    stream.handle(lifecycle("T", "deactivated", is_deactivated=False))
+    stream.handle(lifecycle("T", "deactivated", is_deactivated=True))
+    stream.handle(lifecycle("T", "activated"))
+    stream.handle(lifecycle("U", "close_date_updated", close_ts=1791382501))    # Closed early, as a game ends.
+    stream.handle(lifecycle("U", "close_date_updated", close_ts=1791400000))    # Its close moved later again.
+    stream.handle(lifecycle("V", "close_date_updated", close_ts=1791400000))    # Later, while it trades: nothing to say.
+    stream.handle(lifecycle("V", "determined", result="yes"))
+    stream.handle(lifecycle("V", "activated"))                                  # Decided stays decided.
+    assert said == [("T", "paused"), ("T", None), ("T", "paused"), ("T", None), ("U", "closed"), ("U", None), ("V", "decided")]
+
+
+def test_a_new_connection_reads_whether_the_markets_said_not_to_trade_trade_again(monkeypatch):
+    asked = []
+
+    def market_states(tickers):
+        asked.append(tickers)
+        return {"T": None, "U": "paused"}
+
+    class FakeSocket:
+        async def send(self, text):
+            pass
+
+    monkeypatch.setattr(kalshi, "market_states", market_states)
+    said = []
+    stream = kalshi.KalshiBookStream(["T", "U", "V"], lambda *args: None)
+    stream.on_state = lambda ticker, why: said.append((ticker, why))
+
+    async def scenario():
+        stream.reset()
+        await stream.subscribe(FakeSocket())        # The first connection, with nothing said yet, reads nothing.
+        assert stream.rechecking is None
+        for ticker, why in (("T", "paused"), ("U", "paused"), ("V", "decided")):
+            stream.set_state(ticker, why)
+        stream.reset()
+        await stream.subscribe(FakeSocket())
+        await stream.rechecking
+    asyncio.run(scenario())
+    assert asked == [["T", "U"]]                     # Not the decided one, which never trades again.
+    assert said[-1] == ("T", None) and stream.states == {"U": "paused", "V": "decided"}
+
+
+def test_market_states_say_why_each_market_is_not_trading_in_batches(monkeypatch):
+    calls = []
+
+    def fake_get_json(url, params=None, retries=3):
+        calls.append(params["tickers"])
+        statuses = {"A": "active", "B": "inactive", "C": "closed", "D": "finalized", "E": "initialized"}
+        return {"markets": [{"ticker": t, "status": statuses[t]} for t in params["tickers"].split(",")]}
+
+    monkeypatch.setattr(kalshi, "get_json", fake_get_json)
+    monkeypatch.setattr(kalshi, "RESULTS_BATCH", 3)
+    monkeypatch.setattr(kalshi, "SLEEP", 0)
+    assert kalshi.market_states(["E", "D", "C", "B", "A"]) == {"A": None, "B": "paused", "C": "closed", "D": "decided", "E": "unopened"}
+    assert calls == ["A,B,C", "D,E"]
+
+
+def test_the_exchange_says_whether_each_shard_trades(monkeypatch):
+    answer = {"exchange_active": True, "trading_active": True, "exchange_index_statuses": [
+        {"exchange_index": 0, "exchange_active": True, "trading_active": True},
+        {"exchange_index": 3, "exchange_active": True, "trading_active": False}]}
+    monkeypatch.setattr(kalshi, "get_json", lambda url, params=None: answer)
+    assert kalshi.exchange_trading() == {0: True, 3: False}
+    monkeypatch.setattr(kalshi, "get_json", lambda url, params=None: {"exchange_active": False, "trading_active": True})
+    assert kalshi.exchange_trading() == {None: False}         # Without a shard by shard answer, the whole exchange.
+
+
 def test_results_are_looked_up_in_batches_and_only_finalized_markets_count(monkeypatch):
     calls = []
 
@@ -149,7 +239,8 @@ def test_the_book_stream_asks_for_yes_side_prices():
             sent.append(json.loads(text))
     stream = kalshi.KalshiBookStream(["B", "A"], lambda *args: None)
     asyncio.run(stream.subscribe(FakeSocket()))
-    assert sent == [{"id": 1, "cmd": "subscribe", "params": {"channels": ["orderbook_delta"], "market_tickers": ["A", "B"], "use_yes_price": True}}]
+    assert sent == [{"id": 1, "cmd": "subscribe", "params": {"channels": ["orderbook_delta"], "market_tickers": ["A", "B"], "use_yes_price": True}},
+                    {"id": 2, "cmd": "subscribe", "params": {"channels": ["market_lifecycle_v2"]}}]     # Every market's, untold.
 
 
 def test_an_order_is_quoted_on_the_yes_side_and_a_sale_may_open_the_other_side():
@@ -198,7 +289,8 @@ def test_a_sale_turned_away_for_lack_of_cash_is_unfunded_where_a_buy_is_refused(
 
 @pytest.mark.parametrize("error, status", [
     (RequestFailed(400, '{"code": "insufficient_balance", "message": "insufficient balance"}'), "rejected"),     # Refused, nothing traded.
-    (RequestFailed(400, '{"error":{"code":"trading_is_paused","message":"trading is paused"}}'), "rejected"),    # Kalshi stopped: refused.
+    (RequestFailed(400, '{"error":{"code":"trading_is_paused","message":"trading is paused"}}'), "closed"),      # Kalshi stopped: no refusal.
+    (RequestFailed(400, '{"error":{"code":"MARKET_NOT_ACTIVE","message":"MARKET_NOT_ACTIVE"}}'), "closed"),     # A paused market, 2026-10-07.
     (RequestFailed(503, "unavailable"), "error"),                                                                   # Failed on its side, it may have traded.
     # The market's exchange shard lacked the cash, as Kalshi answered on 2026-09-29. Nothing traded, and no refusal to halt on.
     (RequestFailed(404, '{"error":{"code":"insufficient_shard_balance","message":"insufficient shard balance","details":'

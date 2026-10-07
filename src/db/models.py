@@ -94,6 +94,8 @@ class Book:
     bids: list              # [[price, size], ...] best first.
     asks: list              # [[price, size], ...] best first.
     at: float | None = None     # The venue's clock, seconds since 1970, when it made the change, or None when it did not say.
+    halted: str | None = None   # Why the market is not trading, as its venue said or an order it turned away showed, or None
+                                # while it trades. A halted book is not priced or traded, see pricing.fresh().
 
 
 @dataclass
@@ -271,7 +273,7 @@ class Order:
     limit_price: float      # The worst price per contract accepted for the outcome, before fees.
     client_id: str          # Our id for the order, sent with it, so an order whose answer was lost can be found at the venue.
     sent_at: str
-    status: str = "sent"    # 'sent' until the venue answers, then 'filled', 'partial', 'unfilled', 'unfunded', 'rejected', or 'error'.
+    status: str = "sent"    # 'sent' until the venue answers, then 'filled', 'partial', 'unfilled', 'unfunded', 'closed', 'rejected', or 'error'.
     venue_order_id: str | None = None   # The venue's id for the order, once it answered.
     answered_at: str | None = None
     latency_ms: int | None = None       # From sending the order to its answer.

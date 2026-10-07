@@ -67,3 +67,19 @@ def test_a_drop_on_one_connection_leaves_the_books_of_the_others(tmp_path, fake_
         return r.books
     latest = asyncio.run(scenario())
     assert sorted(latest) == [("polymarket_us", "a"), ("polymarket_us", "b")]     # Only c waits for its connection to send it again.
+
+
+def test_what_a_venue_says_of_its_markets_reaches_the_recorder_unless_the_contract_was_removed(tmp_path, fake_stream):
+    async def scenario():
+        r = record.Recorder(database.connect(tmp_path / "test.sqlite"), log=lambda line: None)
+        s = streams.Streams(r, {"polymarket_us": fake_stream, "kalshi": fake_stream})
+        s.start("polymarket_us", ["a", "b"])
+        s.start("kalshi", ["k1"])
+        await asyncio.sleep(0)
+        s.update({"polymarket_us": ["a"], "kalshi": ["k1"]})
+        (pm,) = s.feeds["polymarket_us"].streams
+        pm.on_state("a", "suspended")
+        pm.on_state("b", "expired")                 # A late word on the removed contract.
+        await s.stop_all()
+        return r.states
+    assert asyncio.run(scenario()) == {("polymarket_us", "a"): "suspended"}

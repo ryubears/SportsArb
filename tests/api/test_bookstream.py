@@ -251,3 +251,17 @@ def test_run_waits_until_something_is_wanted():
         except asyncio.CancelledError:
             pass
     asyncio.run(scenario())
+
+
+def test_what_a_venue_says_of_a_market_goes_on_only_as_it_changes_and_goes_with_the_contract():
+    said = []
+    stream = ScriptedStream(["x", "y"], [])
+    stream.on_state = lambda contract_id, why: said.append((contract_id, why))
+    stream.set_state("x", None)                 # It trades, as everything does until said otherwise.
+    stream.set_state("x", "paused")
+    stream.set_state("x", "paused")
+    stream.set_state("x", None)
+    stream.set_state("y", "closed")
+    assert said == [("x", "paused"), ("x", None), ("y", "closed")] and stream.states == {"y": "closed"}
+    stream.remove(["y"])
+    assert stream.states == {}

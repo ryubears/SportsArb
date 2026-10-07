@@ -11,7 +11,12 @@ venues, trading/ makes the trades, and money/ keeps the cash.
   paired contract in memory. Books are not stored. While a paper order is
   in flight, every book of its contract also goes on a tape, from
   market/tape.py, so the order can meet the venue's book as it was when a
-  live order would have arrived.
+  live order would have arrived. It also holds which markets are not
+  trading, as their venues' feeds say or an order turned away showed, and
+  their books are not traded.
+- The exchange status, from market/exchange.py, reads whether Kalshi
+  trades, shard by shard, and no trade opens with a leg where it has
+  stopped.
 - The scanner, from market/scan.py, prices each pair a changed book
   belongs to, stores every episode of positive edge in the opportunities
   table, and offers each episode to the desks.
@@ -89,6 +94,7 @@ from common.processes import CONTEXT, set_up_child
 from common.timeutil import now_iso
 from db import database
 from engine.components.market import scan
+from engine.components.market.exchange import ExchangeStatus
 from engine.components.market.record import Recorder, load_targets
 from engine.components.market.streams import Streams
 from engine.components.market.tape import Tapes
@@ -278,10 +284,12 @@ class Session:
         for mode in executors if with_scanner else ():     # Live first, so its orders go out first.
             self.desks.append(Desk(mode, conn, lambda: self.recorder.books, self.notifier, **rules[mode]))
         self.scanner = scan.Scanner(conn, sports, log, [d.signal for d in self.desks], books=lambda: self.recorder.books) if with_scanner else None
+        self.recorder = Recorder(conn, self.scanner, self.tapes, log)
+        self.exchange = ExchangeStatus(log) if self.desks else None
         for desk in self.desks:
             ex = desk.executor
             ex.recheck, ex.edge_since, ex.edge_books = self.scanner.recheck, self.scanner.edge_since, self.scanner.edge_books
-        self.recorder = Recorder(conn, self.scanner, self.tapes)
+            ex.venue_trading, ex.market_closed = self.exchange.trading, self.recorder.refuse
         self.streams = Streams(self.recorder)
         self.last_status = self.last_summary = time.time()
 
@@ -330,6 +338,9 @@ class Session:
         retry and settle, and log the status and summaries when they are due.
         """
         now = now_iso()
+        self.recorder.tick(now)
+        if self.exchange:
+            self.exchange.tick(time.time())
         if self.scanner:
             self.scanner.tick(self.recorder.books, now)
         self.attestation.tick(now, time.time())

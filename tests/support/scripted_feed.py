@@ -16,7 +16,8 @@ class ScriptedStream(BookStream):
     Sends a book for each contract it carries as soon as it carries it,
     stamped with the time it sent it as a venue does, and ends a gap first
     when its connection was lost before it started. Two contracts fill a
-    connection.
+    connection. One whose id begins 'halted' comes suspended, as Polymarket
+    US says so with the book.
     """
 
     name = "scripted"
@@ -29,6 +30,8 @@ class ScriptedStream(BookStream):
         sent = set()
         while True:
             for contract_id in sorted(self.wanted - sent):
+                if contract_id.startswith("halted"):
+                    self.set_state(contract_id, "suspended")
                 self.on_book(contract_id, [[0.5, 1]], [[0.6, 1]], time.time())
             sent = set(self.wanted)
             await asyncio.sleep(0.01)

@@ -302,6 +302,18 @@ def test_orders_the_latency_stopgap_turned_away_do_not_count_as_refusals(tmp_pat
     assert "yes leg unfilled: latency stopgap" in stored(conn, "trades")[0]["hedge"]
 
 
+def test_a_market_that_turned_an_order_away_as_not_trading_is_left_alone_and_is_no_refusal(tmp_path):
+    closed = orders.Answer(None, "closed", 0, 0.0, 0.0, "market not trading: MARKET_NOT_ACTIVE", {})
+    venues = Venues(polymarket_us=[fills(), fills()] * 3, kalshi=[closed] * 3)     # Each Polymarket US fill is sold back.
+    conn, cash, ex = executor(tmp_path, venues)
+    left_alone = []
+    ex.market_closed = lambda venue, contract_id, now: left_alone.append((venue, contract_id, now))
+    assert trade(ex, 3) == [True] * 3 and ex.halted is None             # Three in a row halt nothing, as refusals would.
+    assert left_alone == [("kalshi", "k", NOW)] * 3                     # The recorder leaves it alone after the first, see record.py.
+    assert "no leg closed: market not trading: MARKET_NOT_ACTIVE" in stored(conn, "trades")[0]["hedge"]
+    assert [o["status"] for o in stored(conn, "orders") if o["venue"] == "kalshi"] == ["closed"] * 3
+
+
 def test_trades_spend_all_the_cash_and_a_venue_or_kalshi_shard_running_low_emails_once(tmp_path):
     shards = {0: 8.0, 2: 20.0, 3: 20.0}                 # Football's shard, Bitcoin's, and baseball's.
     cash = LiveBalances(lambda m: None, {"kalshi": lambda: (sum(shards.values()), dict(shards)), "polymarket_us": lambda: (8.0, {})})

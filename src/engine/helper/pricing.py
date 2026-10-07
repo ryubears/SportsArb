@@ -30,15 +30,19 @@ class Priced(NamedTuple):
 
 def fresh(book, now, aging=True):
     """
-    Whether a book can be priced and traded at now: it has changed within
-    config.MAX_BOOK_AGE seconds. A market that has closed may stop changing
-    rather than empty its book, and its last book cannot be traded, so an
-    old book counts as no book. A quiet market that is still open waits for
-    its next change. A book that may rest unchanged for hours while its
-    market is open, as a future's does, or a game's before kickoff, is priced
-    without aging: it counts until the recorder stops following it.
+    Whether a book can be priced and traded at now: its market is trading,
+    and it has changed within config.MAX_BOOK_AGE seconds. A market its
+    venue paused, closed, or decided, or that turned an order away as not
+    trading, is halted, see market/record.py, and counts as no book until
+    it trades again: its book may stay up, and move, while no order can
+    trade at it. A market that has closed may also stop changing rather
+    than empty its book, and its last book cannot be traded, so an old book
+    counts as no book. A quiet market that is still open waits for its next
+    change. A book that may rest unchanged for hours while its market is
+    open, as a future's does, or a game's before kickoff, is priced without
+    aging: it counts until the recorder stops following it.
     """
-    return book is not None and (not aging or seconds_between(book.ts, now) <= config.MAX_BOOK_AGE)
+    return book is not None and not book.halted and (not aging or seconds_between(book.ts, now) <= config.MAX_BOOK_AGE)
 
 
 def ladder(book, polarity, side):

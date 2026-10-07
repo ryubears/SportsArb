@@ -5,6 +5,7 @@ A stand in for the venue streams, shared by the live tests as a fixture.
 import asyncio
 import pytest
 from api import kalshi
+from engine.components.market import exchange
 from engine.helper import config
 
 
@@ -14,6 +15,14 @@ def no_kalshi_key_reading(monkeypatch):
     A session reads when the Kalshi key's location attestation lapses. In tests Kalshi gives no date, and nothing asks it.
     """
     monkeypatch.setattr(kalshi, "attestation_lapses", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def no_exchange_status_reading(monkeypatch):
+    """
+    A trading session reads whether Kalshi's exchange trades. In tests it always does, and nothing asks it.
+    """
+    monkeypatch.setattr(exchange, "READERS", {"kalshi": lambda: {None: True}})
 
 
 class FakeStream:

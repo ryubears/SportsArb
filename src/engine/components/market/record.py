@@ -20,11 +20,24 @@ line says how far behind the venue those books reached this process since
 the last status line, median and 90th percentile, and how much of it was
 ours, from the feed receiving a book to this process having it.
 
+A market can stop trading while its book stays up, and moves. Each
+venue's feed says when one of its markets is paused, closed, or decided,
+and when it trades again, see BookStream.set_state(), and a market that
+turned a live order away as not trading is left alone for
+config.CLOSED_MARKET_SECONDS, or until its venue says it trades, see
+refuse(). Either way its book is halted, see Book.halted, and is not
+priced or traded, see pricing.fresh(). Each change is logged, but for what
+a venue says of a market as its first book comes, as Polymarket US's
+feed does of every expired one it carries, and the status line counts the
+markets not trading.
+
 Only games within config.GAME_WINDOW_DAYS of kickoff are recorded.
 The process that runs all this is run.py.
 """
 
+import dataclasses
 import time
+from collections import Counter
 from common.stats import quantile
 from common.timeutil import epoch, now_iso, shift
 from common.venues import VENUES
@@ -62,11 +75,15 @@ class Recorder:
     scanner, every change at the top of a book is priced as it lands.
     """
 
-    def __init__(self, conn, scanner=None, tapes=None):
+    def __init__(self, conn, scanner=None, tapes=None, log=print):
         self.conn = conn
         self.scanner = scanner
         self.tapes = tapes      # Tapes of the contracts paper orders are in flight on, or None.
+        self.log = log
         self.books = {}         # (venue, contract_id) maps to the contract's newest Book.
+        self.states = {}        # (venue, contract_id) maps to why its venue says the market is not trading, see on_state().
+        self.refused = {}       # (venue, contract_id) maps to when, in seconds since 1970, a market that turned an order away as not
+                                # trading may be traded again, see refuse().
         self.updates = {venue: 0 for venue in VENUES}
         self.last_update = {venue: None for venue in VENUES}       # Wall clock seconds of the newest update per venue.
         self.gaps = {venue: 0 for venue in VENUES}
@@ -89,17 +106,89 @@ class Recorder:
                 self.ours[venue].append(now - received)
         key = (venue, contract_id)
         before = self.books.get(key)
-        book = self.books[key] = Book(venue, contract_id, ts or now_iso(), bids[:config.BOOK_LEVELS], asks[:config.BOOK_LEVELS], sent)
+        book = self.books[key] = Book(venue, contract_id, ts or now_iso(), bids[:config.BOOK_LEVELS], asks[:config.BOOK_LEVELS], sent,
+                                      self.halted(key))
         if self.tapes:
             self.tapes.add(key, book)
         if self.scanner and (before is None or top(before) != top(book)):
             self.scanner.on_book(venue, contract_id, self.books, book.ts)
 
-    def forget(self, venue, contract_ids):
+    # MARKETS NOT TRADING
+
+    def halted(self, key):
         """
-        Drop the books of contracts that are no longer recorded, or not seen for a while.
+        Why a contract's market is not trading, as its venue says or a refused order showed, or None while it trades.
+        """
+        return self.states.get(key) or ("refused an order" if key in self.refused else None)
+
+    def rebook(self, key):
+        """
+        Mark the contract's book halted or not, as halted() now says, and price its pairs again when that changed it.
+        """
+        book = self.books.get(key)
+        if book is None or book.halted == self.halted(key):
+            return
+        book = self.books[key] = dataclasses.replace(book, halted=self.halted(key))
+        if self.tapes:
+            self.tapes.add(key, book)
+        if self.scanner:
+            self.scanner.on_book(key[0], key[1], self.books, now_iso())
+
+    def on_state(self, venue, contract_id, why):
+        """
+        Note what a venue says of a market: why it is not trading, or None
+        when it trades again, which also ends a refusal's wait, see refuse().
+        A change is logged, but for what the venue says as the contract's
+        first book comes.
+        """
+        key = (venue, contract_id)
+        if why is None:
+            self.states.pop(key, None)
+            self.refused.pop(key, None)
+        else:
+            self.states[key] = why
+        if key in self.books:
+            self.log(f"{venue} {contract_id} {'trading again' if why is None else f'not trading: {why}'}")
+        self.rebook(key)
+
+    def refuse(self, venue, contract_id, now):
+        """
+        A live order on the contract was turned away as its market not
+        trading, at now, so leave the market alone for
+        config.CLOSED_MARKET_SECONDS, or until its venue says it trades.
+        """
+        key = (venue, contract_id)
+        self.refused[key] = epoch(now) + config.CLOSED_MARKET_SECONDS
+        self.log(f"{venue} {contract_id} turned an order away as not trading, left alone for {config.CLOSED_MARKET_SECONDS:g}s "
+                 f"or until {venue} says it trades")
+        self.rebook(key)
+
+    def tick(self, now):
+        """
+        Once a second from the session. Ends the wait of each refused market whose time is up.
+        """
+        clock = epoch(now)
+        for key in [key for key, until in self.refused.items() if until <= clock]:
+            del self.refused[key]
+            self.log(f"{key[0]} {key[1]} may be traded again, {config.CLOSED_MARKET_SECONDS:g}s after it turned an order away")
+            self.rebook(key)
+
+    def not_trading(self):
+        """
+        The markets not trading by venue and why, in words, or '' when there are none.
+        """
+        counts = Counter((key[0], self.halted(key)) for key in set(self.states) | set(self.refused))
+        return ", ".join(f"{venue} {why} {n}" for (venue, why), n in sorted(counts.items()))
+
+    def forget(self, venue, contract_ids, states=True):
+        """
+        Drop the books of contracts that are no longer recorded, or not seen
+        for a while, and with states what their venue said of their
+        markets, which a feed started again says only as it changes.
         """
         for contract_id in contract_ids:
+            if states:
+                self.states.pop((venue, contract_id), None)
             if self.books.pop((venue, contract_id), None) and self.tapes:
                 self.tapes.add((venue, contract_id), None)
 
@@ -107,11 +196,12 @@ class Recorder:
         """
         Store a gap in one of a venue's connections and drop the books of the
         contracts it carries, which the scanner leaves out until the new
-        connection sends them again.
+        connection sends them again. What the venue said of their markets
+        stays, as the feed keeps it across connections.
         """
         database.insert_gap(self.conn, Gap(venue, start_ts, end_ts))
         self.gaps[venue] += 1
-        self.forget(venue, contract_ids)
+        self.forget(venue, contract_ids, states=False)
 
     def delay(self, venue):
         """
@@ -126,10 +216,12 @@ class Recorder:
 
     def status(self):
         """
-        One line with what has happened so far, including how long each venue has been quiet and how far behind it its books came.
+        One line with what has happened so far, including how long each venue has been quiet and how far behind it its books
+        came, and the markets not trading, see not_trading().
         """
         parts = []
         for venue, n in self.updates.items():
             t = self.last_update[venue]
             parts.append(f"{venue} {n} (last {f'{time.time() - t:.0f}s ago' if t else 'never'}, {self.gaps[venue]} gaps{self.delay(venue)})")
-        return f"tracking {len(self.books)} books, updates {', '.join(parts)}"
+        halted = self.not_trading()
+        return f"tracking {len(self.books)} books, updates {', '.join(parts)}" + (f"; not trading: {halted}" if halted else "")

@@ -9,6 +9,7 @@ from typing import NamedTuple
 from common.timeutil import epoch
 
 STEP = 0.01     # The least part of a contract both venues fill and take orders for, a hundredth.
+NOT_TRADING = "market not trading"      # How a closed order's note begins, see closed().
 
 
 class Answer(NamedTuple):
@@ -16,8 +17,9 @@ class Answer(NamedTuple):
     What came back for one immediate or cancel order.
     """
     order_id: str | None    # The venue's id for the order, None when it never took it.
-    status: str             # 'filled', 'partial', 'unfilled', 'unfunded' when the venue lacked our cash for it, 'rejected' when it
-                            # refused it, or 'error' when we cannot tell what happened.
+    status: str             # 'filled', 'partial', 'unfilled', 'unfunded' when the venue lacked our cash for it, 'closed' when it
+                            # turned it away because the market was not trading, 'rejected' when it refused it, or 'error' when
+                            # we cannot tell what happened.
     filled: float           # Contracts bought or sold, to the hundredth, see exact().
     dollars: float          # Paid for a buy or received for a sale, fees included.
     fees: float
@@ -73,6 +75,17 @@ def unfunded(error):
     is no refusal: the same order may go through once cash arrives.
     """
     return Answer(None, "unfunded", 0, 0.0, 0.0, f"not enough funds: {error.body[:300]}", {"error": error.body, "status": error.status})
+
+
+def closed(error):
+    """
+    The Answer for an order the venue turned away because its market was
+    not trading: paused, closed, or decided, or the exchange stopped.
+    Nothing traded, and the venue is no less able to trade, so it is no
+    refusal either: the market is left alone until it trades again, see
+    market/record.py.
+    """
+    return Answer(None, "closed", 0, 0.0, 0.0, f"{NOT_TRADING}: {error.body[:300]}", {"error": error.body, "status": error.status})
 
 
 def unfilled(error, why):

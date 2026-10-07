@@ -17,6 +17,8 @@ A child never waits on the main process. Its books wait in an Outbox, where
 a newer book of a contract replaces an older one not yet sent, and a thread
 of the child's sends the outbox whenever the pipe takes more. A main
 process that falls behind gets the newest books rather than a backlog.
+What the venue says of a market's trading, see BookStream.set_state(),
+goes the same way, in order, ahead of the books.
 
 A child that dies is started again, after a pause that grows while it keeps
 dying. Its books are dropped until the new connections send them, and the
@@ -42,16 +44,19 @@ class VenueFeed:
     connection come back through its on_refused and are placed the same
     way. Each book is passed to on_book(contract_id, bids, asks, ts, sent=)
     with the time it arrived and the venue's time for it, as the stream
-    gives it, depth levels a side, and each gap to
-    on_gap(start_ts, end_ts, contract_ids). down_since, when given, is when
-    the venue's connections were lost before these, so their first
-    subscriptions end a gap.
+    gives it, depth levels a side, each gap to
+    on_gap(start_ts, end_ts, contract_ids), and what the venue says of a
+    market's trading to on_state(contract_id, why), see
+    BookStream.set_state(). down_since, when given, is when the venue's
+    connections were lost before these, so their first subscriptions end a
+    gap.
     """
 
-    def __init__(self, stream_class, on_book, on_gap, log=log, depth=None, down_since=None):
+    def __init__(self, stream_class, on_book, on_gap, log=log, depth=None, down_since=None, on_state=None):
         self.stream_class = stream_class
         self.on_book = on_book
         self.on_gap = on_gap
+        self.on_state = on_state or (lambda contract_id, why: None)
         self.log = log
         self.depth = depth
         self.down_since = down_since
@@ -72,6 +77,7 @@ class VenueFeed:
             stream.depth = self.depth
         stream.down_since = self.down_since
         stream.on_refused = self.add
+        stream.on_state = self.on_state
         self.streams.append(stream)
         self.tasks.append(asyncio.create_task(stream.run()))
         return stream
@@ -132,14 +138,16 @@ class Outbox:
     of its own, from start(), so the feed never waits on the pipe. A book
     waits keyed by its contract, a newer one replacing an older one not yet
     sent, with the count of books behind it. A gap waits in order, and drops
-    its contracts' books not yet sent, which it clears anyway.
+    its contracts' books not yet sent, which it clears anyway. What the
+    venue says of a market's trading waits in order with the gaps.
     """
 
     def __init__(self, conn):
         self.conn = conn
         self.lock = threading.Lock()
         self.books = {}                     # Contract id maps to (bids, asks, ts, sent, books behind it) not yet sent.
-        self.gaps = []                      # ("gap", start_ts, end_ts, contract_ids) not yet sent, in order.
+        self.gaps = []                      # ("gap", start_ts, end_ts, contract_ids) and ("state", contract_id, why) not yet
+                                            # sent, in order.
         self.pending = threading.Event()    # Set while something waits to be sent.
         self.closed = False
         self.thread = None
@@ -157,9 +165,14 @@ class Outbox:
             self.gaps.append(("gap", start_ts, end_ts, contract_ids))
         self.pending.set()
 
+    def state(self, contract_id, why):
+        with self.lock:
+            self.gaps.append(("state", contract_id, why))
+        self.pending.set()
+
     def take(self):
         """
-        Everything waiting, as the messages to send in order: the gaps, then one message with every book.
+        Everything waiting, as the messages to send in order: the gaps and states, then one message with every book.
         """
         with self.lock:
             self.pending.clear()
@@ -204,7 +217,7 @@ async def run_child(stream_class, contract_ids, depth, down_since, commands, upd
     """
     outbox = Outbox(updates)
     outbox.start()
-    feed = VenueFeed(stream_class, outbox.book, outbox.gap, log, depth, down_since)
+    feed = VenueFeed(stream_class, outbox.book, outbox.gap, log, depth, down_since, outbox.state)
     feed.start(contract_ids)
     stop = asyncio.Event()
 
@@ -242,20 +255,23 @@ class FeedProcess:
     One venue's VenueFeed, run in a child process. What the child sends is
     passed on here in the main process: each book to on_book(contract_id,
     bids, asks, ts, books, sent) with the number of books it stands for and
-    the venue's time for the newest, and each
-    gap to on_gap(start_ts, end_ts, contract_ids). When the child dies,
-    on_lost(contract_ids) drops its books, and a new child starts after a
-    pause, its first subscriptions ending a gap from when the old one was
+    the venue's time for the newest, each gap to on_gap(start_ts, end_ts,
+    contract_ids), and what the venue says of a market's trading to
+    on_state(contract_id, why). When the child dies, on_lost(contract_ids)
+    drops its books, and what its venue had said of its markets, which a
+    new child hears again only as it changes, and a new child starts after
+    a pause, its first subscriptions ending a gap from when the old one was
     found dead. Must be made inside the running loop.
     """
 
-    def __init__(self, venue, stream_class, contract_ids, depth, on_book, on_gap, on_lost, log=log):
+    def __init__(self, venue, stream_class, contract_ids, depth, on_book, on_gap, on_lost, log=log, on_state=None):
         self.venue = venue
         self.stream_class = stream_class
         self.wanted = set(contract_ids)
         self.depth = depth
         self.on_book = on_book
         self.on_gap = on_gap
+        self.on_state = on_state or (lambda contract_id, why: None)
         self.on_lost = on_lost
         self.log = log
         self.loop = asyncio.get_running_loop()
@@ -299,6 +315,8 @@ class FeedProcess:
                 self.deaths = 0
                 for contract_id, bids, asks, ts, sent, books in message[1]:
                     self.on_book(contract_id, bids, asks, ts, books, sent)
+            elif message[0] == "state":
+                self.on_state(*message[1:])
             else:
                 self.on_gap(*message[1:])
         except Exception as e:

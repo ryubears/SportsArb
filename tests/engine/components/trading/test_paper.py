@@ -515,6 +515,20 @@ def test_no_trade_opens_and_no_sale_goes_out_on_a_venue_that_is_not_trading(tmp_
     assert stored(conn)[0]["yes_held"] == 0 and ex.exposed == {}
 
 
+def test_no_trade_opens_and_no_sale_goes_out_where_the_exchange_says_it_has_stopped(tmp_path, quick):
+    latest = books()
+    conn, cash, ex = executor(tmp_path, latest)
+    asked = []
+
+    def trading(venue, shard):
+        asked.append((venue, shard))
+        return venue != "kalshi"
+    ex.venue_trading = trading                                          # Kalshi found an issue and stopped, say.
+    assert run(ex) == [False] and stored(conn) == [] and ("kalshi", None) in asked
+    ex.venue_trading = lambda venue, shard: True
+    assert run(ex) == [True]
+
+
 # TIMED AS LIVE ORDERS ARE, against the books the recorder tapes
 
 T = epoch(NOW)

@@ -5,8 +5,8 @@ Each venue has a BookStream class in api/ that keeps one websocket
 connection for a set of contracts, and a VenueFeed from feeds.py that holds
 as many of them as the venue's contracts need. Streams gives each venue its
 feed, in a process of its own when config.FEED_PROCESSES is set, applies
-catalog changes to the running feeds, and passes their books and gaps to
-the recorder.
+catalog changes to the running feeds, and passes their books, their gaps,
+and what each venue says of its markets' trading to the recorder.
 """
 
 import math
@@ -40,6 +40,13 @@ class Streams:
         if contract_id in self.wanted[venue]:
             self.recorder.on_book(venue, contract_id, bids, asks, ts, books, sent)
 
+    def on_state(self, venue, contract_id, why):
+        """
+        Pass on what a venue says of a market's trading, see BookStream.set_state(), unless its contract was removed.
+        """
+        if contract_id in self.wanted[venue]:
+            self.recorder.on_state(venue, contract_id, why)
+
     def connections(self, venue):
         """
         How many connections the venue's contracts take to start with.
@@ -59,11 +66,14 @@ class Streams:
         def on_gap(start_ts, end_ts, gap_ids):
             self.recorder.on_gap(venue, start_ts, end_ts, gap_ids)
 
+        def on_state(contract_id, why):
+            self.on_state(venue, contract_id, why)
+
         if self.processes:
             self.feeds[venue] = FeedProcess(venue, self.stream_classes[venue], contract_ids, config.BOOK_LEVELS, on_book, on_gap,
-                                            lambda lost_ids: self.recorder.forget(venue, lost_ids), log)
+                                            lambda lost_ids: self.recorder.forget(venue, lost_ids), log, on_state)
         else:
-            feed = self.feeds[venue] = VenueFeed(self.stream_classes[venue], on_book, on_gap, log, config.BOOK_LEVELS)
+            feed = self.feeds[venue] = VenueFeed(self.stream_classes[venue], on_book, on_gap, log, config.BOOK_LEVELS, on_state=on_state)
             feed.start(contract_ids)
 
     def update(self, targets):

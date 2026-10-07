@@ -67,7 +67,7 @@ BOOK_AGES = ((1, "0-1s"), (5, "1-5s"), (30, "5-30s"), (None, "30s+"))    # How l
 MIN_CONTRACTS = 1   # The fewest contracts a trade opens, see Executor.quantity_for(), so the least an episode worth showing kept.
 # The order trade and order statuses are shown in, best first: a trade is filled, partial, or failed, and an order
 # filled, partial, or one of the ways it took nothing. One not listed comes last.
-STATUSES = ("filled", "partial", "failed", "unfilled", "unfunded", "rejected", "error", "sent")
+STATUSES = ("filled", "partial", "failed", "unfilled", "unfunded", "closed", "rejected", "error", "sent")
 
 
 def query_rows(conn, sql, params=()):

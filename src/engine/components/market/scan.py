@@ -39,7 +39,10 @@ leaves the edge where live takes it does not start the wait again.
 The recorder drives the Scanner with the books it holds in memory and
 the Scanner stores every episode as it ends, so the opportunities table
 is the log of everything it saw. The summary script reads it. The
-pricing itself lives in pricing.py.
+pricing itself lives in pricing.py. A member whose market is not trading,
+as its venue says or an order it turned away showed, is left out, as a
+stale book is, and so is a future's member past its close time, so an
+edge on a market that cannot trade is never offered, from 2026-10-07.
 
 A desk that turns an edge down only to wait for a book to catch up, or
 for the edge to last, see edge_since(), asks for the pair again once the
@@ -54,7 +57,7 @@ from common.timeutil import now_iso, seconds_between
 from db import database
 from db.models import Opportunity
 from engine.helper import config
-from engine.helper.game import days_until, pays_at as payout_time, started
+from engine.helper.game import days_until, past_close, pays_at as payout_time, started
 from engine.helper.pricing import (Priced, annual_pct, best_trade, changed_at, fillable, fresh, live_hold, live_min_edge,
                                    polymarket_us_just_changed, return_pct, trade_words)
 
@@ -219,11 +222,14 @@ class Scanner:
     def price(self, pair, books, now):
         """
         The best trade across the pair's members whose books are fresh, as a Priced, or None. Books age only
-        once their game may have started, see game.started(). A future's legs may be two contracts of one venue
-        with the same rules, see pricing.best_trade().
+        once their game may have started, see game.started(), and a halted one, whose market is not trading,
+        counts as none, see pricing.fresh(). A future's member past its close time is left out, see
+        game.past_close(). A future's legs may be two contracts of one venue with the same rules, see
+        pricing.best_trade().
         """
         aging = started(pair["game_date"], pair["members"], now)
-        members = [m for m in pair["members"] if fresh(books.get((m["venue"], m["contract_id"])), now, aging)]
+        members = [m for m in pair["members"]
+                   if fresh(books.get((m["venue"], m["contract_id"])), now, aging) and not past_close(pair["game_date"], m, now)]
         if len(members) < 2:
             return None
         return best_trade(members, books, self.fee_infos, one_venue=pair["game_date"] is None)

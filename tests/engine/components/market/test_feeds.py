@@ -42,6 +42,16 @@ def test_a_gap_goes_out_before_later_books_and_drops_the_unsent_books_of_its_con
     assert outbox.take() == [("gap", "t0", "t2", ["a", "b"]), ("books", [("c", [[0.5, 1]], [], "t1", None, 1), ("b", [[0.4, 1]], [], "t3", None, 1)])]
 
 
+def test_what_a_venue_says_of_a_market_goes_out_in_order_with_the_gaps_ahead_of_the_books():
+    outbox = feeds.Outbox(Pipe())
+    outbox.book("a", [[0.5, 1]], [], "t1")
+    outbox.state("a", "paused")
+    outbox.gap("t0", "t2", ["b"])
+    outbox.state("a", None)
+    assert outbox.take() == [("state", "a", "paused"), ("gap", "t0", "t2", ["b"]), ("state", "a", None),
+                             ("books", [("a", [[0.5, 1]], [], "t1", None, 1)])]
+
+
 def test_the_outbox_thread_sends_everything_before_it_closes():
     pipe = Pipe()
     outbox = feeds.Outbox(pipe)
@@ -127,3 +137,18 @@ def test_a_feed_in_its_own_process_follows_the_catalog_and_comes_back_with_a_gap
     assert r.updates["polymarket_us"] >= 7                                      # a, b, c, then d, then b, c, d again.
     assert len(r.behind["polymarket_us"]) >= 7 and all(0 <= s < 5 for s in r.behind["polymarket_us"])   # The venue's time came through.
     assert [line.split(" process ")[0] for line in logs] == ["polymarket_us feed runs in", "polymarket_us feed", "polymarket_us feed runs in"]
+
+
+def test_a_feed_in_its_own_process_passes_on_what_its_venue_says_of_a_market(tmp_path, monkeypatch):
+    r = record.Recorder(database.connect(tmp_path / "t.sqlite"), log=lambda line: None)
+    monkeypatch.setattr(streams, "log", lambda line: None)
+
+    async def scenario():
+        s = streams.Streams(r, {"polymarket_us": scripted_feed.ScriptedStream, "kalshi": scripted_feed.ScriptedStream}, processes=True)
+        s.start("polymarket_us", ["a", "halted"])
+        await until(lambda: len(r.books) == 2)
+        await s.stop_all()
+
+    asyncio.run(scenario())
+    assert r.states == {("polymarket_us", "halted"): "suspended"}
+    assert r.books[("polymarket_us", "halted")].halted == "suspended" and r.books[("polymarket_us", "a")].halted is None

@@ -135,6 +135,10 @@ RECORD_HOURS = 5            # Kickoff to when a game's contracts stop being reco
 BOOK_LEVELS = 5             # Price levels kept per side.
 FEED_PROCESSES = True       # Run each venue's feed in a process of its own, see market/feeds.py. False runs every feed in the main process.
 GAME_WINDOW_DAYS = 7        # Games further out than this are not recorded.
+CLOSED_MARKET_SECONDS = 600 # How long a market that turned an order away as not trading is left alone, unless its venue says sooner
+                            # that it trades, see Recorder.refuse(). From 2026-10-07 at the user's asking, after a paused CS2
+                            # match's Kalshi leg was refused once the Polymarket US one had filled.
+EXCHANGE_STATUS_SECONDS = 30    # Between readings of whether Kalshi's exchange is trading, shard by shard, see market/exchange.py.
 
 # SCANNING, market/scan.py and pricing.py
 

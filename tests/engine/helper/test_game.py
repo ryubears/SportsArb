@@ -36,3 +36,11 @@ def test_a_game_starts_at_its_kickoff_or_at_once_when_no_member_gives_one_and_a_
     assert game.started("2026-09-20", [GAME], KICKOFF)
     assert game.started("2026-09-20", [UNKNOWN], "2026-09-19T00:00:00+00:00")
     assert not game.started(None, [FUTURE], "2027-03-01T00:00:00+00:00")
+
+
+def test_only_a_futures_member_is_past_its_close():
+    member = {"close_time": "2026-10-07T12:00:00+00:00"}
+    assert game.past_close(None, member, "2026-10-07T12:00:00+00:00")
+    assert not game.past_close(None, member, "2026-10-07T11:59:59+00:00")
+    assert not game.past_close("2026-10-07", member, "2026-10-08T00:00:00+00:00")     # A game says itself when it closes.
+    assert not game.past_close(None, {"close_time": None}, "2026-10-08T00:00:00+00:00")

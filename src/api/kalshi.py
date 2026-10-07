@@ -3,12 +3,14 @@ Kalshi API client.
 
 Three jobs. The query half walks series to events to markets on the public
 API, sports' and elections', turns every open market into a Contract, and
-reads the account's balance. The streaming half opens one websocket with a
-signed API key, subscribes to order book updates, and keeps a live book for
-each ticker restated from the Yes side so it matches Polymarket US's shape.
-Tickers can be added and removed while the connection runs. The trading
-half sends signed orders for the live executor. This is the only file that
-knows Kalshi's field names and message formats.
+reads the account's balance and whether the exchange is trading. The
+streaming half opens one websocket with a signed API key, subscribes to
+order book updates, and keeps a live book for each ticker restated from
+the Yes side so it matches Polymarket US's shape, and to the markets'
+lifecycle, to say when one is paused, closed, or decided. Tickers can be
+added and removed while the connection runs. The trading half sends signed
+orders for the live executor. This is the only file that knows Kalshi's
+field names and message formats.
 """
 
 import asyncio
@@ -45,6 +47,14 @@ SHORT_SHARD = "insufficient_shard_balance"
 # selling the Yes one trade holds where others hold more No is buying No. Such a sale is unfunded, as on Polymarket US,
 # and waits for cash. A buy turned away for it is refused, since trades are sized by the cash.
 NO_FUNDS = "insufficient_balance"
+# Words in the error of an order turned away because its market or the exchange is not trading, which counts as closed
+# rather than refused: MARKET_NOT_ACTIVE, as a paused CS2 match answered on 2026-10-07, and trading_is_paused, as every order
+# in the Thursday maintenance did on 2026-10-01, and a closed or inactive market.
+NOT_TRADING = ("not_active", "trading_is_paused", "closed", "inactive")
+LIFECYCLE = "market_lifecycle_v2"   # The channel saying when any market opens, pauses, closes, or is decided. It takes no tickers.
+# Why a market with each status the markets call gives is not trading, None when it trades. Any other status is a market
+# decided: determined, disputed, amended, or finalized.
+STATUS_WHY = {"active": None, "open": None, "inactive": "paused", "initialized": "unopened", "unopened": "unopened", "closed": "closed"}
 
 
 # SIGNING
@@ -217,6 +227,44 @@ def results(tickers):
     return out
 
 
+def not_trading(status):
+    """
+    Why a market with this status, as the markets call gives it, is not trading, in a word, or None when it trades.
+    """
+    return STATUS_WHY.get(status, "decided")
+
+
+def market_states(tickers):
+    """
+    Why each market is not trading, None for one that trades, as {ticker: why}, read from the markets call RESULTS_BATCH
+    tickers at a time. A ticker the call does not return is left out.
+    """
+    out = {}
+    tickers = sorted(set(tickers))
+    for i in range(0, len(tickers), RESULTS_BATCH):
+        batch = tickers[i:i + RESULTS_BATCH]
+        for m in get_json(f"{BASE}/markets", {"tickers": ",".join(batch), "limit": len(batch)}).get("markets", []):
+            out[m["ticker"]] = not_trading(m.get("status"))
+        if i + RESULTS_BATCH < len(tickers):
+            time.sleep(SLEEP)
+    return out
+
+
+def exchange_trading():
+    """
+    Whether the exchange takes orders now, on each shard, as {shard: bool},
+    from the public status call. Kalshi stops trading every Thursday from 3
+    to 5 AM Eastern, see common/venues.py, and at any other time it finds
+    an issue. Without a shard by shard answer, the whole exchange's comes
+    as {None: bool}.
+    """
+    answer = get_json(f"{BASE}/exchange/status")
+    shards = answer.get("exchange_index_statuses") or []
+    if not shards:
+        return {None: bool(answer.get("trading_active") and answer.get("exchange_active"))}
+    return {int(s["exchange_index"]): bool(s.get("trading_active") and s.get("exchange_active")) for s in shards}
+
+
 def attestation_lapses():
     """
     When the account's location attestation for API keys lapses, in seconds
@@ -295,18 +343,26 @@ class KalshiBookStream(BookStream):
     already priced as the Yes ask it is, rather than at the No price, which
     Kalshi's default did until it announced it would flip. Every message
     counts as data because the feed has no keepalive replies. A skipped
-    sequence number forces a reconnect. Each side's best levels are kept
-    with its book and sorted again only when a delta reaches them, so a
-    delta deeper in the book costs no sort.
+    sequence number, each subscription counting its own, forces a
+    reconnect. Each side's best levels are kept with its book and sorted
+    again only when a delta reaches them, so a delta deeper in the book
+    costs no sort.
+
+    The same connection follows every market's lifecycle, see LIFECYCLE,
+    and says when one of the wanted markets is paused, closed, or decided,
+    and when a pause ends, see lifecycle(). A connection lost may miss
+    the end of a pause, so the next one reads the markets still said not to
+    trade from the markets call, see recheck().
     """
 
     name = "kalshi"
 
     def reset(self):
-        self.sid = None                     # The live subscription id, needed for update commands.
-        self.last_seq = None
-        self.subscribed = asyncio.Event()   # Set once the subscribe acknowledgement arrives.
-        self.message_id = 2
+        self.sid = None                     # The order book subscription's id, needed for update commands.
+        self.last_seq = {}                  # Each subscription's last sequence number, by its id.
+        self.subscribed = asyncio.Event()   # Set once the order book subscription's acknowledgement arrives.
+        self.message_id = 3
+        self.rechecking = None              # The read of the markets said not to trade, while it runs.
 
     def connect(self):
         return self.open_connection(WS_URL, signed_headers("GET", WS_PATH))
@@ -314,6 +370,49 @@ class KalshiBookStream(BookStream):
     async def subscribe(self, ws):
         await ws.send(json.dumps({"id": 1, "cmd": "subscribe",
                                   "params": {"channels": ["orderbook_delta"], "market_tickers": sorted(self.wanted), "use_yes_price": True}}))
+        await ws.send(json.dumps({"id": 2, "cmd": "subscribe", "params": {"channels": [LIFECYCLE]}}))
+        if any(why != "decided" for why in self.states.values()):
+            self.rechecking = asyncio.create_task(self.recheck())
+
+    async def recheck(self):
+        """
+        Read from the markets call whether the markets said not to trade,
+        bar the decided ones, which never trade again, trade now, since a
+        lifecycle message saying so may have come while no connection was
+        there to hear it. One that cannot be read keeps what was said.
+        """
+        tickers = sorted(t for t, why in self.states.items() if why != "decided")
+        try:
+            states = await asyncio.to_thread(market_states, tickers)
+        except Exception as e:
+            self.log(f"kalshi could not read whether {len(tickers)} markets not trading trade again ({e!r}), keeping them so")
+            return
+        for ticker, why in states.items():
+            if ticker in self.states:
+                self.set_state(ticker, why)
+
+    def lifecycle(self, body):
+        """
+        Note what one lifecycle message says of a wanted market: paused, or
+        trading again, when it is deactivated or activated, closed when its
+        close moves to now or earlier, trading again when a close moves
+        later, and decided when it is determined or settled, which no later
+        message changes.
+        """
+        ticker, event = body.get("market_ticker"), body.get("event_type")
+        if ticker not in self.wanted or self.states.get(ticker) == "decided":
+            return
+        if event == "deactivated":
+            self.set_state(ticker, "paused" if body.get("is_deactivated") else None)
+        elif event == "activated":
+            self.set_state(ticker, None)
+        elif event == "close_date_updated" and body.get("close_ts") is not None:
+            if body["close_ts"] <= time.time():
+                self.set_state(ticker, "closed")
+            elif self.states.get(ticker) == "closed":
+                self.set_state(ticker, None)
+        elif event in ("determined", "settled"):
+            self.set_state(ticker, "decided")
 
     async def send_command(self, ws, action, tickers):
         await self.subscribed.wait()
@@ -337,11 +436,15 @@ class KalshiBookStream(BookStream):
         kind, body = m.get("type"), m.get("msg") or {}
         ticker = body.get("market_ticker")
         if kind == "subscribed":
-            self.sid = body.get("sid")
-            self.subscribed.set()
+            if body.get("channel") != LIFECYCLE:
+                self.sid = body.get("sid")
+                self.subscribed.set()
             return
         if kind == "error":
             self.log(f"kalshi stream error {body}")
+            return
+        if kind == LIFECYCLE:
+            self.lifecycle(body)
             return
         if kind == "orderbook_snapshot" and ticker in self.wanted:
             book = self.books[ticker] = {
@@ -370,11 +473,12 @@ class KalshiBookStream(BookStream):
 
     def handle(self, raw):
         m = json.loads(raw)
-        seq = m.get("seq")
+        seq, sid = m.get("seq"), m.get("sid")
         if seq is not None:
-            if self.last_seq is not None and seq != self.last_seq + 1:
-                raise Reconnect(f"skipped from seq {self.last_seq} to {seq}")
-            self.last_seq = seq
+            last = self.last_seq.get(sid)
+            if last is not None and seq != last + 1:
+                raise Reconnect(f"skipped from seq {last} to {seq}")
+            self.last_seq[sid] = seq
         self.apply(m)
         return True
 
@@ -413,8 +517,9 @@ def place_order(ticker, action, outcome, quantity, price, client_id):
     side fill at p cost 1 - p, and the average fee per contract. The fill is
     counted to the hundredth, as Kalshi does, see orders.exact(). An order
     turned away for lack of cash on its market's exchange shard is
-    unfilled, not refused, and a sale turned away for lack of cash is
-    unfunded.
+    unfilled, not refused, a sale turned away for lack of cash is
+    unfunded, and an order turned away because its market or the exchange
+    is not trading is closed, see NOT_TRADING.
     """
     try:
         answer = signed_request("POST", "/portfolio/events/orders", order_body(ticker, action, outcome, quantity, price, client_id))
@@ -423,6 +528,8 @@ def place_order(ticker, action, outcome, quantity, price, client_id):
             return orders.unfilled(e, "insufficient shard balance")
         if action == "sell" and NO_FUNDS in e.body:
             return orders.unfunded(e)
+        if e.status < 500 and any(word in e.body.lower() for word in NOT_TRADING):
+            return orders.closed(e)
         return orders.refused(e) if e.status < 500 else orders.unknown(e)
     except Exception as e:
         return orders.unknown(e)

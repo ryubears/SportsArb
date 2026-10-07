@@ -171,6 +171,16 @@ say when they made each change, so the status line every minute says how
 far behind the venue each feed's books reached us, which the executor
 checks before it trades, below.
 
+A market can stop trading while its book stays up, and even moves:
+paused, closed, or decided. Each feed says so when its venue does, and
+when the market trades again (`BookStream.set_state`), and the word goes
+down the pipe in order with the gaps. Polymarket US gives each market's
+state with every book, and Kalshi says it on its market lifecycle channel,
+which the same connection follows. The recorder marks such a book halted
+(`Book.halted`), and a halted book is not priced or traded
+(`pricing.fresh`), so its pairs' episodes end and no desk is offered them.
+The status line counts the markets not trading, by venue and why.
+
 ### The life of a trade
 
 1. **Decide** (`Executor.signal` in `trading/executor.py`). The executor
@@ -233,6 +243,10 @@ checks before it trades, below.
 
 - the scanner prices every open episode again, so episodes whose books go
   stale end;
+- the recorder lets a market that turned a live order away as not trading
+  be traded again once `CLOSED_MARKET_SECONDS`, ten minutes, have passed;
+- every 30 seconds the exchange status reads whether Kalshi trades, shard
+  by shard (`EXCHANGE_STATUS_SECONDS`, `market/exchange.py`);
 - every hour the attestation watch reads when the Kalshi key's location
   attestation lapses;
 - each desk reads the live balances every 15 seconds, retries exposed
@@ -465,14 +479,22 @@ wanted set applied without reconnecting, and a reconnect that is immediate
 on the first drop and backs off only on repeated ones, with the stretch
 until the new subscription is confirmed stored as a gap, and the books of
 that connection's contracts dropped until it sends them again. Each change
-is passed on with the venue's own time for it, when the message gives one.
+is passed on with the venue's own time for it, when the message gives one,
+and what the venue says of a market's trading is passed on as it changes,
+kept across reconnects since a venue may not say it again.
 **kalshi.py** signs each connection and request with RSA-PSS and holds the
 whole catalog on one connection, on the hosts Kalshi dedicates to API
 traders, `external-api`, where a signed call took 17 ms against 27 on the
 old host. It also reads the cash on each exchange shard, moves cash between
 shards and sets the split Kalshi keeps them to, for
 `tools/kalshi_shards.py`, and reads when the key's location attestation
-lapses, past which Kalshi refuses the key for sports markets.
+lapses, past which Kalshi refuses the key for sports markets. Its
+connection also follows every market's lifecycle, a channel that takes no
+tickers, and says when a market it carries is paused or trades again,
+closes, or is decided. Since a connection lost may miss a pause's end, the
+next one reads the markets still said not to trade from the markets call.
+It also reads whether the exchange trades, shard by shard, from its
+public status call.
 **polymarket_us.py** signs with Ed25519 and subscribes to books in requests
 of up to 100 slugs. The feed takes ten requests on a connection, so a
 connection carries 1,000 markets, and has no unsubscribe, and every catalog
@@ -480,7 +502,10 @@ refresh that adds contracts spends more, however few it adds. So new
 contracts go to a connection with requests left, a new connection opens
 when none has any, and contracts a connection refuses anyway, as one
 request too many, move to another. Updates are not batched, since batching
-held our view of the books behind the venue's. Its trade feed was dropped
+held our view of the books behind the venue's. Every book carries its
+market's state, and one not open, suspended, halted, expired, and the
+like, is said not to trade: 109 of 3,000 markets the recorder followed on
+2026-10-07 came expired. Its trade feed was dropped
 on September 30, since trades came no sooner than the book that showed
 them. Both clients also report how a contract resolved, which the settler
 uses, and carry the live trading calls: the account's balance, and an
@@ -502,10 +527,13 @@ counts as `unfunded`, not refused either. A sale can need cash: each venue
 keeps one position per market across all our trades, so selling the No one
 trade holds, in a market where others hold more Yes, is buying Yes. So a
 Kalshi sale is not reduce only, which would cancel such a sale unfilled
-every time. Trading calls go over kept HTTPS connections from **http.py**,
-since a new TLS connection costs round trips a race cannot spare, and are
-never retried, since an order sent twice trades twice. The field names come
-from the venues' published Python SDKs.
+every time. An order either venue turned away because its market or the
+exchange was not trading, Kalshi's `MARKET_NOT_ACTIVE` or
+`trading_is_paused`, Polymarket US's exchange closed, counts as `closed`,
+not refused either (`orders.closed`). Trading calls go over kept HTTPS
+connections from **http.py**, since a new TLS connection costs round trips
+a race cannot spare, and are never retried, since an order sent twice
+trades twice. The field names come from the venues' published Python SDKs.
 
 ### Engine (`src/engine`)
 
@@ -601,7 +629,11 @@ futures trades that evening came from episodes kept with under a contract,
 one of them filling 30. A book goes stale after a minute only once its game
 may have started: a future's markets, and a game's before kickoff, can rest
 unchanged for hours while they are open, so their books are priced however
-old they are.
+old they are. So a future's member past its close time is left out
+(`game.past_close`), since its market has stopped or its bet is expected
+to be decided, while a game's is not: Kalshi gives a game's contract the
+time it expects the game to end, which many outlast, and its markets say
+themselves when they close.
 
 **trading/** trades the signal. **executor.py** holds what paper and live
 share, which is everything but how an order is filled. Live trades the
@@ -719,9 +751,15 @@ wait as long as it lasted. Paper counts from the last change. Both venues
 stop every Thursday for maintenance they publish, Kalshi from 3 to 5 AM
 Eastern and Polymarket US from 6 to 8 AM, while a feed may go on sending
 books, so no trade is opened, and no order sent to flatten one, with a leg
-on a venue in its window (`venues.is_maintenance`). A pause at any other
-time is met by the brakes: the venue refuses the orders, and three refusals
-in a row halt live trading. Live trading takes every sport the run does. A
+on a venue in its window (`venues.is_maintenance`). Kalshi says at any
+other time whether it trades, shard by shard, read every 30 seconds
+(`market/exchange.py`), and nothing is opened or sold back where it has
+stopped either (`Executor.trading`). A market that has stopped on its own
+is never offered, as its venue says (`market/record.py`), and one that
+turned a live order away as not trading, `closed`, is left alone for ten
+minutes, or until its venue says it trades (`Recorder.refuse`). Until
+2026-10-07 such an order counted as a refusal, and three in a row would
+have halted live trading. Live trading takes every sport the run does. A
 Kalshi leg spends only the cash on its market's shard: football's,
 hockey's, soccer's, the national teams' too, motorsport's, UFC's, darts',
 esports', and politics' on shard 0, Bitcoin's on 2, and baseball's,
@@ -843,12 +881,13 @@ more orders of any kind, when the orders themselves fail:
   steady error rate. The halt names each of those orders, to look up;
 - one venue refused its last 3 orders. A refusal is the venue answering
   that it will not take an order, so nothing traded: not authorized, not
-  enough money, a bad price, too many requests, or a market that has
-  closed. An order that found nothing at its price is unfilled, not
-  refused, as is one Polymarket US turned away for no liquidity or for
-  being slow, and one either venue turned away for lack of cash is
-  unfunded, not refused: the venue works, and the low cash email tells a
-  human.
+  enough money, a bad price, or too many requests. An order that found
+  nothing at its price is unfilled, not refused, as is one Polymarket US
+  turned away for no liquidity or for being slow, one either venue turned
+  away for lack of cash is unfunded, not refused: the venue works, and the
+  low cash email tells a human, and one turned away because its market or
+  the exchange was not trading is closed, not refused: the venue works,
+  and the market is left alone until it trades again.
 
 It halts new trades, but goes on flattening what is exposed, when the
 live trades decided in the last 6 hours lost more than 10% of the live
@@ -1306,6 +1345,25 @@ Overwatch's: 125 of the 139 matches Kalshi listed had a Polymarket US match
 by the teams' names and the date. All of them trade on Kalshi's shard 0.
 Live trades them as any sport, their matches once under way.
 
+**Markets that stop.** On October 7, at 08:41 UTC, live bought one
+Polymarket US contract of a CS2 match and Kalshi turned the other leg away,
+`MARKET_NOT_ACTIVE`: Kalshi had paused the market, and its book, still up,
+had shown a two and a half cent edge for 132 seconds. The contract was
+sold back three seconds later for 0.05$. It was the fourth such trade,
+after three on October 1 in Kalshi's Thursday maintenance, 0.32$ in all,
+small only because each was one to three contracts. A paused market's
+book stops moving with the game, so its edge lasts and passes every wait,
+and three such refusals in a row would have halted live trading. So that
+day, at the user's asking, each venue's own word on its markets came in:
+Polymarket US's state on every book and Kalshi's lifecycle channel, a
+market paused, closed, or decided being left out until it trades again;
+Kalshi's exchange status, shard by shard, every 30 seconds; a future
+past a member's close time left out; and a market that turns an order
+away as not trading, which counts as `closed` rather than refused, left
+alone for ten minutes or until its venue says it trades. With Polymarket
+US's order first, only a market Kalshi has stopped while Polymarket US's
+trades can cost anything, the spread on what is sold back.
+
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.
 The paper edge is real. Whether it is reachable is a question of whether
@@ -1391,7 +1449,7 @@ src/
   db/         models, the SQLite schema and its migrations, reads and writes
   engine/     run, the process that wires the components together
     components/
-      market/    record, feeds, streams, scan, tape: the venues' books and the edges between them
+      market/    record, feeds, streams, scan, tape, exchange: the venues' books, which markets trade, and the edges between them
       trading/   executor (what paper and live share), paper, live, footprints, brakes, notify
       money/     balances (what paper and live share), paper, live, settle
     helper/      config (the settings a run is tuned by), game (when a game is played and when its bets pay out), pricing, fees
@@ -1414,6 +1472,7 @@ Where to look to change something:
 | how an edge is priced | `engine/helper/pricing.py` |
 | game timing | `engine/helper/game.py` |
 | when each venue is in maintenance | `common/venues.py` |
+| which markets and exchanges are not trading | `engine/components/market/record.py`, `engine/components/market/exchange.py` |
 | which sports are treated alike: team sports, soccer, national teams, matches, races, esports | `common/sports.py` |
 | every tunable number | `engine/helper/config.py` |
 | when a trade is taken and sized | `engine/components/trading/executor.py` |
