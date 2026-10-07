@@ -165,19 +165,31 @@ def test_a_games_episode_whose_edge_never_lasted_a_tenth_of_a_second_keeps_nothi
     assert takes(conn) == [(0.0, 0.0)] and stretches(conn) == [(pytest.approx(0.04), 40.0, pytest.approx(5.2))]
 
 
-def test_an_episode_keeps_what_one_order_could_have_had_once_its_peak_offered_a_whole_contract(tmp_path):
-    # Yes costs 0.40 on Polymarket US. The peak, 13 cents, first offers half a contract, which live, opening whole ones,
-    # cannot trade. A moment at the same edge, or, while no moment has offered a whole contract, at less, counts instead.
+def test_an_episode_keeps_what_one_order_could_have_had_once_its_peak_offered_the_fewest_live_opens_with(tmp_path):
+    # Yes costs 0.40 on Polymarket US. The peak, 13 cents, first offers a twentieth of a contract, under the tenth live opens
+    # a trade with. A moment at the same edge, or, while no moment has offered a tenth, at less, counts instead.
     at = "2026-09-19T12:00:%02d+00:00"
     for later, take in (([[0.53, 40]], (40, 5.2)), ([[0.50, 40]], (40, 4.0))):
         conn = make_db(tmp_path / str(later[0][0]), [member("kalshi", "k"), member("polymarket_us", "pm")], future=True)
         replay(conn, [Book("polymarket_us", "pm", at % 0, [[0.39, 500]], [[0.40, 500]]),
-                      Book("kalshi", "k", at % 1, [[0.53, 0.5]], [[0.99, 1]]),
+                      Book("kalshi", "k", at % 1, [[0.53, 0.05]], [[0.99, 1]]),
                       Book("kalshi", "k", at % 2, later, [[0.99, 1]]),
                       Book("kalshi", "k", at % 3, [[0.50, 500]], [[0.99, 1]]),     # 10 cents on 500 counts for nothing now.
                       Book("kalshi", "k", at % 4, [[0.40, 100]], [[0.99, 1]])])
         assert takes(conn) == [pytest.approx(take)], later
         assert [(o.peak_ts, o.peak_edge) for o in stored(conn)] == [(at % 1, pytest.approx(0.13))]
+
+
+def test_a_moment_offering_the_tenth_live_opens_with_beats_a_richer_sliver(tmp_path):
+    # 13 cents on 0.09 of a contract makes more than 10 cents on 0.1, but only the tenth can be traded.
+    at = "2026-09-19T12:00:%02d+00:00"
+    conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket_us", "pm")], future=True)
+    replay(conn, [Book("polymarket_us", "pm", at % 0, [[0.39, 500]], [[0.40, 500]]),
+                  Book("kalshi", "k", at % 1, [[0.53, 0.09]], [[0.99, 1]]),
+                  Book("kalshi", "k", at % 2, [[0.53, 0.09]], [[0.99, 1]]),
+                  Book("kalshi", "k", at % 3, [[0.50, 0.1]], [[0.99, 1]]),
+                  Book("kalshi", "k", at % 4, [[0.40, 100]], [[0.99, 1]])])
+    assert takes(conn) == [pytest.approx((0.1, 0.01))]
 
 
 def test_a_futures_legs_may_be_two_contracts_of_one_venue_with_the_same_rules(tmp_path):

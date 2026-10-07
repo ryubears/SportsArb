@@ -189,7 +189,7 @@ class Trade:
     trade: str              # The two legs in words.
     signal_ts: str          # When the scanner signalled.
     edge: float             # Net dollars per contract at the signal.
-    quantity: int           # Contracts wanted on each leg.
+    quantity: float         # Contracts wanted on each leg: whole until 2026-10-07, to the hundredth live since.
     yes_venue: str
     yes_contract: str
     yes_polarity: str       # The side the contract pays on, so settlement knows whether the leg won.

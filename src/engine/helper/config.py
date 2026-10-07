@@ -87,6 +87,12 @@ LIVE_HOLD_SECONDS = 0.1        # How long an edge must have stayed at live's lea
                                 # which in seven hours let one episode through.
 LIVE_IN_PLAY_CONTRACTS = 10     # The most contracts a live trade on a game under way asks for: 5 from 2026-10-05, for 200 trades, and
                                 # 10 from 2026-10-06, for as many as come, at the user's asking.
+LIVE_MIN_CONTRACTS = 0.1        # The fewest contracts a live trade opens with, on a future or a game, in hundredths above it, which both
+                                # venues take orders and fill in. One whole contract until 2026-10-07, when the user asked for a tenth:
+                                # from 2026-10-05 to 10-07 the episodes offering under a contract at live's least edge would have added
+                                # some 2.2$ a day on futures, about 18 trades, and 4.7$ on games, about 520, and a tenth kept nine in
+                                # ten of the futures' dollars at under half their trades. Neither venue charges a small order more:
+                                # Kalshi rounds its fee to the hundredth of a cent, and Polymarket US rounds a small order's to nothing.
 LIVE_BALANCE_SECONDS = 15   # Between readings of the venues' balances. Under http.IDLE_SECONDS, so each reading also keeps the
                             # venue's kept connection open for the next order: one opened afresh took Polymarket US 11 ms longer.
 LIVE_LOW_CASH = 5.0         # Dollars on a live venue, or on one of its shards in LIVE_SHARDS, under which a human is emailed, once until

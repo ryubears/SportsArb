@@ -104,7 +104,8 @@ CREATE TABLE IF NOT EXISTS trades (
     trade          TEXT NOT NULL,   -- The two legs in words.
     signal_ts      TEXT NOT NULL,
     edge           REAL NOT NULL,   -- Net dollars per contract at the signal.
-    quantity       INTEGER NOT NULL,   -- Contracts wanted on each leg.
+    quantity       INTEGER NOT NULL,   -- Contracts wanted on each leg: whole until 2026-10-07, to the hundredth live since. SQLite keeps
+                                       -- a fraction in an INTEGER column as it is, as orders.quantity always has.
     yes_venue      TEXT NOT NULL,
     yes_contract   TEXT NOT NULL,
     yes_polarity   TEXT NOT NULL,   -- The side the contract pays on, so settlement knows whether the leg won.

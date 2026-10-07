@@ -17,8 +17,10 @@ answer, and the money is the venues' own, through LiveBalances from
 money/live.py.
 
 Both venues fill orders in hundredths of a contract, so fills, holdings,
-and the orders that flatten are all counted to the hundredth, while a
-trade opens in whole contracts. Every config.LIVE_POSITION_SECONDS the
+and the orders that flatten are all counted to the hundredth, and from
+2026-10-07 a trade opens in hundredths too, with as little as
+config.LIVE_MIN_CONTRACTS, where before it opened whole contracts, at
+least one. Every config.LIVE_POSITION_SECONDS the
 live executor reads each venue's positions and logs any contract the
 venue holds more or less of than the live trades say, which would mean
 the records are wrong, see check_positions().
@@ -227,6 +229,12 @@ class LiveExecutor(Executor):
         config.LIVE_IN_PLAY_CONTRACTS on a game under way, otherwise as many as the books and the cash allow.
         """
         return config.LIVE_IN_PLAY_CONTRACTS if self.in_game(pair, yes, no, now) else None
+
+    def fewest(self):
+        """
+        config.LIVE_MIN_CONTRACTS, on a future or a game alike.
+        """
+        return config.LIVE_MIN_CONTRACTS
 
     def hold(self, pair, yes, no, now):
         """

@@ -319,6 +319,14 @@ def test_a_trade_takes_half_the_book_with_no_cap(tmp_path, quick):
     assert at(ex, PAIR, YES, NO, 0.08, NOW) is True and stored(conn)[0]["quantity"] == 2500       # Half the 5,000 shown.
 
 
+def test_paper_opens_whole_contracts_only(tmp_path, quick):
+    # Half of the 3 shown is 1.5, cut to 1, and half of 1.5 is 0.75, which paper, filling whole contracts, does not trade.
+    conn, cash, ex = executor(tmp_path, books(size=3))
+    assert at(ex, PAIR, YES, NO, 0.08, NOW) is True and stored(conn)[0]["quantity"] == 1
+    conn, cash, ex = executor(tmp_path / "under", books(size=1.5))
+    assert at(ex, PAIR, YES, NO, 0.08, NOW) is False and stored(conn) == []
+
+
 @pytest.mark.full_share
 def test_a_trade_takes_all_the_book_shows_by_default(tmp_path, quick):
     conn, cash, ex = executor(tmp_path, books(size=5000))

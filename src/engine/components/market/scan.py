@@ -21,10 +21,11 @@ fillable on the levels at live's least edge or more, see
 pricing.live_min_edge(), and what they lock in, and whether that moment
 came with a change of the Polymarket US leg's book. It is the best of the
 moments at the peak's edge, and of every moment while none of those had
-offered a whole contract: a peak's first moment can offer a fraction of
-one, where live, which opens whole contracts, trades a moment later at the
-same edge or a little less. Until 2026-10-06 only the peak's first moment
-counted, and 21 of 55 live futures trades that evening came from episodes
+offered config.LIVE_MIN_CONTRACTS, the fewest live opens a trade with, a
+whole contract until 2026-10-07: a peak's first moment can offer less,
+where live trades a moment later at the same edge or a little less. Until
+2026-10-06 only the peak's first moment counted, and 21 of 55 live
+futures trades that evening came from episodes
 kept with under a contract. Only the moments once the edge has stayed at
 live's least edge or more for config.LIVE_HOLD_SECONDS count, since live
 trades it only then: on a game under way from 2026-10-06, on a future from
@@ -250,8 +251,9 @@ class Scanner:
         live_floor(), the net dollars they lock in, and whether the pricing
         came with a change of the Polymarket US leg's book, which live traded
         a game under way on from 2026-10-05 to 10-06, see
-        pricing.polymarket_us_just_changed(). The best has a whole contract
-        or more, the fewest a trade opens, then the most profit. A moment
+        pricing.polymarket_us_just_changed(). The best has
+        config.LIVE_MIN_CONTRACTS or more, the fewest live opens a trade
+        with, then the most profit. A moment
         counts only once the episode's edge has stayed at live's least edge
         or more for config.LIVE_HOLD_SECONDS, as live waits for it to, see
         pricing.live_hold().
@@ -260,7 +262,7 @@ class Scanner:
             return
         size, profit = fillable(priced.yes, priced.no, books, self.fee_infos, floor)
         pm_changed = polymarket_us_just_changed(priced.yes, priced.no, books, now)
-        rank = (size >= 1, profit)
+        rank = (size >= config.LIVE_MIN_CONTRACTS - 1e-9, profit)
         if episode.take_rank is None or rank > episode.take_rank:
             episode.take, episode.pm_changed, episode.take_rank = (size, profit), pm_changed, rank
 
@@ -279,9 +281,9 @@ class Scanner:
             episode.see(priced, now)
             floor = self.live_floor(pair, priced, now)
             episode.see_live(priced.edge >= floor, books, now)
-            # What one order could have had, worked out at the peak's edge, and at every moment until a whole contract was
-            # on offer, not on every pricing.
-            if priced.edge >= episode.peak.edge or episode.take[0] < 1:
+            # What one order could have had, worked out at the peak's edge, and at every moment until the fewest contracts
+            # live opens a trade with were on offer, not on every pricing.
+            if priced.edge >= episode.peak.edge or episode.take[0] < config.LIVE_MIN_CONTRACTS - 1e-9:
                 self.weigh_take(episode, priced, books, floor, now)
             for i, on_signal in enumerate(self.on_signals):
                 if i not in episode.taken and on_signal(pair, priced.yes, priced.no, priced.edge, priced.size, self.fee_infos, now):

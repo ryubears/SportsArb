@@ -73,18 +73,20 @@ def test_only_episodes_within_the_rules_are_shown(tmp_path, monkeypatch, capsys)
             episode("2026-09-27T15:00:00+00:00", 150, 0.10, 100),         # 10 cents over 150 days, 27% a year, too little.
             episode("2026-09-27T16:00:00+00:00", 2, 0.015, 100),          # 1.5 cents paying in two days: a future has no 2 cent minimum.
             episode("2026-09-27T16:30:00+00:00", 2, 0.03, 100, lasted=0.004),      # 3 cents paying in two days, 278% a year.
-            episode("2026-09-27T16:45:00+00:00", 2, 0.06, 0.6, lasted=900),         # Under a whole contract at the peak, however long.
+            episode("2026-09-27T16:45:00+00:00", 2, 0.06, 0.06, lasted=900),        # Under a tenth of a contract at the peak, however long.
+            episode("2026-09-27T16:46:00+00:00", 2, 0.06, 0.5),                     # Half a contract, which live opens from 2026-10-07.
             # Live took the one contract at the peak, which left 0.29 fillable through the stretch.
             episode("2026-09-27T16:50:00+00:00", 2, 0.14, 0.29, take=1),
             episode("2026-09-27T17:00:00+00:00", 2, 0.08, 100, live=1)])  # During a game.
     out = report(tmp_path, monkeypatch, capsys, fill)
-    assert ("\nfutures opportunities (1+ contracts in one order on levels returning 100%+ a year once the edge lasted 0.1s, "
+    assert ("\nfutures opportunities (0.1+ contracts in one order on levels returning 100%+ a year once the edge lasted 0.1s, "
             "paying 24h+ out), last 12 hours\n"
-            "  4 episodes could have taken 290$ in one order each and locked in 10.64$\n") in out
-    assert [r[:3] for r in table(out, "futures opportunities by kind")] == [["nfl", "winner", "4"]]
+            "  5 episodes could have taken 291$ in one order each and locked in 10.67$\n") in out
+    assert [r[:3] for r in table(out, "futures opportunities by kind")] == [["nfl", "winner", "5"]]
     assert [r[2:4] + r[5:7] for r in table(out, "futures largest opportunities")] == [
-        ["6.0", "600.000s", "94", "6.00"], ["3.0", "0.004s", "97", "3.00"], ["1.5", "600.000s", "98", "1.50"], ["14.0", "600.000s", "1", "0.14"]]
-    assert ("\nin-play opportunities (1+ contracts in one order on levels at 2c+ once the edge lasted 0.1s, games, matches, races, and windows under way, "
+        ["6.0", "600.000s", "94", "6.00"], ["3.0", "0.004s", "97", "3.00"], ["1.5", "600.000s", "98", "1.50"], ["14.0", "600.000s", "1", "0.14"],
+        ["6.0", "600.000s", "0", "0.03"]]
+    assert ("\nin-play opportunities (0.1+ contracts in one order on levels at 2c+ once the edge lasted 0.1s, games, matches, races, and windows under way, "
             "paying within 24h), last 12 hours\n  none\n") in out
 
 
@@ -98,12 +100,12 @@ def test_in_play_opportunities_are_the_games_under_way_paying_within_a_day(tmp_p
             episode("2026-09-27T14:00:00+00:00", 2, 0.10, 100, pair_id=3),                          # Paying in two days.
             episode("2026-09-27T15:00:00+00:00", 0.5, 0.10, 100, live=1, pair_id=1)])    # A future that pays too soon.
     out = report(tmp_path, monkeypatch, capsys, fill, modes=summary.MODES["all"])
-    assert ("\nin-play opportunities (1+ contracts in one order on levels at 2c+ once the edge lasted 0.1s, games, matches, races, and windows under way, "
+    assert ("\nin-play opportunities (0.1+ contracts in one order on levels at 2c+ once the edge lasted 0.1s, games, matches, races, and windows under way, "
             "paying within 24h), last 12 hours\n") in out
     assert "  at 2c or more for 2.000s at the median, 2.000s at the 90th percentile, 2.000s at the longest\n" in out
     assert [r[:5] for r in table(out, "in-play opportunities by kind")] == [["nfl", "spread", "2", "2.000s", "2.000s"]]
     assert [r[3] for r in table(out, "in-play largest opportunities")] == ["2.000s", "1.500s"]
-    assert ("\nfutures opportunities (1+ contracts in one order on levels returning 100%+ a year once the edge lasted 0.1s, "
+    assert ("\nfutures opportunities (0.1+ contracts in one order on levels returning 100%+ a year once the edge lasted 0.1s, "
             "paying 24h+ out), last 12 hours\n  none\n") in out
     assert out.index("\nfutures opportunities") < out.index("\nin-play opportunities")
 

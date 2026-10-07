@@ -112,6 +112,20 @@ def test_both_legs_are_sent_as_real_orders_and_every_order_is_stored(tmp_path):
     assert stored(conn, "ledger") == []                                 # Live money keeps no ledger of ours.
 
 
+def test_a_trade_opens_with_a_fraction_of_a_contract_down_to_a_tenth(tmp_path):
+    # Half of the 0.74 shown is 0.37, which live opens in hundredths, on futures and games alike, from 2026-10-07.
+    venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
+    conn, cash, ex = executor(tmp_path, venues, books(size=0.74))
+    assert trade(ex) == [True]
+    assert sorted(venues.orders) == [("kalshi", "buy", "no", 0.37, 0.47), ("polymarket_us", "buy", "yes", 0.37, 0.45)]
+    t = stored(conn, "trades")[0]
+    assert (t["quantity"], t["status"], t["matched"]) == (0.37, "filled", 0.37)
+    # Half of 0.18 is 0.09, under config.LIVE_MIN_CONTRACTS: no trade.
+    venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
+    conn, cash, ex = executor(tmp_path / "under", venues, books(size=0.18))
+    assert trade(ex) == [False] and venues.orders == [] and stored(conn, "trades") == []
+
+
 def test_a_leg_that_filled_short_is_evened_by_selling_the_other_back_no_lower_than_the_books_said(tmp_path):
     venues = Venues(polymarket_us=[fills(), fills()], kalshi=[fills(4)])
     logs = []
@@ -329,23 +343,23 @@ def test_trades_spend_all_the_cash_and_a_venue_or_kalshi_shard_running_low_email
         await asyncio.gather(*ex.tasks)
         return sent
     # All 8 dollars on Polymarket US and on Kalshi's shard 0 may be spent: half the 100 shown is 50, but the 8 dollars pay for
-    # 17 contracts at 0.45 or at 0.47.
+    # 17.02 contracts at 0.47, cut to the hundredth live trades in.
     assert cash.spendable("kalshi", 0) == pytest.approx(8.0)
-    assert asyncio.run(scenario()) is True and stored(conn, "trades")[0]["quantity"] == 17
+    assert asyncio.run(scenario()) is True and stored(conn, "trades")[0]["quantity"] == 17.02
     ex.tick(NOW)
     ex.tick(NOW)
-    # Once each: Kalshi's shard 0, whose 8 dollars less the 7.99 bought is 0.01, and Polymarket US, 8 less 7.65. Shards 2 and 3
-    # have plenty.
-    assert [(kind, subject) for kind, subject, _ in notifier.sent] == [("low_cash", "SportsArb live kalshi shard 0 cash low: 0.01$"),
-                                                                        ("low_cash", "SportsArb live polymarket_us cash low: 0.35$")]
+    # Once each: Kalshi's shard 0, whose 8 dollars less the 7.9994 bought is 0.0006, and Polymarket US, 8 less 7.659. Shards 2
+    # and 3 have plenty.
+    assert [(kind, subject) for kind, subject, _ in notifier.sent] == [("low_cash", "SportsArb live kalshi shard 0 cash low: 0.00$"),
+                                                                        ("low_cash", "SportsArb live polymarket_us cash low: 0.34$")]
     assert "move some to the shard with python3 -m tools.kalshi_shards" in notifier.sent[0][2]
     cash.shard_read[("kalshi", 0)] = 20.0                               # A payout arrives.
     ex.tick(NOW)
-    assert logs[-1] == "live kalshi shard 0 has 12.01$, back over 5.00$"
+    assert logs[-1] == "live kalshi shard 0 has 12.00$, back over 5.00$"
     cash.shard_read[("kalshi", 0)] = 4.0
     cash.shard_read[("kalshi", 3)] = 1.0
     ex.tick(NOW)
-    assert [subject for _, subject, _ in notifier.sent][-2:] == ["SportsArb live kalshi shard 0 cash low: -3.99$",     # 4 read, less 7.99.
+    assert [subject for _, subject, _ in notifier.sent][-2:] == ["SportsArb live kalshi shard 0 cash low: -4.00$",     # 4 read, less 7.9994.
                                                                   "SportsArb live kalshi shard 3 cash low: 1.00$"]
 
 
@@ -406,11 +420,11 @@ def test_a_kalshi_leg_trades_only_with_the_cash_on_its_markets_shard(tmp_path):
         return asyncio.run(scenario())
 
     assert signal() is False and venues.orders == []
-    shards[3] = 3 * 0.47 + 0.01                     # Room for three contracts on baseball's shard.
+    shards[3] = 3 * 0.47 + 0.01                     # Room for 3.02 contracts on baseball's shard, to the hundredth.
     asyncio.run(cash.refresh(NOW))
     assert signal() is True
-    assert sorted(venues.orders) == [("kalshi", "buy", "no", 3, 0.47), ("polymarket_us", "buy", "yes", 3, 0.45)]     # Sent together.
-    assert cash.available("kalshi", 3) == pytest.approx(0.01) and cash.available("kalshi", 0) == 1000.0
+    assert sorted(venues.orders) == [("kalshi", "buy", "no", 3.02, 0.47), ("polymarket_us", "buy", "yes", 3.02, 0.45)]  # Sent together.
+    assert cash.available("kalshi", 3) == pytest.approx(1.42 - 3.02 * 0.47) and cash.available("kalshi", 0) == 1000.0
 
 
 def test_a_leg_filled_in_hundredths_is_flattened_to_the_hundredth(tmp_path):

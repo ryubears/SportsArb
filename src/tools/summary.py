@@ -6,11 +6,11 @@ Everything is shown for the futures, then for the games, matches, races,
 and windows in play, each under a heading of its own, see MARKETS: its
 opportunities, then its trades for each mode, paper then live, or one
 with --mode. Opportunities are shown as live takes them: an episode
-counts when one order could have had a whole contract or more, since a
-trade opens no fewer, on the levels at live's least edge or more, see
-pricing.live_min_edge(), once the edge has lasted config.LIVE_HOLD_SECONDS
-there, as live waits for it to: on a future paying
-config.MIN_PAYOUT_HOURS or more out, the levels returning
+counts when one order could have had config.LIVE_MIN_CONTRACTS or more,
+since live opens a trade with no fewer, on the levels at live's least
+edge or more, see pricing.live_min_edge(), once the edge has lasted
+config.LIVE_HOLD_SECONDS there, as live waits for it to: on a future
+paying config.MIN_PAYOUT_HOURS or more out, the levels returning
 config.MIN_ANNUAL_PCT a year, and on a game under way paying within
 config.MAX_PAYOUT_HOURS, those at config.LIVE_IN_PLAY_MIN_EDGE or more.
 Which moment is the scanner's, see Opportunity.take_size. Each market
@@ -64,7 +64,6 @@ OPENED_HOURS = {"hour": 1, "day": 24, "week": 24 * 7}     # The windows the open
 WIDTH = 100         # The longest line a list of items wraps at.
 BOOK_AGES = ((1, "0-1s"), (5, "1-5s"), (30, "5-30s"), (None, "30s+"))    # How long a venue had sent nothing for a market
                                                                             # when an order went out, by upper bound in seconds.
-MIN_CONTRACTS = 1   # The fewest contracts a trade opens, see Executor.quantity_for(), so the least an episode worth showing kept.
 # The order trade and order statuses are shown in, best first: a trade is filled, partial, or failed, and an order
 # filled, partial, or one of the ways it took nothing. One not listed comes last.
 STATUSES = ("filled", "partial", "failed", "unfilled", "unfunded", "closed", "rejected", "error", "sent")
@@ -240,10 +239,12 @@ def opportunity_rules(market):
 def print_market_opportunities(conn, since, hours, sports, market):
     """
     The episodes of one market within live's rules in the window: one order
-    could have had MIN_CONTRACTS or more on the levels at live's least edge
-    or more, see opportunity_rules(). An edge on less, a
-    sliver of a level, is one no trade could take. Live takes an edge at
-    once, and its own fill empties the levels it takes, so what stayed
+    could have had config.LIVE_MIN_CONTRACTS or more on the levels at live's
+    least edge or more, see opportunity_rules(). An edge on less, a sliver
+    of a level, is one no trade could take. That is a tenth of a contract
+    over the whole window, though live opened whole contracts until
+    2026-10-07, so days before then show episodes it could not take. Live
+    takes an edge at once, and its own fill empties the levels it takes, so what stayed
     fillable through the stretch at config.MIN_EDGE, which these were
     counted by until 2026-10-05, left out the very episodes it traded.
     Episodes from before the scanner kept what one order could have had
@@ -258,7 +259,7 @@ def print_market_opportunities(conn, since, hours, sports, market):
     cents = f"{100 * config.MIN_EDGE:.0f}c"
     where, params = in_sports(sports)
     rule, rule_params, levels = opportunity_rules(market)
-    print(f"\n{market} opportunities ({MIN_CONTRACTS}+ contracts in one order on {levels}), last {hours} hours")
+    print(f"\n{market} opportunities ({config.LIVE_MIN_CONTRACTS:g}+ contracts in one order on {levels}), last {hours} hours")
     if "take_size" not in table_columns(conn, "opportunities"):
         print("  not kept yet, until the live process restarts on this code")
         return
@@ -267,7 +268,7 @@ def print_market_opportunities(conn, since, hours, sports, market):
                take_profit, days_held
         FROM opportunities o JOIN pairs p ON p.id = o.pair_id
         WHERE start_ts >= ? AND take_size >= ? AND {rule}{in_market(market)}{where}
-        ORDER BY take_profit DESC""", (since, MIN_CONTRACTS) + rule_params + params)
+        ORDER BY take_profit DESC""", (since, config.LIVE_MIN_CONTRACTS - 1e-9) + rule_params + params)
     if not rows:
         print("  none")
         return

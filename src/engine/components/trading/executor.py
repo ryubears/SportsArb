@@ -79,11 +79,15 @@ what the books show at that edge, the share we expect to get, as far as
 the cash free on each venue pays for, live as on paper. Every trade is
 stored in the trades table as soon as it is sent and updated when it is
 done, and every dollar moved goes through the cash the executor was
-given. Settling what was bought is money/settle.py's job.
+given. Live opens a trade with as little as config.LIVE_MIN_CONTRACTS,
+sized in hundredths of a contract, which both venues trade in, and paper
+in whole contracts, see fewest(). Settling what was bought is
+money/settle.py's job.
 """
 
 import asyncio
 import dataclasses
+import math
 from dataclasses import dataclass
 from api.orders import exact, size as order_size
 from common.log import on_failure
@@ -131,7 +135,8 @@ class Executor:
 
     mode = None     # 'paper' or 'live', set by each subclass. It starts every log line.
     in_play = False     # Whether a game is traded once it has started: paper's, which trades games.
-    step = 1        # The least part of a contract an order trades: whole contracts on paper, a hundredth live, see orders.STEP.
+    step = 1        # The least part of a contract an order trades: whole contracts on paper, a hundredth live, see orders.STEP. A
+                    # trade's size is cut to it.
 
     def __init__(self, conn, cash, books, log=print, clock=now_iso, is_maintenance=is_maintenance):
         if cash.mode != self.mode:
@@ -516,6 +521,13 @@ class Executor:
         """
         return None
 
+    def fewest(self):
+        """
+        The fewest contracts this executor opens a trade with: one whole contract on paper, whose fills are worked out
+        in whole contracts, and live's own, see LiveExecutor.fewest().
+        """
+        return self.step
+
     def hold(self, pair, yes, no, now):
         """
         How many seconds the pair's edge must still last before this executor trades it, 0 when it may now: paper takes
@@ -578,7 +590,8 @@ class Executor:
         full, and no more than the cash free pays for, both legs' at once
         where they share a venue's cash. Given most, it is no more than
         that, and the walk stops at the levels that hold it, so no limit
-        goes deeper than those.
+        goes deeper than those. It is cut to whole steps, see step: whole
+        contracts on paper, hundredths live.
         """
         yes_leg, no_leg = legs
         yes_book, no_book = self.book(yes_leg.key), self.book(no_leg.key)
@@ -594,9 +607,9 @@ class Executor:
         per_contract = {}           # What one contract of both legs costs from each venue's cash, its shard's where it has them.
         for leg in legs:
             per_contract[(leg.venue, shard(leg))] = per_contract.get((leg.venue, shard(leg)), 0.0) + leg.limit
-        affordable = min(self.cash.spendable(venue, part) // cost for (venue, part), cost in per_contract.items())
-        quantity = min(available * config.FILL_SHARE, affordable)
-        return int(quantity if most is None else min(quantity, most))
+        affordable = min(self.cash.spendable(venue, part) / cost for (venue, part), cost in per_contract.items())
+        quantity = min(available * config.FILL_SHARE, affordable, math.inf if most is None else most)
+        return order_size(math.floor(quantity / self.step + 1e-9) * self.step)
 
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """
@@ -631,7 +644,7 @@ class Executor:
         if not all(self.trading(leg, now) for leg in legs):
             return False
         quantity = self.quantity_for(legs, least, self.most(pair, yes, no, now))
-        if quantity < 1:
+        if quantity < self.fewest() - 1e-9:
             return False
         for leg in legs:
             leg.quantity = quantity

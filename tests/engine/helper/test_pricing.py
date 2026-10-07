@@ -231,8 +231,10 @@ def test_fees_are_charged_once_per_level_on_buys_and_sells():
     kalshi = ("kalshi", {"fee_type": "quadratic", "fee_multiplier": 1})
     assert pricing.sweep([(0.5, 100)], 100, *kalshi) == (100, pytest.approx(50 + 1.75))                  # Not 100 fees of 2 cents.
     assert pricing.sweep([(0.5, 100)], 100, *kalshi, selling=True) == (100, pytest.approx(50 - 1.75))
-    # Two levels are two trades, each rounded up to the cent on its own.
-    assert pricing.sweep([(0.5, 10), (0.6, 10)], 20, *kalshi) == (20, pytest.approx(5 + 0.18 + 6 + 0.17))
+    # Two levels are two trades, each rounded on its own, up to the hundredth of a cent on Kalshi, and to the cent on Polymarket US.
+    assert pricing.sweep([(0.5, 10), (0.6, 10)], 20, *kalshi) == (20, pytest.approx(5 + 0.175 + 6 + 0.168))
+    polymarket_us = ("polymarket_us", {"feeCoefficient": 0.0695})
+    assert pricing.sweep([(0.5, 10), (0.6, 10)], 20, *polymarket_us) == (20, pytest.approx(5 + 0.17 + 6 + 0.17))
 
 
 def test_edges_use_the_unrounded_fee_per_contract():

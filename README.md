@@ -590,7 +590,9 @@ feed runs in the main process instead.
 **scan.py** prices every pair whose member's book just changed. Using
 **pricing.py** it walks the ladders to find the cheapest way to hold yes
 and the cheapest way to hold no across the pair's members, on two different
-venues, including the venue's taker fee from **fees.py**. Two contracts on
+venues, including the venue's taker fee from **fees.py**, Kalshi's rounded
+up to the hundredth of a cent and Polymarket US's to the cent, once per
+order, as the venues charged our orders. Two contracts on
 one venue, such as a game's two teams on Kalshi, are priced by the same
 traders, and a gap between them is gone before both orders land: in the
 in-play test 52 trades with both legs on Kalshi matched 5 of the 247
@@ -621,9 +623,11 @@ change of the Polymarket US leg's book (`pm_changed`), the only moment live
 traded a game under way from 2026-10-05 to 10-06. The summary counts
 opportunities by that, since live's own fill empties the levels it takes.
 It is the best of the moments at the peak's edge, and of every moment while
-none of those had offered a whole contract (`Scanner.weigh_take`): a peak's
-first moment can offer a sliver of a contract, and live, which opens whole
-ones, trades a moment later at the same edge or a little less. Until
+none of those had offered `LIVE_MIN_CONTRACTS`, the fewest live opens a
+trade with, a tenth of a contract, a whole one until 2026-10-07
+(`Scanner.weigh_take`): a peak's first moment can offer a sliver of a
+contract, and live trades a moment later at the same edge or a little
+less. Until
 2026-10-06 only the peak's first moment counted, and 21 of the 55 live
 futures trades that evening came from episodes kept with under a contract,
 one of them filling 30. A book goes stale after a minute only once its game
@@ -713,14 +717,15 @@ since a market that has closed may stop changing rather than empty its
 book, and its last book cannot be traded. Every trade is stored as soon as
 it is sent and updated when it is done.
 
-A trade opens in whole contracts, at least one, so no order opens a
-fraction of a contract, but a leg may fill to the hundredth,
-6.42 of 7 for one, and live trading counts it so: the other leg's 0.58
-over is sold back like any excess, in an order for 0.58 of a contract. A
-Kalshi order sent after Polymarket US's, in play, below, asks for what that
-filled, to the hundredth.
-Paper trading keeps to whole contracts, as its fills are worked out from
-the books (`Executor.step`). Every `LIVE_POSITION_SECONDS`, 5 minutes, the
+Both venues take orders and fill them in hundredths of a contract, so a
+live trade opens in hundredths, with as little as `LIVE_MIN_CONTRACTS`, a
+tenth of a contract, on a future or a game alike (`Executor.fewest`).
+Until 2026-10-07 it opened whole contracts, at least one. A leg may fill to
+the hundredth, 6.42 of 7 for one, and live trading counts it so: the other
+leg's 0.58 over is sold back like any excess, in an order for 0.58 of a
+contract. A Kalshi order sent after Polymarket US's, below, asks for what
+that filled, to the hundredth. Paper trading keeps to whole contracts, as
+its fills are worked out from the books (`Executor.step`). Every `LIVE_POSITION_SECONDS`, 5 minutes, the
 live executor reads each venue's positions and compares them with what
 the open live trades hold of each contract (`check_positions`). A
 difference of a hundredth or more means the records are wrong, so it is
@@ -954,8 +959,8 @@ and the pairs of each sport in one line, and feed drops. Then everything on
 the futures under a heading of its own, then everything on the games in
 play, or one of them with `--market futures` or `--market in-play`. Each
 market starts with its opportunities as live takes them: an episode
-counts when one order could have had a whole contract or more on the
-levels at live's least edge or more, the levels returning `MIN_ANNUAL_PCT`
+counts when one order could have had `LIVE_MIN_CONTRACTS` or more, a
+tenth of a contract, on the levels at live's least edge or more, the levels returning `MIN_ANNUAL_PCT`
 a year on a future paying `MIN_PAYOUT_HOURS` or more out, and those at
 `LIVE_IN_PLAY_MIN_EDGE` or more on a game, match, race, or window under
 way paying within `MAX_PAYOUT_HOURS`, once the edge has lasted
@@ -968,9 +973,11 @@ what those orders could have taken and
 locked in at full size, how long the edge stayed at `MIN_EDGE` or more, in
 seconds to the thousandth, at the median, the 90th percentile, and the
 longest, the same by sport and kind, and the largest five. An edge on less
-than a contract, a sliver of a Polymarket US level that can last minutes,
-is left out, since a trade opens a whole contract or more and so could
-never take it. Until 2026-10-05 an episode counted only with a whole
+than a tenth of a contract, a sliver of a Polymarket US level that can
+last minutes, is left out, since live opens a trade with no less and so
+could never take it. The tenth holds for the whole window, though live
+opened whole contracts until 2026-10-07, so earlier days show episodes it
+could not take then. Until 2026-10-05 an episode counted only with a whole
 contract fillable through all of its longest stretch at `MIN_EDGE`, which
 left out the very episodes live traded, since its own fill empties the
 levels it takes: of the two futures it traded in the hour after the 15:14
@@ -1387,6 +1394,29 @@ away as not trading, which counts as `closed` rather than refused, left
 alone for ten minutes or until its venue says it trades. With Polymarket
 US's order first, only a market Kalshi has stopped while Polymarket US's
 trades can cost anything, the spread on what is sold back.
+
+**Fractions of a contract.** Both venues take orders and fill them in
+hundredths of a contract, and live already traded that way when a leg
+filled in part, but it opened whole contracts. On October 7 the episodes
+that had offered less than one contract at live's least edge, once the
+edge had lasted the tenth of a second live waits, were counted: on
+futures, over 49 hours from October 5 15:47 UTC, 94 of them, 15 contracts
+and 4.94$; on games, over 25 hours from October 6 15:37, 2,676, 242
+contracts and 11.08$, a median of 0.06 of a contract at 3.5 cents. The
+leftover fractions of whole-contract trades added 2.27$ and 0.23$. With a
+tenth of a contract the least, futures kept 2.22$ a day on about 18
+trades and games 4.72$ on about 520, so from that day live opens with as
+little as a tenth on both, at the user's asking (`LIVE_MIN_CONTRACTS`).
+In play live had filled 2 of its 47 trades in that window, so there the
+fractions add orders more than profit until those fill. The same check
+found Kalshi charging fees to the hundredth of a cent, not up to the cent
+as `fees.py` had it: one contract at 19 cents paid 0.0108$, and a
+hundredth of a contract 0.0002$, as every Kalshi order had since live
+trading began on September 30. Polymarket US rounds to the cent, so a
+small order's fee rounds to nothing: 49 of its 67 fractional fills paid
+none. `fees.py` was fixed to match. Edges were always priced on the
+unrounded fee, so only what an order or a sale was expected to cost
+changed, by under a cent an order.
 
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.
