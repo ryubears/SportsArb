@@ -1049,6 +1049,30 @@ trading: Polymarket US's full book with and without compression, its
 best prices only feed, and its trade feed, and Kalshi's order book on its
 old host and on `external-api`, each with and without compression.
 
+`src/tools/event_probe/` is phase 0 of a second idea, trading on plays: a
+play can settle a contract before the game ends, a player's second hit
+settling "over 1.5 hits", and any order still selling it below the settled
+price is there to buy. Unlike the arbitrage nothing is locked in, since a
+play can be overturned, and it pays only if we see the play before the
+venues' prices move. The probe only listens, to measure that. `probe.py`
+follows MLB and NHL games through the leagues' free public feeds, MLB's
+Stats API and NHL's play-by-play, read once a second, and at the same time
+the books of every cataloged contract on those games, on connections of
+its own, and keeps both in `data/event_probe.sqlite`, apart from the bot's
+database. A read that takes a count past a contract's line, ends the game,
+or takes a pitcher out, whose pitching counts are then final, settles the
+contract's bet, see `markets.py`, and the read is an event. `report.py`
+sets each event against the contract's books: had the price already moved
+when the feed showed the play, and what was left at 0.97$ or less when an
+order sent then would have landed, after fees. For MLB, whose feed times
+each pitch, it also shows how long after the pitch itself the venue moved
+and our read came, the delay any faster feed would have to beat. Both
+feeds sit behind web caches, which before games said their content may be
+10 seconds old for MLB and 19 for NHL, so they are expected to be too slow;
+the probe is there to confirm it. Nothing outside the folder imports it, so
+if the idea is dropped, deleting the folder, `tests/tools/event_probe/`,
+`data/event_probe.sqlite`, and `data/event_probe.log` removes it.
+
 ## Deployment
 
 The live process runs on a c7a.large in us-east-1, the region Polymarket
@@ -1438,6 +1462,14 @@ To compare ways of following the books during a game, from `src/`:
 python3 -m tools.feed_check --seconds 300 --markets 100
 ```
 
+To follow MLB and NHL games beside the bot for the event probe, at a lower
+priority, and read what it found, from `src/`:
+
+```bash
+nohup nice -n 10 python3 -m tools.event_probe.probe >> ../data/event_probe.log 2>&1 &
+python3 -m tools.event_probe.report
+```
+
 ## Layout
 
 ```
@@ -1454,6 +1486,7 @@ src/
       money/     balances (what paper and live share), paper, live, settle
     helper/      config (the settings a run is tuned by), game (when a game is played and when its bets pay out), pricing, fees
   tools/      summary report, live_check, kalshi_shards, repair_fills, latency_report, feed_check, in_play_test
+    event_probe/  phase 0 of trading on plays: leagues' feeds, the contracts they settle, the probe, its store, its report
 tests/        mirrors src, run with pytest, configured in pyproject.toml
   support/    helpers the tests share, and the streams and refreshes a child process can run
 commands.txt  operating the AWS instance, gitignored, kept locally
@@ -1481,6 +1514,7 @@ Where to look to change something:
 | when live trading halts | `engine/components/trading/brakes.py` |
 | the email alerts | `engine/components/trading/notify.py` |
 | how far behind the feeds run | `tools/latency_report.py`, `tools/feed_check.py` |
+| whether the leagues' free feeds see a play before the venues' prices move | `tools/event_probe/` |
 | how the processes are wired | `engine/run.py` |
 | the report on the database | `tools/summary.py` |
 | live trading games in play, Polymarket US first | `trading/executor.py` (`fill_legs`), `trading/live.py`, `trading/footprints.py` |
