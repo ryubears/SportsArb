@@ -40,7 +40,10 @@ SALE_RETRY_SECONDS = 60     # After a sale to flatten a trade fills nothing, how
 # A leg on a venue here trades only once its book is current: newer, by the venues' own clocks, than the other leg's last
 # change, or else that change is this many seconds old, time for any reaction to it on this venue to reach us. Polymarket US
 # books reached us 85 ms after the venue changed them at the median, 160 at the 90th percentile, so a price that moved on
-# Kalshi sat next to Polymarket US's old one, and on 2026-09-28 only 4 of 72 orders there filled.
+# Kalshi sat next to Polymarket US's old one, and on 2026-09-28 only 4 of 72 orders there filled. Then both legs went out at
+# once, and a missed Polymarket US order left Kalshi's to sell back. Live sends Polymarket US's first, so from 2026-10-07, at
+# the user's asking, it counts only from the other leg's change as of when the edge reached live's least edge: a change that
+# leaves the edge there does not start the wait again, see LiveExecutor.opened(). Paper counts from the other leg's last change.
 CONFIRM_SECONDS = {"polymarket_us": 0.3}
 
 # PAPER, trading/paper.py and money/paper.py. How paper orders fill, and the paper money.
@@ -68,17 +71,20 @@ PAPER_START_BALANCE = 10000.0   # Paper dollars per venue at the start.
 
 LIVE_IN_PLAY_MIN_EDGE = 0.02    # The least edge live trades on a game under way, and the floor for the deeper levels its orders sweep
                                 # there: five cents from 2026-10-05, two, as MIN_EDGE, from 2026-10-06, at the user's asking.
-LIVE_IN_PLAY_HOLD_SECONDS = 0.1 # How long a game's edge must have stayed at MIN_EDGE or more, unbroken, as the scanner times it,
-                                # before live trades it, so only an edge that lasts is taken: half a second from 2026-10-06, a
-                                # tenth from 2026-10-07, at the user's asking. In eleven hours the half second let through 12
-                                # episodes with a whole contract left, of 2,069 that lasted it, the rest fractions of one, while
-                                # 205 more with a contract or more ended between a tenth and a half; in the in-play test, trades
-                                # sent Polymarket US's order first on edges that went on to last a tenth to a half a second made
-                                # 1.92$ and those on edges ending sooner matched nothing. A Polymarket US leg still waits for its
-                                # book to catch up with a Kalshi change, see CONFIRM_SECONDS, so an edge Kalshi's change opened
-                                # is taken a few tenths after that change, unless a newer Polymarket US book still shows it.
-                                # Futures are taken at once. From 2026-10-05 to 10-06 live took a game's edge only on the signal
-                                # a change of the Polymarket US leg's book brought, which in seven hours let one episode through.
+LIVE_HOLD_SECONDS = 0.1        # How long an edge must have stayed at live's least edge or more, unbroken, as the scanner times it,
+                                # before live trades it, so only an edge that lasts is taken: on a game under way
+                                # LIVE_IN_PLAY_MIN_EDGE, on a future the edge returning MIN_ANNUAL_PCT a year, see
+                                # pricing.live_min_edge(). At the user's asking: games' alone, half a second, from 2026-10-06, a
+                                # tenth from 2026-10-07, and futures', taken at once until then, too from that day's second build. In
+                                # eleven hours the half second let through 12 episodes with a whole contract left, of 2,069 that
+                                # lasted it, the rest fractions of one, while 205 more with a contract or more ended between a
+                                # tenth and a half; in the in-play test, trades sent Polymarket US's order first on edges that
+                                # went on to last a tenth to a half a second made 1.92$ and those on edges ending sooner matched
+                                # nothing. A Polymarket US leg still waits for its book to catch up with a Kalshi change made
+                                # before the edge began, see CONFIRM_SECONDS, so an edge Kalshi's change opened is taken 0.3s
+                                # after that change, unless a newer Polymarket US book still shows it. From 2026-10-05 to 10-06
+                                # live took a game's edge only on the signal a change of the Polymarket US leg's book brought,
+                                # which in seven hours let one episode through.
 LIVE_IN_PLAY_CONTRACTS = 10     # The most contracts a live trade on a game under way asks for: 5 from 2026-10-05, for 200 trades, and
                                 # 10 from 2026-10-06, for as many as come, at the user's asking.
 LIVE_BALANCE_SECONDS = 15   # Between readings of the venues' balances. Under http.IDLE_SECONDS, so each reading also keeps the

@@ -33,21 +33,25 @@ each beside a paper twin on the same signal, see tools/in_play_test.py.
 When paper trades the same games, each live order leaves a footprint of
 what it took, which paper adds back, see footprints.py.
 
-Live takes a future's edge the moment it sees it, as paper does, its
-orders sweeping only the levels that return config.MIN_ANNUAL_PCT a year
-until it pays, not every level down to config.MIN_EDGE, see min_edge().
-On a game under way it takes an edge of config.LIVE_IN_PLAY_MIN_EDGE or
-more, two cents, only once it has stayed at config.MIN_EDGE or more for
-config.LIVE_IN_PLAY_HOLD_SECONDS, a tenth of a second, by the scanner's
-episode: one that ends sooner is never traded, and one still there when
-the time is up is priced again then and traded, see hold(). It asks for no
-more than config.LIVE_IN_PLAY_CONTRACTS a trade, ten, with no limit on how
-many such trades. All from 2026-10-06, at the user's asking, the wait half
-a second until 2026-10-07. From 2026-10-05 04:07 UTC to that day's 15:14
-UTC build every edge, futures' too, waited half a second; then a game's
-was taken at five cents, five contracts a trade, for 200 trades, only on
-the signal a change of the Polymarket US leg's book brought, which in
-seven hours let one episode through.
+Live takes a future's edge when it returns config.MIN_ANNUAL_PCT a year
+until it pays, its orders sweeping only the levels that return that, not
+every level down to config.MIN_EDGE, see min_edge(). On a game under way
+it takes an edge of config.LIVE_IN_PLAY_MIN_EDGE or more, two cents, and
+asks for no more than config.LIVE_IN_PLAY_CONTRACTS a trade, ten, with no
+limit on how many such trades. Either only once the edge has stayed at
+that least edge or more for config.LIVE_HOLD_SECONDS, a tenth of a
+second, by the scanner's episode: one that ends sooner is never traded,
+and one still there when the time is up is priced again then and traded,
+see hold(). A Polymarket US leg's book must still be current, counted
+from the Kalshi leg's change as of when the edge began, see opened(). All
+at the user's asking: the games' rules from 2026-10-06, their wait half a
+second until 2026-10-07, when futures, taken at once until then, began
+waiting too, and the book's wait stopped starting again on a change that
+left the edge. From 2026-10-05 04:07 UTC to that day's 15:14 UTC build
+every edge, futures' too, waited half a second; then a game's was taken
+at five cents, five contracts a trade, for 200 trades, only on the signal
+a change of the Polymarket US leg's book brought, which in seven hours let
+one episode through.
 
 An order whose outcome cannot be known, because no answer came, the venue
 failed on its side, or its answer cannot be read, leaves what its trade
@@ -218,14 +222,29 @@ class LiveExecutor(Executor):
 
     def hold(self, pair, yes, no, now):
         """
-        On a game under way, how many seconds until the pair's edge has
-        stayed at config.MIN_EDGE or more for config.LIVE_IN_PLAY_HOLD_SECONDS,
-        by the scanner's episode, see pricing.live_hold(), 0 once it has, or
-        without a scanner to say when it began, as in tests. 0 on a future,
-        taken at once.
+        How many seconds until the pair's edge has stayed at live's least
+        edge or more, see min_edge(), for config.LIVE_HOLD_SECONDS, by the
+        scanner's episode, see pricing.live_hold(), 0 once it has, or without
+        a scanner to say when it began, as in tests. On a future too from
+        2026-10-07, taken at once until then.
         """
-        since = self.edge_since(pair["id"]) if self.edge_since and self.in_game(pair, yes, no, now) else None
+        since = self.edge_since(pair["id"]) if self.edge_since else None
         return 0.0 if since is None else live_hold(since, now)
+
+    def opened(self, pair):
+        """
+        When each member's book of the pair had last changed as its edge
+        reached live's least edge, by the scanner's episode, see
+        Scanner.edge_books(), so a leg's wait for its book to catch up, see
+        confirm_wait(), counts from the other leg's change as of then: a
+        change since that left the edge there does not start it again.
+        Polymarket US's order goes first, see lead(), so a quote it no
+        longer shows costs only an order that fills nothing. Before
+        2026-10-07 every Kalshi change started it again, and in a game under
+        way, where Kalshi's books change many times a second, an edge could
+        wait as long as it lasted.
+        """
+        return (self.edge_books(pair["id"]) if self.edge_books else None) or {}
 
     def plays(self, pair, yes, no, now):
         """

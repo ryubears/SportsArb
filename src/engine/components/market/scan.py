@@ -25,9 +25,16 @@ offered a whole contract: a peak's first moment can offer a fraction of
 one, where live, which opens whole contracts, trades a moment later at the
 same edge or a little less. Until 2026-10-06 only the peak's first moment
 counted, and 21 of 55 live futures trades that evening came from episodes
-kept with under a contract. On a game under way only the moments once the
-edge has stayed at config.MIN_EDGE or more for
-config.LIVE_IN_PLAY_HOLD_SECONDS count, since live trades it only then.
+kept with under a contract. Only the moments once the edge has stayed at
+live's least edge or more for config.LIVE_HOLD_SECONDS count, since live
+trades it only then: on a game under way from 2026-10-06, on a future from
+2026-10-07.
+
+The episode also follows that stretch at live's least edge, see
+edge_since(), and keeps when each member's book had last changed as it
+began, see edge_books(): live counts a Polymarket US leg's wait for its
+book to catch up from the other leg's change as of then, so a change that
+leaves the edge where live takes it does not start the wait again.
 
 The recorder drives the Scanner with the books it holds in memory and
 the Scanner stores every episode as it ends, so the opportunities table
@@ -48,8 +55,8 @@ from db import database
 from db.models import Opportunity
 from engine.helper import config
 from engine.helper.game import days_until, pays_at as payout_time, started
-from engine.helper.pricing import (Priced, annual_pct, best_trade, fillable, fresh, live_hold, live_min_edge, polymarket_us_just_changed,
-                                   return_pct, trade_words)
+from engine.helper.pricing import (Priced, annual_pct, best_trade, changed_at, fillable, fresh, live_hold, live_min_edge,
+                                   polymarket_us_just_changed, return_pct, trade_words)
 
 RECHECK_MARGIN = 0.005      # Seconds past a wait's end that a recheck prices the pair, so the wait is surely over by our clock.
 
@@ -71,6 +78,10 @@ class Episode:
     worth_since: str | None = None      # When the current stretch at config.MIN_EDGE or more began, or None outside one.
     worth_least: tuple = (0.0, 0.0)     # The fewest contracts fillable at that edge so far in the stretch, and their profit.
     worth_best: tuple | None = None     # The longest stretch so far, as (seconds, contracts, profit), a moment's included.
+    live_since: str | None = None       # When the current stretch at live's least edge or more began, by our clock, or None outside
+                                        # one, see Scanner.live_floor().
+    live_books: dict = field(default_factory=dict)  # When each member's book had last changed as that stretch began, by
+                                                    # (venue, contract id), see pricing.changed_at().
 
     def end_stretch(self, now):
         """
@@ -95,6 +106,22 @@ class Episode:
                 self.worth_least = least
         else:
             self.end_stretch(now)
+
+    def see_live(self, worth, books, now):
+        """
+        Follow the stretch at live's least edge or more through one pricing
+        of the pair, worth saying whether the edge is there: when it began,
+        and when each member's book had last changed then, which later
+        changes in the stretch leave as they were.
+        """
+        if not worth:
+            self.live_since, self.live_books = None, {}
+        elif self.live_since is None:
+            self.live_since = now
+            for m in self.pair["members"]:
+                key = (m["venue"], m["contract_id"])
+                if books.get(key) is not None:
+                    self.live_books[key] = changed_at(books[key])
 
     def opportunity(self, end_ts):
         """
@@ -201,25 +228,30 @@ class Scanner:
             return None
         return best_trade(members, books, self.fee_infos, one_venue=pair["game_date"] is None)
 
-    def weigh_take(self, episode, pair, priced, books, now):
+    def live_floor(self, pair, priced, now):
+        """
+        Live's least edge on the pair at now, see pricing.live_min_edge(): on a game under way, once it may have started,
+        a set one, otherwise the edge returning its rate a year until the legs pay.
+        """
+        under_way = started(pair["game_date"], pair["members"], now)
+        return live_min_edge(under_way, days_until(now, payout_time((priced.yes, priced.no), pair["sport"])))
+
+    def weigh_take(self, episode, priced, books, floor, now):
         """
         What an order sent at now could have had as live takes it, kept on
         the episode when it is the best yet: the contracts fillable on the
-        levels at live's least edge on the pair or more, see
-        pricing.live_min_edge(), the net dollars they lock in, and whether
-        the pricing came with a change of the Polymarket US leg's book, which
-        live traded a game under way on from 2026-10-05 to 10-06, see
+        levels at live's least edge on the pair, floor, or more, see
+        live_floor(), the net dollars they lock in, and whether the pricing
+        came with a change of the Polymarket US leg's book, which live traded
+        a game under way on from 2026-10-05 to 10-06, see
         pricing.polymarket_us_just_changed(). The best has a whole contract
-        or more, the fewest a trade opens, then the most profit. On a game
-        under way a moment counts only once the episode's edge has stayed at
-        config.MIN_EDGE or more for config.LIVE_IN_PLAY_HOLD_SECONDS, as
-        live waits for it to, see pricing.live_hold().
+        or more, the fewest a trade opens, then the most profit. A moment
+        counts only once the episode's edge has stayed at live's least edge
+        or more for config.LIVE_HOLD_SECONDS, as live waits for it to, see
+        pricing.live_hold().
         """
-        under_way = started(pair["game_date"], pair["members"], now)
-        if under_way and (episode.worth_since is None or live_hold(episode.worth_since, now) > 0):
+        if episode.live_since is None or live_hold(episode.live_since, now) > 0:
             return
-        pays_at = payout_time((priced.yes, priced.no), pair["sport"])
-        floor = live_min_edge(under_way, days_until(now, pays_at))
         size, profit = fillable(priced.yes, priced.no, books, self.fee_infos, floor)
         pm_changed = polymarket_us_just_changed(priced.yes, priced.no, books, now)
         rank = (size >= 1, profit)
@@ -239,10 +271,12 @@ class Scanner:
             elif priced.edge > episode.peak.edge:
                 episode.peak, episode.peak_ts = priced, now
             episode.see(priced, now)
+            floor = self.live_floor(pair, priced, now)
+            episode.see_live(priced.edge >= floor, books, now)
             # What one order could have had, worked out at the peak's edge, and at every moment until a whole contract was
             # on offer, not on every pricing.
             if priced.edge >= episode.peak.edge or episode.take[0] < 1:
-                self.weigh_take(episode, pair, priced, books, now)
+                self.weigh_take(episode, priced, books, floor, now)
             for i, on_signal in enumerate(self.on_signals):
                 if i not in episode.taken and on_signal(pair, priced.yes, priced.no, priced.edge, priced.size, self.fee_infos, now):
                     episode.taken.add(i)
@@ -251,12 +285,24 @@ class Scanner:
 
     def edge_since(self, pair_id):
         """
-        When the pair's open episode last reached config.MIN_EDGE, by our
-        clock, if it has stayed there since, or None. A desk that trades an
-        edge only once it has lasted asks, see Executor.hold().
+        When the pair's open episode last reached live's least edge, by our
+        clock, see live_floor(), if it has stayed there since, or None. A
+        desk that trades an edge only once it has lasted asks, see
+        Executor.hold().
         """
         episode = self.episodes.get(pair_id)
-        return episode.worth_since if episode else None
+        return episode.live_since if episode else None
+
+    def edge_books(self, pair_id):
+        """
+        When each member's book of the pair had last changed as its open
+        episode last reached live's least edge, by (venue, contract id), see
+        pricing.changed_at(), or nothing outside that stretch. Live counts a
+        leg's wait for its book to catch up from the other's, see
+        LiveExecutor.opened().
+        """
+        episode = self.episodes.get(pair_id)
+        return dict(episode.live_books) if episode else {}
 
     def reprice(self, pair_id):
         """

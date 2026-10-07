@@ -5,15 +5,15 @@ executors' rules trade, and the trades.
 Everything is shown for the futures, then for the games, matches, races,
 and windows in play, each under a heading of its own, see MARKETS: its
 opportunities, then its trades for each mode, paper then live, or one
-with --mode. Opportunities are shown as live takes them, at once: an
-episode counts when one order could have had a whole contract or more,
-since a trade opens no fewer, on the levels at live's least edge or more,
-see pricing.live_min_edge(): on a future paying config.MIN_PAYOUT_HOURS
-or more out, the levels returning config.MIN_ANNUAL_PCT a year, and on a
-game under way paying within config.MAX_PAYOUT_HOURS, those at
-config.LIVE_IN_PLAY_MIN_EDGE or more once the edge has lasted
-config.LIVE_IN_PLAY_HOLD_SECONDS, as live waits for it to. Which moment
-is the scanner's, see Opportunity.take_size. Each market shows what those
+with --mode. Opportunities are shown as live takes them: an episode
+counts when one order could have had a whole contract or more, since a
+trade opens no fewer, on the levels at live's least edge or more, see
+pricing.live_min_edge(), once the edge has lasted config.LIVE_HOLD_SECONDS
+there, as live waits for it to: on a future paying
+config.MIN_PAYOUT_HOURS or more out, the levels returning
+config.MIN_ANNUAL_PCT a year, and on a game under way paying within
+config.MAX_PAYOUT_HOURS, those at config.LIVE_IN_PLAY_MIN_EDGE or more.
+Which moment is the scanner's, see Opportunity.take_size. Each market shows what those
 orders could have taken at full size and what that locks in, overall, by
 sport and kind, and the largest, and how long the edge stayed at
 config.MIN_EDGE or more, in seconds to the thousandth. A market's trades
@@ -211,12 +211,15 @@ def opportunity_rules(market):
     matches, races, and windows under way at the peak paying within
     config.MAX_PAYOUT_HOURS, on the levels at config.LIVE_IN_PLAY_MIN_EDGE
     or more, of which no return a year is asked, whose edge stayed at
-    config.MIN_EDGE or more for config.LIVE_IN_PLAY_HOLD_SECONDS, as live
-    waits for it to, see LiveExecutor.hold(). The scanner counts a game's
-    moments only from then, so the stretch condition leaves out only the
-    episodes of before 2026-10-06, kept by the rules of then. Until
-    2026-10-07 live waited half a second, and the scanner counted a game's
-    moments only from half a second, so those days show fewer. Lasting does
+    config.MIN_EDGE or more for config.LIVE_HOLD_SECONDS, as live waits for
+    it to, see LiveExecutor.hold(). The scanner counts a game's moments
+    only from then, so the stretch condition leaves out only the episodes
+    of before 2026-10-06, kept by the rules of then. Until 2026-10-07 live
+    waited half a second, and the scanner counted a game's moments only
+    from half a second, so those days show fewer. A future's moments it
+    counts only once the edge has lasted config.LIVE_HOLD_SECONDS at the
+    rate a year from 2026-10-07, and those of the episodes before, counted
+    at once, stay as they were kept. Lasting does
     not make an edge real: two episodes of one Bitcoin window on 2026-10-05
     showed 5,304$ to be locked in at 18.7 and 51.8 cents for one and two
     minutes, unlikely when both venues settle it on the same index, likely
@@ -227,9 +230,10 @@ def opportunity_rules(market):
     """
     if market == "futures":
         return ("live = 0 AND days_held * 24 >= ? AND annual_pct >= ?", (config.MIN_PAYOUT_HOURS, config.MIN_ANNUAL_PCT),
-                f"levels returning {config.MIN_ANNUAL_PCT}%+ a year, paying {config.MIN_PAYOUT_HOURS}h+ out")
-    return ("live = 1 AND days_held * 24 <= ? AND min_edge_seconds >= ?", (config.MAX_PAYOUT_HOURS, config.LIVE_IN_PLAY_HOLD_SECONDS),
-            f"levels at {100 * config.LIVE_IN_PLAY_MIN_EDGE:.0f}c+ once the edge lasted {config.LIVE_IN_PLAY_HOLD_SECONDS:g}s, "
+                f"levels returning {config.MIN_ANNUAL_PCT}%+ a year once the edge lasted {config.LIVE_HOLD_SECONDS:g}s, "
+                f"paying {config.MIN_PAYOUT_HOURS}h+ out")
+    return ("live = 1 AND days_held * 24 <= ? AND min_edge_seconds >= ?", (config.MAX_PAYOUT_HOURS, config.LIVE_HOLD_SECONDS),
+            f"levels at {100 * config.LIVE_IN_PLAY_MIN_EDGE:.0f}c+ once the edge lasted {config.LIVE_HOLD_SECONDS:g}s, "
             f"games, matches, races, and windows under way, paying within {config.MAX_PAYOUT_HOURS}h")
 
 

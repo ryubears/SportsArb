@@ -27,9 +27,9 @@ and paper the bets on one event paying within a day, where faster traders
 may take the edges first, to see how they would do, its orders timed as
 live ones are. By default the orders are paper. With `--execute live` or
 `--execute both` it sends real ones, and with `--live-in-play` live trades
-the games under way too, Polymarket US's order first, an edge of two cents
-or more once it has lasted a tenth of a second, at most 10 contracts a
-trade.
+the games under way too, an edge of two cents or more, at most 10
+contracts a trade. Polymarket US's order goes first, and live takes an
+edge, a game's or a future's, once it has lasted a tenth of a second.
 From October 4 to 5 the service on the instance
 traded every sport's futures and the elections live, with paper on every
 event beside it, and the in-play test below. From October 5 it is set to
@@ -181,12 +181,13 @@ checks before it trades, below.
    the bet pays when the desk trades it (`pays_in_time`), a future
    `MIN_PAYOUT_HOURS` or more away and a game within `MAX_PAYOUT_HOURS`,
    and the edge returns `MIN_ANNUAL_PCT` a year or more until then, asked
-   of no game under way from 2026-10-05 (`pays_enough`), for live on a game
-   under way the edge has stayed at `MIN_EDGE` or more for
-   `LIVE_IN_PLAY_HOLD_SECONDS`, by the scanner's episode (`hold`,
-   `Scanner.edge_since`), and a Polymarket US leg's book is current
-   (`confirm_wait`): newer than the Kalshi leg's last change, by the
-   venues' own clocks, or else that change is `CONFIRM_SECONDS` old.
+   of no game under way from 2026-10-05 (`pays_enough`), for live the edge
+   has stayed at its least edge or more for `LIVE_HOLD_SECONDS`, by the
+   scanner's episode (`hold`, `Scanner.edge_since`), and a Polymarket US
+   leg's book is current (`confirm_wait`): newer than the Kalshi leg's last
+   change, by the venues' own clocks, or else that change is
+   `CONFIRM_SECONDS` old, for live the Kalshi change as of when the edge
+   reached its least edge (`opened`, `Scanner.edge_books`).
    Otherwise the edge waits, and the scanner offers it again at the next
    change, or the moment the wait ends (`recheck`), not at the next tick up
    to a second later. `quantity_for` walks both ladders together through
@@ -583,10 +584,11 @@ back after it has gone is a new episode. An episode also keeps its longest
 stretch at `MIN_EDGE` or more, and the contracts that stayed fillable
 through all of it, which is what an order sent any time in the stretch
 could have had. From 2026-10-05 it keeps too what one order could have had
-as live takes it, at once: the contracts on the levels at live's least edge
-or more, `pricing.live_min_edge()`, 2 cents on a game under way, counted
-only once the edge has lasted `LIVE_IN_PLAY_HOLD_SECONDS`, and 100% a year
-on a future, and what they lock in, and whether that moment came with a
+as live takes it: the contracts on the levels at live's least edge or
+more, `pricing.live_min_edge()`, 2 cents on a game under way and 100% a
+year on a future, counted only once the edge has lasted
+`LIVE_HOLD_SECONDS` there, a game's from 2026-10-06 and a future's from
+2026-10-07, and what they lock in, and whether that moment came with a
 change of the Polymarket US leg's book (`pm_changed`), the only moment live
 traded a game under way from 2026-10-05 to 10-06. The summary counts
 opportunities by that, since live's own fill empties the levels it takes.
@@ -705,7 +707,15 @@ trusted only once that change is `CONFIRM_SECONDS`, 0.3 seconds, old, long
 enough for a reaction on Polymarket US to have reached us, and until then
 the edge waits for the scanner to offer it again at the next change, or
 when the wait ends, when the executor asks the scanner to price the pair
-again. A Kalshi leg has no such wait, since its feed is fast. Both venues
+again. A Kalshi leg has no such wait, since its feed is fast. Live, whose
+Polymarket US order goes first, counts from the Kalshi change as of when
+the edge reached its least edge, from 2026-10-07: a change since that
+leaves the edge there does not start the wait again
+(`LiveExecutor.opened`), the scanner keeping when each book had changed as
+the edge began (`Scanner.edge_books`). A Polymarket US quote no longer
+there costs it only an order that fills nothing, and in a game under way,
+where Kalshi's books change many times a second, an edge could otherwise
+wait as long as it lasted. Paper counts from the last change. Both venues
 stop every Thursday for maintenance they publish, Kalshi from 3 to 5 AM
 Eastern and Polymarket US from 6 to 8 AM, while a feed may go on sending
 books, so no trade is opened, and no order sent to flatten one, with a leg
@@ -730,7 +740,9 @@ the scanner's episode timed it, and the scanner offered it again when the
 half second was up. In its first hours no in-play edge passed, the largest
 lasting 6 to 110 ms, and the user dropped it with the in-play rules below:
 live takes a future's edge the moment it sees it, as paper does. From
-2026-10-06 it is back for games under way alone, below.
+2026-10-06 it is back for games under way, and from 2026-10-07, a tenth of
+a second, for futures too, each at live's least edge on it, the rate a
+year on a future and two cents on a game, below.
 
 **Games in play.** With `--live-in-play` live also trades the games,
 matches, races, and windows under way, of every sport, Bitcoin's windows
@@ -788,18 +800,21 @@ something by how long the book had been quiet, to tell.
 **In-play rules.** Since 2026-10-06, at the user's asking, live on a game
 under way takes an edge of two cents or more (`LIVE_IN_PLAY_MIN_EDGE`), and
 sweeps the levels down to that, but only once the edge has stayed at
-`MIN_EDGE` or more, unbroken, for a tenth of a second
-(`LIVE_IN_PLAY_HOLD_SECONDS`, half a second until 2026-10-07), as the
-scanner's episode times it (`LiveExecutor.hold`, `Scanner.edge_since`):
-one that ends sooner is never traded, and one still there when the time
-is up is priced again then (`recheck`) and traded, whichever venue's book
-changed last. The Polymarket US book must still be current
-(`confirm_wait`), a separate wait timed from Kalshi's last change, not
-from the edge's start: when Kalshi's change opened the edge, or changed it
-since, the Polymarket US leg waits until that change is 0.3 seconds old
-(`CONFIRM_SECONDS`), unless a newer Polymarket US book still shows the
-price. So an edge Polymarket US's change opened is taken at a tenth of a
-second, and one Kalshi's opened at about 0.3. A trade asks
+two cents or more, unbroken, for a tenth of a second
+(`LIVE_HOLD_SECONDS`, half a second until 2026-10-07), as the scanner's
+episode times it (`LiveExecutor.hold`, `Scanner.edge_since`): one that
+ends sooner is never traded, and one still there when the time is up is
+priced again then (`recheck`) and traded, whichever venue's book changed
+last. The Polymarket US book must still be current (`confirm_wait`), a
+separate wait timed from Kalshi's change as of when the edge reached two
+cents: when Kalshi's change opened the edge, the Polymarket US leg waits
+until that change is 0.3 seconds old (`CONFIRM_SECONDS`), unless a newer
+Polymarket US book still shows the price, and a Kalshi change since that
+leaves the edge at two cents or more does not start the wait again, as
+until 2026-10-07 it did. So an edge Polymarket US's change opened is taken
+at a tenth of a second, and one Kalshi's opened at 0.3. A future's edge
+waits the same from 2026-10-07, at the rate a year rather than two cents,
+taken at once until then. A trade asks
 for no more than 10 contracts (`LIVE_IN_PLAY_CONTRACTS`), its limits going
 no deeper than the levels that hold them, and a whole one or more, with no
 limit on how many such trades. Each trade says whether its game was under
@@ -899,17 +914,18 @@ its own.
 and the pairs of each sport in one line, and feed drops. Then everything on
 the futures under a heading of its own, then everything on the games in
 play, or one of them with `--market futures` or `--market in-play`. Each
-market starts with its opportunities as live takes them, at once: an
-episode counts when one order could have had a whole contract or more on
-the levels at live's least edge or more, the levels returning
-`MIN_ANNUAL_PCT` a year on a future paying `MIN_PAYOUT_HOURS` or more out,
-and those at `LIVE_IN_PLAY_MIN_EDGE` or more on a game, match, race, or
-window under way paying within `MAX_PAYOUT_HOURS`, once the edge has lasted
-`LIVE_IN_PLAY_HOLD_SECONDS`, as live waits for it to, the moment being the
-scanner's (`Scanner.weigh_take`). Lasting does not make an edge real: two
-episodes of one Bitcoin window on 2026-10-05 showed $5,304 to be locked in
-at 18.7 and 51.8 cents for one and two minutes, though both venues settle
-it on the same index. It shows what those orders could have taken and
+market starts with its opportunities as live takes them: an episode
+counts when one order could have had a whole contract or more on the
+levels at live's least edge or more, the levels returning `MIN_ANNUAL_PCT`
+a year on a future paying `MIN_PAYOUT_HOURS` or more out, and those at
+`LIVE_IN_PLAY_MIN_EDGE` or more on a game, match, race, or window under
+way paying within `MAX_PAYOUT_HOURS`, once the edge has lasted
+`LIVE_HOLD_SECONDS` there, as live waits for it to, a future's from
+2026-10-07, the moment being the scanner's (`Scanner.weigh_take`).
+Lasting does not make an edge real: two episodes of one Bitcoin window on
+2026-10-05 showed $5,304 to be locked in at 18.7 and 51.8 cents for one
+and two minutes, though both venues settle it on the same index. It shows
+what those orders could have taken and
 locked in at full size, how long the edge stayed at `MIN_EDGE` or more, in
 seconds to the thousandth, at the median, the 90th percentile, and the
 longest, the same by sport and kind, and the largest five. An edge on less
@@ -1268,6 +1284,17 @@ second (17 trades, -1.00$), and made 1.92$ on those that lasted a tenth
 to a half (26) and 3.01$ on a half to five seconds (15), while those past
 five seconds, mostly frozen books, matched 1 contract of 37. So on October
 7, at the user's asking, the wait became a tenth of a second.
+
+**One rule for futures and games.** Later that day, at the user's asking,
+futures began waiting a tenth of a second too, at the edge returning 100%
+a year where a game's is two cents, so the two differ only in that, the
+10 contracts, and the payout times. And the wait for Polymarket US's book
+to catch up stopped starting again on every Kalshi change: in the eleven
+hours of the half second, the log's ten-minute reports counted 826 pairs
+waiting on a book, as Kalshi's books in a game change many times a
+second, while with Polymarket US's order first a quote it no longer shows
+costs only an order that fills nothing. It now counts from the Kalshi
+change as of when the edge reached live's least edge.
 
 **National teams and esports.** On October 6 the catalog took national
 teams' soccer, the men's and the women's, and esports, a sport each for

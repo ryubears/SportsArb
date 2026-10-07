@@ -29,10 +29,12 @@ venues, trading/ makes the trades, and money/ keeps the cash.
   still flattens and settles every trade it holds. With --live-in-play
   live also trades the games, matches, races, and windows under way that
   pay within MAX_PAYOUT_HOURS, of every sport, Polymarket US's order
-  first, an edge of LIVE_IN_PLAY_MIN_EDGE or more once it has lasted
-  LIVE_IN_PLAY_HOLD_SECONDS, at most LIVE_IN_PLAY_CONTRACTS a trade, the
-  scanner offering a held edge again once it has lasted, through
-  Scanner.edge_since() and recheck(). When paper runs too it trades
+  first, an edge of LIVE_IN_PLAY_MIN_EDGE or more, at most
+  LIVE_IN_PLAY_CONTRACTS a trade. Live takes a future's edge, as a game's,
+  once it has lasted LIVE_HOLD_SECONDS, the scanner offering a held edge
+  again once it has lasted, through Scanner.edge_since() and recheck(),
+  and counts a leg's wait for its book to catch up from the other's change
+  as the edge began, through Scanner.edge_books(). When paper runs too it trades
   the same games, given back what our live orders took from the books, see
   trading/footprints.py.
   - Paper: trading/paper.py fills against the same books with the paper
@@ -167,8 +169,8 @@ def in_play_settings():
     What edge live trades on a game under way, when, and how many contracts, in words.
     """
     c = config
-    return (f"an edge of {c.LIVE_IN_PLAY_MIN_EDGE:g}$ or more once it has lasted {c.LIVE_IN_PLAY_HOLD_SECONDS:g}s at "
-            f"{c.MIN_EDGE:g}$ or more, at most {c.LIVE_IN_PLAY_CONTRACTS} contracts a trade")
+    return (f"an edge of {c.LIVE_IN_PLAY_MIN_EDGE:g}$ or more once it has lasted {c.LIVE_HOLD_SECONDS:g}s at "
+            f"{c.LIVE_IN_PLAY_MIN_EDGE:g}$ or more, at most {c.LIVE_IN_PLAY_CONTRACTS} contracts a trade")
 
 
 def live_settings():
@@ -176,8 +178,9 @@ def live_settings():
     The settings that decide what the live trader does, in one line.
     """
     c = config
-    return (f"LIVE TRADING with real money: a future's edge as soon as seen, its orders down to the levels returning "
-            f"{c.MIN_ANNUAL_PCT}% a year, balances read every "
+    return (f"LIVE TRADING with real money: a future's edge once it has lasted {c.LIVE_HOLD_SECONDS:g}s returning "
+            f"{c.MIN_ANNUAL_PCT}% a year, its orders down to the levels returning that, a leg's book waiting only for the other's "
+            f"change before the edge began, balances read every "
             f"{c.LIVE_BALANCE_SECONDS}s, email under {c.LIVE_LOW_CASH:,.2f}$ on a venue or shard; halt at {c.LIVE_UNKNOWN_LIMIT} "
             f"unknown outcomes in {c.LIVE_ORDER_WINDOW} orders, {c.LIVE_REJECT_LIMIT} refusals in a row, or a loss over "
             f"{c.LIVE_MAX_LOSS_SHARE:.0%} in {c.LIVE_RESULT_HOURS}h")
@@ -276,7 +279,8 @@ class Session:
             self.desks.append(Desk(mode, conn, lambda: self.recorder.books, self.notifier, **rules[mode]))
         self.scanner = scan.Scanner(conn, sports, log, [d.signal for d in self.desks], books=lambda: self.recorder.books) if with_scanner else None
         for desk in self.desks:
-            desk.executor.recheck, desk.executor.edge_since = self.scanner.recheck, self.scanner.edge_since
+            desk.executor.recheck, desk.executor.edge_since, desk.executor.edge_books = (self.scanner.recheck, self.scanner.edge_since,
+                                                                                         self.scanner.edge_books)
         self.recorder = Recorder(conn, self.scanner, self.tapes)
         self.streams = Streams(self.recorder)
         self.last_status = self.last_summary = time.time()

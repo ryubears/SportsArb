@@ -677,7 +677,7 @@ def test_in_play_live_takes_as_many_trades_on_games_under_way_as_come(tmp_path):
     assert [t["in_play"] for t in stored(conn)] == [1, 1, 0]
 
 
-def test_in_play_live_trades_an_edge_only_once_it_has_lasted_and_asks_to_be_offered_it_again_then(tmp_path):
+def test_live_trades_an_edge_only_once_it_has_lasted_and_asks_to_be_offered_it_again_then(tmp_path):
     venues = Venues(polymarket_us=[fills()] * 2, kalshi=[fills()] * 2)
     conn, ex = in_play(tmp_path, venues, books())
     since, asked = {}, []
@@ -689,8 +689,11 @@ def test_in_play_live_trades_an_edge_only_once_it_has_lasted_and_asks_to_be_offe
     assert "; 1 pairs' edges held until they lasted" in ex.summary()
     since[GAME["id"]] = "2026-09-22T17:59:59.900000+00:00"             # A tenth of a second.
     assert signal(ex) and len(venues.orders) == 2 and asked == [(GAME["id"], 0.06)]
-    since[FUTURE["id"]] = UNDER_WAY                                     # A future's edge, just begun, is taken at once.
-    assert signal(ex, FUTURE, SURE) and len(venues.orders) == 4
+    future = {**FUTURE, "id": 2}
+    since[future["id"]] = UNDER_WAY                                     # A future's edge, just begun, is held too, from 2026-10-07.
+    assert not signal(ex, future, SURE) and len(venues.orders) == 2 and asked[-1] == (future["id"], 0.1)
+    since[future["id"]] = "2026-09-22T17:59:59.900000+00:00"
+    assert signal(ex, future, SURE) and len(venues.orders) == 4
 
 
 def test_in_play_live_trades_a_lasting_edge_whichever_book_changed_last(tmp_path):
@@ -705,22 +708,31 @@ def test_in_play_live_trades_a_lasting_edge_whichever_book_changed_last(tmp_path
     assert signal(ex)
 
 
-def test_in_play_live_still_waits_for_polymarket_us_to_catch_up_with_a_kalshi_change_once_the_edge_has_lasted(tmp_path):
-    venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
+def test_live_waits_for_polymarket_us_to_catch_up_only_with_the_kalshi_change_from_before_the_edge_began(tmp_path):
+    venues = Venues(polymarket_us=[fills()] * 2, kalshi=[fills()] * 2)
     latest = books()
     conn, ex = in_play(tmp_path, venues, latest)
-    asked = []
+    asked, opened = [], {}
     ex.edge_since = lambda pair_id: "2026-09-22T17:59:59+00:00"         # A second at 2c or more, so no longer held.
+    ex.edge_books = lambda pair_id: dict(opened)
     ex.recheck = lambda pair_id, seconds: asked.append((pair_id, round(seconds, 3)))
     pm, k = latest[("polymarket_us", "pm")], latest[("kalshi", "k")]
     latest[("polymarket_us", "pm")] = Book(pm.venue, pm.contract_id, "2026-09-22T17:59:50+00:00", pm.bids, pm.asks)
     latest[("kalshi", "k")] = Book(k.venue, k.contract_id, "2026-09-22T17:59:59.900000+00:00", k.bids, k.asks)
-    # Kalshi changed a tenth of a second ago, and Polymarket US's book is older, so its leg waits out the rest of 0.3s.
+    # Kalshi's change that opened the edge came a tenth of a second ago, after Polymarket US's book, so its leg waits out
+    # the rest of 0.3s.
+    opened.update({("kalshi", "k"): epoch("2026-09-22T17:59:59.900000+00:00"),
+                   ("polymarket_us", "pm"): epoch("2026-09-22T17:59:50+00:00")})
     assert not signal(ex) and venues.orders == [] and asked == [(GAME["id"], 0.2)]
     assert "; 1 pairs' edges waited for a book to catch up" in ex.summary()
-    # A Polymarket US book newer than Kalshi's change, still showing the price, is current, and the edge is taken.
+    # A Polymarket US book newer than that change, still showing the price, is current, and the edge is taken.
     latest[("polymarket_us", "pm")] = Book(pm.venue, pm.contract_id, "2026-09-22T17:59:59.950000+00:00", pm.bids, pm.asks)
     assert signal(ex) and len(venues.orders) == 2
+    # The edge began a second ago, with Kalshi's change of then. Its change a tenth of a second ago left the edge where live
+    # takes it, so it does not start the wait again: before 2026-10-07 it did.
+    latest[("polymarket_us", "pm")] = Book(pm.venue, pm.contract_id, "2026-09-22T17:59:50+00:00", pm.bids, pm.asks)
+    opened[("kalshi", "k")] = epoch("2026-09-22T17:59:59+00:00")
+    assert signal(ex, {**GAME, "id": 2}) and len(venues.orders) == 4 and asked == [(GAME["id"], 0.2)]
 
 
 def test_in_play_live_trades_an_edge_at_once_when_no_scanner_says_when_it_began(tmp_path):

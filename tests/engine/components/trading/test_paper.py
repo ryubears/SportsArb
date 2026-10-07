@@ -442,6 +442,7 @@ def test_an_edge_waits_for_the_polymarket_us_book_to_catch_up_with_a_kalshi_move
     moved(latest, "kalshi", 0.1)                            # Kalshi just moved.
     moved(latest, "polymarket_us", 2.0)                     # Polymarket US's newest book is from before, so it may not show its reaction yet.
     conn, cash, ex = executor(tmp_path, latest)
+    ex.edge_books = lambda pair_id: {key: epoch(NOW) - 5.0 for key in latest}   # Live counts from when the edge began, paper not.
     assert run(ex) == [False] and stored(conn) == []
     assert ex.summary().endswith("; 1 pairs' edges waited for a book to catch up")
     moved(latest, "polymarket_us", 0.05)                    # A newer Polymarket US book still shows the price.

@@ -10,7 +10,7 @@ positive net edge, and the executor, which fills against the same ladders.
 """
 
 from typing import NamedTuple
-from common.timeutil import seconds_between
+from common.timeutil import epoch, seconds_between
 from common.venues import SHORT_NAMES
 from engine.helper import config, fees
 
@@ -358,9 +358,19 @@ def live_min_edge(under_way, days):
 
 def live_hold(since, now):
     """
-    How many seconds more an edge at config.MIN_EDGE or more from since on,
-    by our clock, must last at now before live trades it on a game under
-    way, 0 once it has lasted config.LIVE_IN_PLAY_HOLD_SECONDS. The live
-    executor waits by it, and the scanner counts a game's moments by it.
+    How many seconds more an edge at live's least edge or more from since
+    on, by our clock, see live_min_edge(), must last at now before live
+    trades it, 0 once it has lasted config.LIVE_HOLD_SECONDS. The live
+    executor waits by it, and the scanner counts an episode's moments by it.
     """
-    return max(0.0, config.LIVE_IN_PLAY_HOLD_SECONDS - seconds_between(since, now))
+    return max(0.0, config.LIVE_HOLD_SECONDS - seconds_between(since, now))
+
+
+def changed_at(book):
+    """
+    When the venue last changed a book, in seconds since 1970 by its own
+    clock, or by ours when the book reached us when the venue gave no time,
+    as for the first book on a connection. Executor.confirm_wait() compares
+    the two legs' books by it.
+    """
+    return book.at if book.at is not None else epoch(book.ts)

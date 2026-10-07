@@ -16,9 +16,12 @@ a price that just moved on one venue can sit next to the other's old one,
 an edge that is gone by the time an order arrives. A leg on a venue in
 config.CONFIRM_SECONDS must have a book newer, by the venues' own clocks,
 than the other leg's last change, or wait until that change is old enough
-that any reaction to it would have reached us. The scanner offers the edge
-again at the next change, or as soon as the wait ends, through recheck,
-so one that is real is taken then. Once it is taken, both legs' orders go
+that any reaction to it would have reached us. Live counts from the other
+leg's change as of when the edge reached its least edge, from 2026-10-07,
+so a change since that leaves the edge there does not start the wait
+again, see opened(). The scanner offers the edge again at the next
+change, or as soon as the wait ends, through recheck, so one that is real
+is taken then. Once it is taken, both legs' orders go
 out at once, on a game not yet started, on a future on paper, and with
 both legs on one venue, see pricing.best_trade(). On a game under way,
 and on live's futures, see LiveExecutor.lead(), Polymarket US's goes
@@ -56,10 +59,11 @@ config.MIN_ANNUAL_PCT a year or more until then, and with run.py
 of which no return a year is asked, see live.py and pays_enough(). Live's
 orders on a future sweep only the levels that return config.MIN_ANNUAL_PCT
 a year. On a game under way live takes an edge of
-config.LIVE_IN_PLAY_MIN_EDGE or more once it has lasted
-config.LIVE_IN_PLAY_HOLD_SECONDS, as the scanner's episode times it, the
-scanner offering it again then, through recheck, and at most
-config.LIVE_IN_PLAY_CONTRACTS a trade, see min_edge(), hold(), and most().
+config.LIVE_IN_PLAY_MIN_EDGE or more, and at most
+config.LIVE_IN_PLAY_CONTRACTS a trade. Either only once the edge has
+stayed at that least edge or more for config.LIVE_HOLD_SECONDS, as the
+scanner's episode times it, the scanner offering it again then, through
+recheck, see min_edge(), hold(), and most().
 Paper trades an edge of config.MIN_EDGE or more on games before and while
 they are played, paying within config.MAX_PAYOUT_HOURS, when first seen,
 see paper.py. The legs are on two venues, or on a future two contracts of
@@ -84,7 +88,7 @@ from common.venues import is_maintenance
 from db import database
 from db.models import Ledger, Leg, Trade
 from engine.helper import config, game
-from engine.helper.pricing import annual_pct, depth, fresh, ladder, reach, sell_ladder, sweep, trade_words
+from engine.helper.pricing import annual_pct, changed_at, depth, fresh, ladder, reach, sell_ladder, sweep, trade_words
 
 
 def shard(leg):
@@ -147,7 +151,8 @@ class Executor:
         self.waiting = set()        # Pairs whose edge waited for a book to catch up since the last summary, see confirm_wait().
         self.held = set()           # Pairs whose edge was held until it had lasted since the last summary, see hold().
         self.recheck = None         # Called with (pair id, seconds) when an edge waits, to price the pair again once the wait ends.
-        self.edge_since = None      # Called with a pair id, returns when its edge at config.MIN_EDGE or more began, see Scanner.edge_since().
+        self.edge_since = None      # Called with a pair id, returns when its edge at live's least or more began, see Scanner.edge_since().
+        self.edge_books = None      # Called with a pair id, returns when each member's book had changed then, see Scanner.edge_books().
         self.retrying = None        # The task flattening exposed trades while one runs.
         self.totals = {"trades": 0, "profit": 0.0, "hedge": 0.0}
         self.reload_exposed()
@@ -496,28 +501,39 @@ class Executor:
     def hold(self, pair, yes, no, now):
         """
         How many seconds the pair's edge must still last before this executor trades it, 0 when it may now: paper takes
-        an edge the moment it is seen, live waits on a game under way, see LiveExecutor.hold().
+        an edge the moment it is seen, live waits, see LiveExecutor.hold().
         """
         return 0.0
 
-    def confirm_wait(self, yes, no, now):
+    def opened(self, pair):
+        """
+        When each member's book of the pair had last changed as the edge
+        began, by (venue, contract id), for confirm_wait() to count from in
+        place of the other leg's last change: nothing for paper, which counts
+        from that, and live's, see LiveExecutor.opened().
+        """
+        return {}
+
+    def confirm_wait(self, pair, yes, no, now):
         """
         How many seconds until each leg's book is current enough to trade on,
         0 when it is now, or None when a leg has no book. A leg on a venue in
         config.CONFIRM_SECONDS needs a book newer, by the venues' own clocks,
         than the other leg's last change, or else that change must be at
-        least that many seconds old. A book the venue gave no time for counts
-        from when it reached us.
+        least that many seconds old. The other leg's change is the one
+        opened() gives, when it gives one, so a later change does not count.
+        A book the venue gave no time for counts from when it reached us.
         """
         times = []
         for member in (yes, no):
             book = self.book((member["venue"], member["contract_id"]))
             if book is None:
                 return None
-            times.append(book.at if book.at is not None else epoch(book.ts))
-        (yes_at, no_at), clock = times, epoch(now)
+            times.append(changed_at(book))
+        (yes_at, no_at), clock, opened = times, epoch(now), self.opened(pair)
         wait = 0.0
-        for member, own, other in ((yes, yes_at, no_at), (no, no_at, yes_at)):
+        for member, own, other_member, other in ((yes, yes_at, no, no_at), (no, no_at, yes, yes_at)):
+            other = opened.get((other_member["venue"], other_member["contract_id"]), other)
             if own < other:
                 wait = max(wait, other + config.CONFIRM_SECONDS.get(member["venue"], 0) - clock)
         return wait
@@ -589,7 +605,7 @@ class Executor:
         hold = self.hold(pair, yes, no, now)
         if hold > 0:
             return self.put_off(pair["id"], hold, self.held)
-        wait = self.confirm_wait(yes, no, now)
+        wait = self.confirm_wait(pair, yes, no, now)
         if wait is None or wait > 0:
             return self.put_off(pair["id"], wait, self.waiting)
         legs = [Leg(side, m["venue"], m["contract_id"], m["polarity"], fee_info=fee_infos[(m["venue"], m["contract_id"])])
