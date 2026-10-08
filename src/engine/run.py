@@ -41,9 +41,9 @@ venues, trading/ makes the trades, and money/ keeps the cash.
   and counts a leg's wait for its book to catch up from the other's change
   as the edge began, through Scanner.edge_books(). A future's edge lasting
   past a trade that matched is offered again, through
-  Scanner.offer_again(). When paper runs too it
-  trades the same games, given back what our live orders took from the
-  books, see trading/footprints.py.
+  Scanner.offer_again(). When paper runs too it trades the same games,
+  given back what our live orders took from the books, see
+  trading/footprints.py.
   - Paper: trading/paper.py fills against the same books with the paper
     money of money/paper.py.
   - Live: trading/live.py sends real orders with the money the venues

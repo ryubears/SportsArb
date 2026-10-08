@@ -96,7 +96,7 @@ from common.venues import is_maintenance
 from db import database
 from db.models import Ledger, Leg, Trade
 from engine.helper import config, game
-from engine.helper.pricing import annual_pct, changed_at, depth, fresh, ladder, reach, sell_ladder, sweep, trade_words
+from engine.helper.pricing import annual_pct, changed_at, depth, fresh, in_steps, ladder, reach, sell_ladder, sweep, trade_words
 
 
 def shard(leg):
@@ -611,7 +611,26 @@ class Executor:
             per_contract[(leg.venue, shard(leg))] = per_contract.get((leg.venue, shard(leg)), 0.0) + leg.limit
         affordable = min(self.cash.spendable(venue, part) / cost for (venue, part), cost in per_contract.items())
         quantity = min(available * config.FILL_SHARE, affordable, math.inf if most is None else most)
-        return order_size(math.floor(quantity / self.step + 1e-9) * self.step)
+        return order_size(in_steps(quantity, self.step))
+
+    def again(self, trade, done):
+        """
+        Once a future's trade is done, its task done, have the scanner offer
+        its episode again, see Scanner.offer_again(), when it matched
+        something and left nothing to flatten, so an edge lasting past the
+        trade is traded again, once it has lasted as live waits for any edge
+        to, counted from now. From 2026-10-08, at the user's asking: of 134
+        live futures trades from 2026-10-05, most edges ended with the
+        trade, but 24 lasted a minute or more past it. A trade that matched
+        nothing, its quote likely gone, or that left a leg to flatten ends
+        the executor's trading of the episode, as every trade did before,
+        and so does every trade on a game, whose edges last a fraction of a
+        second and whose larger orders mostly fail.
+        """
+        if self.offer_again is None or done.cancelled() or done.exception() is not None:
+            return
+        if trade.matched > 0 and trade.id not in self.exposed and trade.id not in self.set_aside:
+            self.offer_again(trade.pair_id, trade.signal_ts, self.clock())
 
     def signal(self, pair, yes, no, edge, size, fee_infos, now):
         """
@@ -666,25 +685,6 @@ class Executor:
         if pair.get("game_date") is None:
             task.add_done_callback(lambda done: self.again(trade, done))
         return True
-
-    def again(self, trade, done):
-        """
-        Once a future's trade is done, its task done, have the scanner offer
-        its episode again, see Scanner.offer_again(), when it matched
-        something and left nothing to flatten, so an edge lasting past the
-        trade is traded again, once it has lasted as live waits for any edge
-        to, counted from now. From 2026-10-08, at the user's asking: of 134
-        live futures trades from 2026-10-05, most edges ended with the
-        trade, but 24 lasted a minute or more past it. A trade that matched
-        nothing, its quote likely gone, or that left a leg to flatten ends
-        the executor's trading of the episode, as every trade did before,
-        and so does every trade on a game, whose edges last a fraction of a
-        second and whose larger orders mostly fail.
-        """
-        if self.offer_again is None or done.cancelled() or done.exception() is not None:
-            return
-        if trade.matched > 0 and trade.id not in self.exposed and trade.id not in self.set_aside:
-            self.offer_again(trade.pair_id, trade.signal_ts, self.clock())
 
     def tick(self, now):
         """

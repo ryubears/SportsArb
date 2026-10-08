@@ -38,7 +38,7 @@ WS_URL = "wss://external-api-ws.kalshi.com/trade-api/ws/v2"
 WS_PATH = "/trade-api/ws/v2"
 KEY_ID_FILE = DATA_DIR / "kalshi_key_id.txt"
 PRIVATE_KEY_FILE = DATA_DIR / "kalshi_private_key.pem"
-RESULTS_BATCH = 50   # Tickers per markets call when looking up results.
+MARKETS_BATCH = 50   # Tickers per markets call, looking up results or whether markets trade, see markets().
 SERIES_SECONDS = 600    # How long the list of every series is kept, so one catalog refresh of many sports reads it once.
 # The error of an order whose market's exchange shard lacks the cash, which Kalshi moving cash between shards may cause
 # between two of our readings. Nothing traded, so it counts as unfilled rather than refused.
@@ -208,23 +208,27 @@ def contracts(sport, tickers, patterns=()):
     return result
 
 
+def markets(tickers):
+    """
+    The markets of the tickers, sorted and each once, as the markets call
+    gives them. The call takes a list of tickers, so this costs one call per
+    MARKETS_BATCH tickers. A ticker the call does not return is left out.
+    """
+    tickers = sorted(set(tickers))
+    for i in range(0, len(tickers), MARKETS_BATCH):
+        batch = tickers[i:i + MARKETS_BATCH]
+        yield from get_json(f"{BASE}/markets", {"tickers": ",".join(batch), "limit": len(batch)}).get("markets", [])
+        if i + MARKETS_BATCH < len(tickers):
+            time.sleep(SLEEP)
+
+
 def results(tickers):
     """
-    Settlement results for the tickers, as {ticker: (result, settled_at)} with
-    result 'yes' or 'no'. Markets not yet finalized are left out. The
-    markets endpoint takes a list of tickers, so this costs one call per
-    RESULTS_BATCH tickers.
+    Settlement results for the tickers, as {ticker: (result, settled_at)} with result 'yes' or 'no', see markets().
+    Markets not yet finalized are left out.
     """
-    out = {}
-    tickers = sorted(set(tickers))
-    for i in range(0, len(tickers), RESULTS_BATCH):
-        batch = tickers[i:i + RESULTS_BATCH]
-        for m in get_json(f"{BASE}/markets", {"tickers": ",".join(batch), "limit": len(batch)}).get("markets", []):
-            if m.get("status") == "finalized" and m.get("result") in ("yes", "no"):
-                out[m["ticker"]] = (m["result"], iso(m.get("settlement_ts")))
-        if i + RESULTS_BATCH < len(tickers):
-            time.sleep(SLEEP)
-    return out
+    return {m["ticker"]: (m["result"], iso(m.get("settlement_ts"))) for m in markets(tickers)
+            if m.get("status") == "finalized" and m.get("result") in ("yes", "no")}
 
 
 def not_trading(status):
@@ -236,18 +240,9 @@ def not_trading(status):
 
 def market_states(tickers):
     """
-    Why each market is not trading, None for one that trades, as {ticker: why}, read from the markets call RESULTS_BATCH
-    tickers at a time. A ticker the call does not return is left out.
+    Why each market is not trading, None for one that trades, as {ticker: why}, see markets().
     """
-    out = {}
-    tickers = sorted(set(tickers))
-    for i in range(0, len(tickers), RESULTS_BATCH):
-        batch = tickers[i:i + RESULTS_BATCH]
-        for m in get_json(f"{BASE}/markets", {"tickers": ",".join(batch), "limit": len(batch)}).get("markets", []):
-            out[m["ticker"]] = not_trading(m.get("status"))
-        if i + RESULTS_BATCH < len(tickers):
-            time.sleep(SLEEP)
-    return out
+    return {m["ticker"]: not_trading(m.get("status")) for m in markets(tickers)}
 
 
 def exchange_trading():
@@ -364,16 +359,6 @@ class KalshiBookStream(BookStream):
         self.message_id = 3
         self.rechecking = None              # The read of the markets said not to trade, while it runs.
 
-    def connect(self):
-        return self.open_connection(WS_URL, signed_headers("GET", WS_PATH))
-
-    async def subscribe(self, ws):
-        await ws.send(json.dumps({"id": 1, "cmd": "subscribe",
-                                  "params": {"channels": ["orderbook_delta"], "market_tickers": sorted(self.wanted), "use_yes_price": True}}))
-        await ws.send(json.dumps({"id": 2, "cmd": "subscribe", "params": {"channels": [LIFECYCLE]}}))
-        if any(why != "decided" for why in self.states.values()):
-            self.rechecking = asyncio.create_task(self.recheck())
-
     async def recheck(self):
         """
         Read from the markets call whether the markets said not to trade,
@@ -390,6 +375,16 @@ class KalshiBookStream(BookStream):
         for ticker, why in states.items():
             if ticker in self.states:
                 self.set_state(ticker, why)
+
+    def connect(self):
+        return self.open_connection(WS_URL, signed_headers("GET", WS_PATH))
+
+    async def subscribe(self, ws):
+        await ws.send(json.dumps({"id": 1, "cmd": "subscribe",
+                                  "params": {"channels": ["orderbook_delta"], "market_tickers": sorted(self.wanted), "use_yes_price": True}}))
+        await ws.send(json.dumps({"id": 2, "cmd": "subscribe", "params": {"channels": [LIFECYCLE]}}))
+        if any(why != "decided" for why in self.states.values()):
+            self.rechecking = asyncio.create_task(self.recheck())
 
     def lifecycle(self, body):
         """

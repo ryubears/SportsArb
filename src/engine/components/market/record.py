@@ -90,6 +90,12 @@ class Recorder:
         self.behind = {venue: [] for venue in VENUES}      # Seconds each book reached us after the venue's time for it, since the last status.
         self.ours = {venue: [] for venue in VENUES}        # The part of that from the feed receiving the book to this process having it.
 
+    def halted(self, key):
+        """
+        Why a contract's market is not trading, as its venue says or a refused order showed, or None while it trades.
+        """
+        return self.states.get(key) or ("refused an order" if key in self.refused else None)
+
     def on_book(self, venue, contract_id, bids, asks, ts=None, books=1, sent=None):
         """
         Remember the newest book for a contract, which arrived at ts, now
@@ -114,12 +120,6 @@ class Recorder:
             self.scanner.on_book(venue, contract_id, self.books, book.ts)
 
     # MARKETS NOT TRADING
-
-    def halted(self, key):
-        """
-        Why a contract's market is not trading, as its venue says or a refused order showed, or None while it trades.
-        """
-        return self.states.get(key) or ("refused an order" if key in self.refused else None)
 
     def rebook(self, key):
         """

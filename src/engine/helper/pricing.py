@@ -9,6 +9,7 @@ fee of the venue, from fees.py. Shared by the scanner, which looks for a
 positive net edge, and the executor, which fills against the same ladders.
 """
 
+import math
 from typing import NamedTuple
 from common.timeutil import epoch, seconds_between
 from common.venues import SHORT_NAMES
@@ -87,6 +88,14 @@ def book_sizes(book):
     return {(side, round(price, 4)): size for side in ("bids", "asks") for price, size in getattr(book, side)}
 
 
+def in_steps(contracts, step):
+    """
+    The contracts cut down to whole steps, to the hundredth, give or take float residue: 6.42 is 6 in steps of 1 and
+    6.4 in steps of 0.1.
+    """
+    return round(math.floor(contracts / step + 1e-9) * step, 2)
+
+
 def takes(levels, quantity, share=1.0, limit=None, step=1, selling=False):
     """
     The contracts an order for quantity takes from each level of one ladder,
@@ -99,7 +108,7 @@ def takes(levels, quantity, share=1.0, limit=None, step=1, selling=False):
     for price, size in levels:
         if limit is not None and (price < limit - 1e-9 if selling else price > limit + 1e-9):
             break
-        take = round(int(min(remaining, size * share) / step + 1e-9) * step, 2)
+        take = in_steps(min(remaining, size * share), step)
         if take < step:
             continue
         yield price, take

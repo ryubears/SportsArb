@@ -615,13 +615,13 @@ matched something and left nothing to flatten gives the episode back once
 it is done (`Executor.again`, `Scanner.offer_again`), so an edge that
 lasts past the trade is traded again; one that matched nothing, its quote
 likely gone, ends it as before. The live executor is offered it first.
-The edge coming back after it has gone is a new episode. An episode also keeps its longest
-stretch at `MIN_EDGE` or more, and the contracts that stayed fillable
-through all of it, which is what an order sent any time in the stretch
-could have had. From 2026-10-05 it keeps too what one order could have had
-as live takes it: the contracts on the levels at live's least edge or
-more, `pricing.live_min_edge()`, 2 cents on a game under way and 100% a
-year on a future, counted only once the edge has lasted
+The edge coming back after it has gone is a new episode. An episode also
+keeps its longest stretch at `MIN_EDGE` or more, and the contracts that
+stayed fillable through all of it, which is what an order sent any time in
+the stretch could have had. From 2026-10-05 it keeps too what one order
+could have had as live takes it: the contracts on the levels at live's
+least edge or more, `pricing.live_min_edge()`, 2 cents on a game under way
+and 100% a year on a future, counted only once the edge has lasted
 `LIVE_HOLD_SECONDS` there, a game's from 2026-10-06 and a future's from
 2026-10-07, and what they lock in, and whether that moment came with a
 change of the Polymarket US leg's book (`pm_changed`), the only moment live
@@ -631,23 +631,23 @@ It is the best of the moments at the peak's edge, and of every moment while
 none of those had offered `LIVE_MIN_CONTRACTS`, the fewest live opens a
 trade with, a tenth of a contract, a whole one until 2026-10-07
 (`Scanner.weigh_take`): a peak's first moment can offer a sliver of a
-contract, and live trades a moment later at the same edge or a little
-less. Until
-2026-10-06 only the peak's first moment counted, and 21 of the 55 live
-futures trades that evening came from episodes kept with under a contract,
-one of them filling 30. A book goes stale after a minute only once its game
-may have started: a future's markets, and a game's before kickoff, can rest
-unchanged for hours while they are open, so their books are priced however
-old they are. So a future's member past its close time is left out
-(`game.past_close`), since its market has stopped or its bet is expected
-to be decided, while a game's is not: Kalshi gives a game's contract the
-time it expects the game to end, which many outlast, and its markets say
-themselves when they close. From 2026-10-08 a member is left out too while
-its venue is in its weekly maintenance (`venues.is_maintenance`), when its
-book may freeze, or go on changing, though no order can trade at it, so
-an episode open as the window begins ends then and none opens on the pair
-until it is over. Live has not traded in the windows since October 1
-(`Executor.trading`); the scanner had gone on keeping episodes there.
+contract, and live trades a moment later at the same edge or a little less.
+Until 2026-10-06 only the peak's first moment counted, and 21 of the 55
+live futures trades that evening came from episodes kept with under a
+contract, one of them filling 30. A book goes stale after a minute only
+once its game may have started: a future's markets, and a game's before
+kickoff, can rest unchanged for hours while they are open, so their books
+are priced however old they are. So a future's member past its close time
+is left out (`game.past_close`), since its market has stopped or its bet is
+expected to be decided, while a game's is not: Kalshi gives a game's
+contract the time it expects the game to end, which many outlast, and its
+markets say themselves when they close. From 2026-10-08 a member is left
+out too while its venue is in its weekly maintenance
+(`venues.is_maintenance`), when its book may freeze, or go on changing,
+though no order can trade at it, so an episode open as the window begins
+ends then and none opens on the pair until it is over. Live has not traded
+in the windows since October 1 (`Executor.trading`); the scanner had gone
+on keeping episodes there.
 
 **trading/** trades the signal. **executor.py** holds what paper and live
 share, which is everything but how an order is filled. Live trades the
@@ -735,13 +735,13 @@ the hundredth, 6.42 of 7 for one, and live trading counts it so: the other
 leg's 0.58 over is sold back like any excess, in an order for 0.58 of a
 contract. A Kalshi order sent after Polymarket US's, below, asks for what
 that filled, to the hundredth. Paper trading keeps to whole contracts, as
-its fills are worked out from the books (`Executor.step`). Every `LIVE_POSITION_SECONDS`, 5 minutes, the
-live executor reads each venue's positions and compares them with what
-the open live trades hold of each contract (`check_positions`). A
-difference of a hundredth or more means the records are wrong, so it is
-logged once and left to a human, see `tools/repair_fills.py`. Nothing is
-compared while a trade or a flatten is in flight, or when an order went
-out while the positions were read.
+its fills are worked out from the books (`Executor.step`). Every
+`LIVE_POSITION_SECONDS`, 5 minutes, the live executor reads each venue's
+positions and compares them with what the open live trades hold of each
+contract (`check_positions`). A difference of a hundredth or more means the
+records are wrong, so it is logged once and left to a human, see
+`tools/repair_fills.py`. Nothing is compared while a trade or a flatten is
+in flight, or when an order went out while the positions were read.
 
 A leg on Polymarket US trades only on a current book. That venue's books
 reached us about 85 ms after it changed them at the median, 160 at the 90th
@@ -869,17 +869,15 @@ at a tenth of a second, and one Kalshi's opened at 0.3. A future's edge
 waits the same from 2026-10-07, at the rate a year rather than two cents,
 taken at once until then, and from 2026-10-08 a future's edge offered
 again after a trade waits as long again from when the trade was done. A
-trade asks
-for no more than 50 contracts (`LIVE_IN_PLAY_CONTRACTS`), 10 until
-2026-10-08, its limits going
-no deeper than the levels that hold them, and a whole one or more, with no
-limit on how many such trades. Each trade says whether its game was under
-way at the signal (the trades table's `in_play`, null before 2026-10-05).
-Lasting does not make an edge real: the two Bitcoin window episodes of
-2026-10-05 that showed $5,304 stayed at two cents or more for one and two
-minutes, likely a book left standing on a market no longer trading; when
-that book is Polymarket US's, its order going first fills nothing and no
-Kalshi order is sent.
+trade asks for no more than 50 contracts (`LIVE_IN_PLAY_CONTRACTS`), 10
+until 2026-10-08, its limits going no deeper than the levels that hold
+them, and a tenth of one or more, with no limit on how many such trades.
+Each trade says whether its game was under way at the signal (the trades
+table's `in_play`, null before 2026-10-05). Lasting does not make an edge
+real: the two Bitcoin window episodes of 2026-10-05 that showed $5,304
+stayed at two cents or more for one and two minutes, likely a book left
+standing on a market no longer trading; when that book is Polymarket US's,
+its order going first fills nothing and no Kalshi order is sent.
 
 From 2026-10-05 to 10-06 the rules were others: five cents at once, but
 only on the signal a change of the Polymarket US leg's book brought, not
@@ -973,12 +971,12 @@ the futures under a heading of its own, then everything on the games in
 play, or one of them with `--market futures` or `--market in-play`. Each
 market starts with its opportunities as live takes them: an episode
 counts when one order could have had `LIVE_MIN_CONTRACTS` or more, a
-tenth of a contract, on the levels at live's least edge or more, the levels returning `MIN_ANNUAL_PCT`
-a year on a future paying `MIN_PAYOUT_HOURS` or more out, and those at
-`LIVE_IN_PLAY_MIN_EDGE` or more on a game, match, race, or window under
-way paying within `MAX_PAYOUT_HOURS`, once the edge has lasted
-`LIVE_HOLD_SECONDS` there, as live waits for it to, a future's from
-2026-10-07, the moment being the scanner's (`Scanner.weigh_take`).
+tenth of a contract, on the levels at live's least edge or more, the levels
+returning `MIN_ANNUAL_PCT` a year on a future paying `MIN_PAYOUT_HOURS` or
+more out, and those at `LIVE_IN_PLAY_MIN_EDGE` or more on a game, match,
+race, or window under way paying within `MAX_PAYOUT_HOURS`, once the edge
+has lasted `LIVE_HOLD_SECONDS` there, as live waits for it to, a future's
+from 2026-10-07, the moment being the scanner's (`Scanner.weigh_take`).
 Lasting does not make an edge real: two episodes of one Bitcoin window on
 2026-10-05 showed $5,304 to be locked in at 18.7 and 51.8 cents for one
 and two minutes, though both venues settle it on the same index. It shows

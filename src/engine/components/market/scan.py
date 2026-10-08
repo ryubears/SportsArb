@@ -24,12 +24,11 @@ moments at the peak's edge, and of every moment while none of those had
 offered config.LIVE_MIN_CONTRACTS, the fewest live opens a trade with, a
 whole contract until 2026-10-07: a peak's first moment can offer less,
 where live trades a moment later at the same edge or a little less. Until
-2026-10-06 only the peak's first moment counted, and 21 of 55 live
-futures trades that evening came from episodes
-kept with under a contract. Only the moments once the edge has stayed at
-live's least edge or more for config.LIVE_HOLD_SECONDS count, since live
-trades it only then: on a game under way from 2026-10-06, on a future from
-2026-10-07.
+2026-10-06 only the peak's first moment counted, and 21 of 55 live futures
+trades that evening came from episodes kept with under a contract. Only
+the moments once the edge has stayed at live's least edge or more for
+config.LIVE_HOLD_SECONDS count, since live trades it only then: on a game
+under way from 2026-10-06, on a future from 2026-10-07.
 
 The episode also follows that stretch at live's least edge, see
 edge_since(), and keeps when each member's book had last changed as it
@@ -68,6 +67,14 @@ from engine.helper.pricing import (Priced, annual_pct, best_trade, changed_at, f
                                    polymarket_us_just_changed, return_pct, trade_words)
 
 RECHECK_MARGIN = 0.005      # Seconds past a wait's end that a recheck prices the pair, so the wait is surely over by our clock.
+
+
+def opens_live(size):
+    """
+    Whether size contracts are enough for live to open a trade with, config.LIVE_MIN_CONTRACTS or more, give or take
+    float residue.
+    """
+    return size >= config.LIVE_MIN_CONTRACTS - 1e-9
 
 
 @dataclass
@@ -180,13 +187,12 @@ class Scanner:
     is older than config.MAX_BOOK_AGE or missing from the map, which is how the
     recorder says a venue's books went unseen, and while its venue is in its
     weekly maintenance, as is_maintenance, (venue, ISO 8601 UTC), says, see
-    common/venues.py. Pairs and fee schedules come
-    from the database and are reloaded after each catalog refresh. Every
-    finished episode is stored at once, and the big ones are logged. Each
-    of on_signals, one per executor, is offered every moment of an episode
-    until it takes a trade, and then not again, see trading/executor.py,
-    unless its executor gives the episode back once a future's trade on it
-    is done, see offer_again().
+    common/venues.py. Pairs and fee schedules come from the database and are
+    reloaded after each catalog refresh. Every finished episode is stored at
+    once, and the big ones are logged. Each of on_signals, one per executor,
+    is offered every moment of an episode until it takes a trade, and then
+    not again, see trading/executor.py, unless its executor gives the episode
+    back once a future's trade on it is done, see offer_again().
     """
 
     def __init__(self, conn, sports, log=print, on_signals=(), books=None, is_maintenance=is_maintenance):
@@ -266,17 +272,16 @@ class Scanner:
         came with a change of the Polymarket US leg's book, which live traded
         a game under way on from 2026-10-05 to 10-06, see
         pricing.polymarket_us_just_changed(). The best has
-        config.LIVE_MIN_CONTRACTS or more, the fewest live opens a trade
-        with, then the most profit. A moment
-        counts only once the episode's edge has stayed at live's least edge
-        or more for config.LIVE_HOLD_SECONDS, as live waits for it to, see
-        pricing.live_hold().
+        config.LIVE_MIN_CONTRACTS or more, the fewest live opens a trade with,
+        then the most profit. A moment counts only once the episode's edge has
+        stayed at live's least edge or more for config.LIVE_HOLD_SECONDS, as
+        live waits for it to, see pricing.live_hold().
         """
         if episode.live_since is None or live_hold(episode.live_since, now) > 0:
             return
         size, profit = fillable(priced.yes, priced.no, books, self.fee_infos, floor)
         pm_changed = polymarket_us_just_changed(priced.yes, priced.no, books, now)
-        rank = (size >= config.LIVE_MIN_CONTRACTS - 1e-9, profit)
+        rank = (opens_live(size), profit)
         if episode.take_rank is None or rank > episode.take_rank:
             episode.take, episode.pm_changed, episode.take_rank = (size, profit), pm_changed, rank
 
@@ -297,7 +302,7 @@ class Scanner:
             episode.see_live(priced.edge >= floor, books, now)
             # What one order could have had, worked out at the peak's edge, and at every moment until the fewest contracts
             # live opens a trade with were on offer, not on every pricing.
-            if priced.edge >= episode.peak.edge or episode.take[0] < config.LIVE_MIN_CONTRACTS - 1e-9:
+            if priced.edge >= episode.peak.edge or not opens_live(episode.take[0]):
                 self.weigh_take(episode, priced, books, floor, now)
             for i, on_signal in enumerate(self.on_signals):
                 if i not in episode.taken and on_signal(pair, priced.yes, priced.no, priced.edge, priced.size, self.fee_infos, now):
@@ -320,24 +325,6 @@ class Scanner:
         if episode.again_ts is not None and seconds_between(episode.live_since, episode.again_ts) > 0:
             return episode.again_ts
         return episode.live_since
-
-    def offer_again(self, desk, pair_id, signal_ts, now):
-        """
-        Offer the desk at position desk the pair's episode again: its
-        trade on it, signalled at signal_ts, is done at now, see
-        Executor.again(). An edge lasting past a future's trade is traded
-        again from 2026-10-08, at the user's asking, where before an
-        episode made one trade a desk. Nothing changes when the episode
-        has ended since, a later one being its own. The edge counts from
-        now for the desk's wait, see edge_since(), and the pair is priced
-        again once that is over, as no book may change to bring it.
-        """
-        episode = self.episodes.get(pair_id)
-        if episode is None or seconds_between(episode.start_ts, signal_ts) < 0:
-            return
-        episode.taken.discard(desk)
-        episode.again_ts = now
-        self.recheck(pair_id, config.LIVE_HOLD_SECONDS)
 
     def edge_books(self, pair_id):
         """
@@ -379,6 +366,24 @@ class Scanner:
                 return
             timer.cancel()
         self.rechecks[pair_id] = loop.call_at(due, self.reprice, pair_id)
+
+    def offer_again(self, desk, pair_id, signal_ts, now):
+        """
+        Offer the desk at position desk the pair's episode again: its
+        trade on it, signalled at signal_ts, is done at now, see
+        Executor.again(). An edge lasting past a future's trade is traded
+        again from 2026-10-08, at the user's asking, where before an
+        episode made one trade a desk. Nothing changes when the episode
+        has ended since, a later one being its own. The edge counts from
+        now for the desk's wait, see edge_since(), and the pair is priced
+        again once that is over, as no book may change to bring it.
+        """
+        episode = self.episodes.get(pair_id)
+        if episode is None or seconds_between(episode.start_ts, signal_ts) < 0:
+            return
+        episode.taken.discard(desk)
+        episode.again_ts = now
+        self.recheck(pair_id, config.LIVE_HOLD_SECONDS)
 
     def on_book(self, venue, contract_id, books, now):
         """
