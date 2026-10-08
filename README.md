@@ -27,7 +27,7 @@ and paper the bets on one event paying within a day, where faster traders
 may take the edges first, to see how they would do, its orders timed as
 live ones are. By default the orders are paper. With `--execute live` or
 `--execute both` it sends real ones, and with `--live-in-play` live trades
-the games under way too, an edge of two cents or more, at most 10
+the games under way too, an edge of two cents or more, at most 50
 contracts a trade. Polymarket US's order goes first, and live takes an
 edge, a game's or a future's, once it has lasted a tenth of a second.
 From October 4 to 5 the service on the instance
@@ -858,7 +858,8 @@ until 2026-10-07 it did. So an edge Polymarket US's change opened is taken
 at a tenth of a second, and one Kalshi's opened at 0.3. A future's edge
 waits the same from 2026-10-07, at the rate a year rather than two cents,
 taken at once until then. A trade asks
-for no more than 10 contracts (`LIVE_IN_PLAY_CONTRACTS`), its limits going
+for no more than 50 contracts (`LIVE_IN_PLAY_CONTRACTS`), 10 until
+2026-10-08, its limits going
 no deeper than the levels that hold them, and a whole one or more, with no
 limit on how many such trades. Each trade says whether its game was under
 way at the signal (the trades table's `in_play`, null before 2026-10-05).
@@ -1413,6 +1414,28 @@ so the delay is mostly MLB's own. A feed would have to beat the venues'
 own official data, Sportradar's and Genius's, by under half a second, so
 the idea was dropped and the probe removed. Its code is in the history
 from commit 147f2a3.
+
+**Fifty contracts in play.** From 2026-10-06 18:51 UTC, when a trade on a
+game under way could ask for 10 contracts, to 02:30 on October 8, live
+took 637 such trades. Those asking under a contract, 554 of them, filled
+429, Polymarket US filling 77% of what they asked; those asking 1 to 9.99
+filled 2 of 37, and those at the 10, 4 of 46, Polymarket US filling 16%
+and 11%. Larger edges filled less too: Polymarket US's leg filled at all
+on 84% of edges under three cents and 29% of those of ten or more. A
+large book on a game in play is mostly gone by the time an order lands,
+80 ms, though the book was under a tenth of a second old when it went:
+the 42 capped trades that failed had 132 contracts on offer at the median
+by the scanner, and none filled. And when Polymarket US did fill a larger
+one, Kalshi often had moved too, missing 7 of the 10 between 1 and 9.99,
+whose Polymarket US legs were then sold back. The 4 capped trades that
+filled, all a long shot bought on one venue and its near-certain other
+side on the other, had 330 contracts on offer for the 40 taken, 10.54$
+against the 1.33$ locked in, at the best moment of each episode, which
+may not have been the order's. On the user's asking the cap became 50
+from October 8. The cash on a trade's venues still sizes it, and Kalshi's
+baseball, basketball, and tennis shard keeps a tenth of its cash, about
+31$ that day, so a baseball trade buying its near-certain side on Kalshi
+stops short of 50.
 
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.

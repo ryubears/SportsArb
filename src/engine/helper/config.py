@@ -85,8 +85,9 @@ LIVE_HOLD_SECONDS = 0.1        # How long an edge must have stayed at live's lea
                                 # after that change, unless a newer Polymarket US book still shows it. From 2026-10-05 to 10-06
                                 # live took a game's edge only on the signal a change of the Polymarket US leg's book brought,
                                 # which in seven hours let one episode through.
-LIVE_IN_PLAY_CONTRACTS = 10     # The most contracts a live trade on a game under way asks for: 5 from 2026-10-05, for 200 trades, and
-                                # 10 from 2026-10-06, for as many as come, at the user's asking.
+LIVE_IN_PLAY_CONTRACTS = 50     # The most contracts a live trade on a game under way asks for: 5 from 2026-10-05, for 200 trades,
+                                # 10 from 2026-10-06, for as many as come, and 50 from 2026-10-08, at the user's asking. At 10, the 4
+                                # of 46 capped trades that filled had 330 contracts on offer at two cents, by the scanner, for 40 taken.
 LIVE_MIN_CONTRACTS = 0.1        # The fewest contracts a live trade opens with, on a future or a game, in hundredths above it, which both
                                 # venues take orders and fill in. One whole contract until 2026-10-07, when the user asked for a tenth:
                                 # from 2026-10-05 to 10-07 the episodes offering under a contract at live's least edge would have added
