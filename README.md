@@ -155,7 +155,8 @@ Follow one Kalshi order book change from the wire to a trade.
    scanner finds the cheapest way to hold yes and the cheapest way to
    hold no across the pair's members, on two different venues, or on a
    future two contracts of one venue with the same rules. Then it works
-   out the edge of buying both.
+   out the edge of buying both. A member whose venue is in its weekly
+   maintenance is left out (`venues.is_maintenance`).
 6. **Follow the episode**. A positive edge opens an `Episode` or extends
    it and keeps its peak. When the edge ends, the episode is stored as an
    Opportunity. While it lasts, each desk's executor is offered it, until
@@ -242,7 +243,7 @@ The status line counts the markets not trading, by venue and why.
 `Session.tick` runs once a second:
 
 - the scanner prices every open episode again, so episodes whose books go
-  stale end;
+  stale, or whose venue begins its weekly maintenance, end;
 - the recorder lets a market that turned a live order away as not trading
   be traded again once `CLOSED_MARKET_SECONDS`, ten minutes, have passed;
 - every 30 seconds the exchange status reads whether Kalshi trades, shard
@@ -637,7 +638,12 @@ old they are. So a future's member past its close time is left out
 (`game.past_close`), since its market has stopped or its bet is expected
 to be decided, while a game's is not: Kalshi gives a game's contract the
 time it expects the game to end, which many outlast, and its markets say
-themselves when they close.
+themselves when they close. From 2026-10-08 a member is left out too while
+its venue is in its weekly maintenance (`venues.is_maintenance`), when its
+book may freeze, or go on changing, though no order can trade at it, so
+an episode open as the window begins ends then and none opens on the pair
+until it is over. Live has not traded in the windows since October 1
+(`Executor.trading`); the scanner had gone on keeping episodes there.
 
 **trading/** trades the signal. **executor.py** holds what paper and live
 share, which is everything but how an order is filled. Live trades the
@@ -985,7 +991,9 @@ left out the very episodes live traded, since its own fill empties the
 levels it takes: of the two futures it traded in the hour after the 15:14
 UTC restart, one stretch kept 0.29 contracts and the other 0.01. Episodes
 from before the scanner kept what one order could have had, and ones still
-open, which are stored only once they end, are left out. The market then
+open, which are stored only once they end, are left out, and so are those
+whose peak came while a leg's venue was in its weekly maintenance, which
+the scanner kept until 2026-10-08. The market then
 shows, for paper and then live, or one of them with `--mode paper` or
 `--mode live`, the trades by outcome, filled, partial, then failed, and by
 sport and kind in the window, the five holding the most capital, the legs
@@ -1436,6 +1444,16 @@ from October 8. The cash on a trade's venues still sizes it, and Kalshi's
 baseball, basketball, and tennis shard keeps a tenth of its cash, about
 31$ that day, so a baseball trade buying its near-certain side on Kalshi
 stops short of 50.
+
+**Maintenance episodes.** From 07:00 UTC on October 8, in Kalshi's
+Thursday maintenance, its books froze while a tennis match, Bartunkova
+against Muchova, went on moving on Polymarket US, and the scanner kept
+episodes on its match and first set winners at 26 to 51 cents on about
+3,800 contracts: the in-play opportunities showed 70 episodes worth
+7,630$, none of which any order could have reached. Live refused to trade
+then, as it does in either venue's window; from that day the scanner
+leaves a member out while its venue is in maintenance, and the summary
+leaves out the episodes kept in the windows before.
 
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.

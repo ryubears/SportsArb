@@ -52,6 +52,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))     # src, so the script runs from any folder.
 from common.stats import quantile
 from common.timeutil import at_seconds, days_between, epoch, now_iso, shift
+from common.venues import is_maintenance
 from db.database import DB_PATH, read_only
 from db.schema import table_columns
 from engine.helper import config
@@ -254,7 +255,12 @@ def print_market_opportunities(conn, since, hours, sports, market):
     have cost with fees, and profit what they lock in. The annual rates
     weight each episode by its capital, over the days until it pays. How
     long the edge stayed at config.MIN_EDGE or more is the longest unbroken
-    stretch of each episode, in seconds to the thousandth.
+    stretch of each episode, in seconds to the thousandth. An episode whose
+    peak came while a leg's venue was in its weekly maintenance, see
+    common/venues.py, is left out, as no order could trade it: the scanner
+    stopped keeping those on 2026-10-08, after Kalshi's books froze that
+    morning while a tennis match moved on Polymarket US, and 70 in-play
+    episodes showed 7,630$ to be locked in.
     """
     cents = f"{100 * config.MIN_EDGE:.0f}c"
     where, params = in_sports(sports)
@@ -265,10 +271,11 @@ def print_market_opportunities(conn, since, hours, sports, market):
         return
     rows = query_rows(conn, f"""
         SELECT p.sport, p.kind, p.label, trade, 100 * peak_edge, min_edge_seconds, take_size, take_size - take_profit,
-               take_profit, days_held
+               take_profit, days_held, peak_ts, yes_venue, no_venue
         FROM opportunities o JOIN pairs p ON p.id = o.pair_id
         WHERE start_ts >= ? AND take_size >= ? AND {rule}{in_market(market)}{where}
         ORDER BY take_profit DESC""", (since, config.LIVE_MIN_CONTRACTS - 1e-9) + rule_params + params)
+    rows = [r[:10] for r in rows if not any(is_maintenance(venue, r[10]) for venue in r[11:])]
     if not rows:
         print("  none")
         return

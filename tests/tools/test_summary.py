@@ -111,6 +111,18 @@ def test_in_play_opportunities_are_the_games_under_way_paying_within_a_day(tmp_p
     assert out.index("\nfutures opportunities") < out.index("\nin-play opportunities")
 
 
+def test_episodes_that_peaked_in_a_legs_venues_weekly_maintenance_are_left_out(tmp_path, monkeypatch, capsys):
+    # Thursday, October 1, 2026: Kalshi's maintenance from 07:00 to 09:00 UTC, Polymarket US's from 10:00 to 12:00.
+    def fill(conn):
+        database.insert_opportunities(conn, [
+            episode("2026-10-01T07:30:00+00:00", 0.2, 0.40, 900, live=1, pair_id=3, lasted=60),     # Kalshi's book froze.
+            episode("2026-10-01T09:30:00+00:00", 0.2, 0.08, 50, live=1, pair_id=3, lasted=1.5),     # Both trade.
+            episode("2026-10-01T10:30:00+00:00", 0.2, 0.30, 500, live=1, pair_id=3, lasted=30)])    # Polymarket US's.
+    out = report(tmp_path, monkeypatch, capsys, fill)
+    assert "  1 episodes could have taken 46$ in one order each and locked in 4.00$\n" in out
+    assert [r[3] for r in table(out, "in-play largest opportunities")] == ["1.500s"]
+
+
 def test_a_sport_filter_keeps_only_its_pairs_episodes_and_trades(tmp_path, monkeypatch, capsys):
     def fill(conn):
         database.insert_opportunities(conn, [episode("2026-09-27T13:00:00+00:00", 2, 0.06, 100),

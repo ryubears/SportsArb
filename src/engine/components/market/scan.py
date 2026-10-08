@@ -43,7 +43,11 @@ is the log of everything it saw. The summary script reads it. The
 pricing itself lives in pricing.py. A member whose market is not trading,
 as its venue says or an order it turned away showed, is left out, as a
 stale book is, and so is a future's member past its close time, so an
-edge on a market that cannot trade is never offered, from 2026-10-07.
+edge on a market that cannot trade is never offered, from 2026-10-07. So
+is a member whose venue is in its weekly maintenance, see
+common/venues.py, from 2026-10-08: its book may freeze, or go on
+changing, while no order can trade at it, so an episode open as the
+window begins ends then, and none opens on the pair until it is over.
 
 A desk that turns an edge down only to wait for a book to catch up, or
 for the edge to last, see edge_since(), asks for the pair again once the
@@ -55,6 +59,7 @@ import asyncio
 from collections import defaultdict
 from dataclasses import dataclass, field
 from common.timeutil import now_iso, seconds_between
+from common.venues import is_maintenance
 from db import database
 from db.models import Opportunity
 from engine.helper import config
@@ -171,19 +176,22 @@ class Scanner:
     books, keyed by (venue, contract_id). Only the pairs a contract belongs
     to are priced when its book changes. A member is left out while its book
     is older than config.MAX_BOOK_AGE or missing from the map, which is how the
-    recorder says a venue's books went unseen. Pairs and fee schedules come
+    recorder says a venue's books went unseen, and while its venue is in its
+    weekly maintenance, as is_maintenance, (venue, ISO 8601 UTC), says, see
+    common/venues.py. Pairs and fee schedules come
     from the database and are reloaded after each catalog refresh. Every
     finished episode is stored at once, and the big ones are logged. Each
     of on_signals, one per executor, is offered every moment of an episode
     until it takes a trade, and then not again, see trading/executor.py.
     """
 
-    def __init__(self, conn, sports, log=print, on_signals=(), books=None):
+    def __init__(self, conn, sports, log=print, on_signals=(), books=None, is_maintenance=is_maintenance):
         self.conn = conn
         self.sports = sports
         self.log = log
         self.on_signals = list(on_signals)  # Each is called with the trade to make until it takes one in the episode.
         self.books = books                  # Returns the recorder's books, for a recheck, which no book change brings.
+        self.is_maintenance = is_maintenance    # Whether a venue is in its weekly maintenance at a time, see common/venues.py.
         self.rechecks = {}                  # Pair id maps to the timer that prices it again once a desk's wait ends.
         self.episodes = {}                  # Pair id maps to its open Episode.
         self.finished = []                  # (kind, Opportunity) for episodes ended since the last summary.
@@ -225,12 +233,14 @@ class Scanner:
         The best trade across the pair's members whose books are fresh, as a Priced, or None. Books age only
         once their game may have started, see game.started(), and a halted one, whose market is not trading,
         counts as none, see pricing.fresh(). A future's member past its close time is left out, see
-        game.past_close(). A future's legs may be two contracts of one venue with the same rules, see
+        game.past_close(), and so is any member while its venue is in its weekly maintenance, see
+        common/venues.py. A future's legs may be two contracts of one venue with the same rules, see
         pricing.best_trade().
         """
         aging = started(pair["game_date"], pair["members"], now)
         members = [m for m in pair["members"]
-                   if fresh(books.get((m["venue"], m["contract_id"])), now, aging) and not past_close(pair["game_date"], m, now)]
+                   if fresh(books.get((m["venue"], m["contract_id"])), now, aging) and not past_close(pair["game_date"], m, now)
+                   and not self.is_maintenance(m["venue"], now)]
         if len(members) < 2:
             return None
         return best_trade(members, books, self.fee_infos, one_venue=pair["game_date"] is None)

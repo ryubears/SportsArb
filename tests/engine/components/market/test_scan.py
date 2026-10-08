@@ -330,6 +330,26 @@ def test_a_member_whose_market_is_not_trading_is_left_out_so_its_episode_ends(tm
     assert len(s.episodes) == 1
 
 
+def test_a_member_whose_venue_is_in_its_weekly_maintenance_is_left_out_so_no_episode_opens_or_goes_on(tmp_path):
+    # Thursday, October 8, 2026: Kalshi's maintenance is from 07:00 to 09:00 UTC, 3 to 5 AM Eastern, and Polymarket US's from
+    # 10:00 to 12:00. A book may go on showing an edge then that no order can trade at, as a tennis match's did that morning.
+    close = "2026-12-31T12:00:00+00:00"
+    conn = make_db(tmp_path, [member("kalshi", "k", close_time=close), member("polymarket_us", "pm", close_time=close)], future=True)
+    s = scan.Scanner(conn, ("nfl",), lambda m: None)
+    at = "2026-10-08T%s+00:00"
+    latest = {("kalshi", "k"): book("kalshi", "k", at % "06:59:00", 0.53, 0.54),
+              ("polymarket_us", "pm"): book("polymarket_us", "pm", at % "06:59:00", 0.44, 0.45)}     # 8 cents throughout.
+    for before, begins, during in (("06:59:00", "07:00:00", "07:30:00"), ("09:00:00", "10:00:00", "10:30:00")):
+        s.on_book("polymarket_us", "pm", latest, at % before)
+        assert len(s.episodes) == 1, before                 # Priced as ever outside the window.
+        s.tick(latest, at % begins)                         # The window begins: the episode ends.
+        assert s.episodes == {} and stored(conn)[-1].end_ts == at % begins
+        s.on_book("polymarket_us", "pm", latest, at % during)
+        assert s.episodes == {}, during                     # None opens during it.
+    s.on_book("polymarket_us", "pm", latest, at % "12:00:00")
+    assert len(s.episodes) == 1 and len(stored(conn)) == 2  # Both venues trade again.
+
+
 def test_episode_opens_peaks_and_closes_from_book_changes(tmp_path):
     conn = game_db(tmp_path)
     logs = []
@@ -440,7 +460,8 @@ def test_a_pair_a_desk_waits_on_is_priced_again_once_the_wait_ends(tmp_path):
     conn = make_db(tmp_path, [member("kalshi", "k", close_time=later), member("polymarket_us", "pm", close_time=later)], future=True)
     latest = {("kalshi", "k"): book("kalshi", "k", T0, 0.53, 0.54), ("polymarket_us", "pm"): book("polymarket_us", "pm", T0, 0.40, 0.41)}
     offered = []
-    s = scan.Scanner(conn, ("nfl",), lambda m: None, books=lambda: latest)
+    # Never in maintenance, as the clock's now may be a Thursday morning.
+    s = scan.Scanner(conn, ("nfl",), lambda m: None, books=lambda: latest, is_maintenance=lambda venue, now: False)
 
     def desk(pair, yes, no, edge, size, fee_infos, now):
         offered.append(now)
