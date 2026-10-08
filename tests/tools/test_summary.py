@@ -83,9 +83,10 @@ def test_only_episodes_within_the_rules_are_shown(tmp_path, monkeypatch, capsys)
             "paying 24h+ out), last 12 hours\n"
             "  5 episodes could have taken 291$ in one order each and locked in 10.67$\n") in out
     assert [r[:3] for r in table(out, "futures opportunities by kind")] == [["nfl", "winner", "5"]]
-    assert [r[2:4] + r[5:7] for r in table(out, "futures largest opportunities")] == [
-        ["6.0", "600.000s", "94", "6.00"], ["3.0", "0.004s", "97", "3.00"], ["1.5", "600.000s", "98", "1.50"], ["14.0", "600.000s", "1", "0.14"],
-        ["6.0", "600.000s", "0", "0.03"]]
+    # Sizes to the hundredth live trades in, the half contract among them.
+    assert [r[2:7] for r in table(out, "futures largest opportunities")] == [
+        ["6.0", "600.000s", "100", "94", "6.00"], ["3.0", "0.004s", "100", "97", "3.00"], ["1.5", "600.000s", "100", "98", "1.50"],
+        ["14.0", "600.000s", "1", "1", "0.14"], ["6.0", "600.000s", "0.5", "0", "0.03"]]
     assert ("\nin-play opportunities (0.1+ contracts in one order on levels at 2c+ once the edge lasted 0.1s, games, matches, races, and windows under way, "
             "paying within 24h), last 12 hours\n  none\n") in out
 
@@ -130,19 +131,20 @@ def test_each_market_shows_under_its_heading_its_opportunities_then_paper_then_l
 
 def test_settled_legs_count_by_when_each_leg_settled(tmp_path, monkeypatch, capsys):
     def fill(conn):
-        for yes_at, no_at in ((BEFORE, INSIDE), (BEFORE, BEFORE)):
+        for yes_at, no_at, no_held in ((BEFORE, INSIDE, 10.1), (BEFORE, INSIDE, 0.2), (BEFORE, BEFORE, 10)):
             t = Trade(mode="paper", pair_id=1, trade="t", signal_ts=BEFORE, edge=0.08, quantity=10,
                       yes_venue="polymarket_us", yes_contract="pm", yes_polarity="yes", yes_limit=0.45,
                       no_venue="kalshi", no_contract="k", no_polarity="yes", no_limit=0.47, pays_at=BEFORE,
-                      yes_held=10, no_held=10, yes_cost=4.5, no_cost=4.7, status="filled")
+                      yes_held=10, no_held=no_held, yes_cost=4.5, no_cost=4.7, status="filled")
             database.insert_trade(conn, t)
             s = Settlement(t.id, max(yes_at, no_at), mode="paper")
             s.record("yes", "yes", 10.0, yes_at)
             s.record("no", "no", 0.0, no_at)
             database.insert_settlement(conn, s)
     out = report(tmp_path, monkeypatch, capsys, fill, modes=("paper",))
-    # Only the first trade's no leg, on Kalshi, settled in the window. Its yes leg settled before it, as did the second trade.
-    assert table(out, "paper futures settled legs by venue, last 12 hours") == [["kalshi", "1", "10", "4.7", "0.0", "-4.7"]]
+    # Only the first two trades' no legs, on Kalshi, settled in the window. Their yes legs settled before it, as did the third
+    # trade. Their contracts, 10.299999999999999 as summed, show to the hundredth.
+    assert table(out, "paper futures settled legs by venue, last 12 hours") == [["kalshi", "2", "10.3", "9.4", "0.0", "-9.4"]]
 
 
 def test_live_money_shows_each_venue_read_now_with_the_kalshi_shards(capsys):

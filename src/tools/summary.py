@@ -299,7 +299,7 @@ def print_market_opportunities(conn, since, hours, sports, market):
     largest = []
     for sport, kind, label, trade, peak, lasted, size, cap, pr, d in rows[:LARGEST]:
         r_, a = returns(cap, pr, d)
-        largest.append((label[:44], f"{peak:.1f}", seconds(lasted), f"{size:,.1f}", f"{cap:,.0f}", f"{pr:,.2f}", percent(a),
+        largest.append((label[:44], f"{peak:.1f}", seconds(lasted), contracts(size), f"{cap:,.0f}", f"{pr:,.2f}", percent(a),
                         f"{d:,.1f}" if d else "-"))
     print_table(f"{market} largest opportunities", ("bet", "peak c", f"{cents}+ for", "size", "capital $", "profit $", "annual %", "days"),
                 largest)
@@ -457,7 +457,7 @@ def print_market_trades(conn, since, hours, mode, market, sports, now):
         GROUP BY venue ORDER BY venue""", (mode, since, since) + params + (mode, since, since) + params)
     if settled:
         print_table(f"{mode} {market} settled legs by venue, last {hours} hours", ("venue", "legs", "contracts", "cost $", "payout $", "realized $"),
-                    settled)
+                    [(v, n, contracts(h), *rest) for v, n, h, *rest in settled])
     print_open_trades(conn, since, hours, mode, market, sports, now)
     if mode == "live":
         print_live_orders(conn, since, hours, market, sports)

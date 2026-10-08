@@ -972,7 +972,8 @@ and two minutes, though both venues settle it on the same index. It shows
 what those orders could have taken and
 locked in at full size, how long the edge stayed at `MIN_EDGE` or more, in
 seconds to the thousandth, at the median, the 90th percentile, and the
-longest, the same by sport and kind, and the largest five. An edge on less
+longest, the same by sport and kind, and the largest five. Every count of
+contracts in the report is to the hundredth live trades in. An edge on less
 than a tenth of a contract, a sliver of a Polymarket US level that can
 last minutes, is left out, since live opens a trade with no less and so
 could never take it. The tenth holds for the whole window, though live
@@ -1055,30 +1056,6 @@ ways of following the books side by side on the same markets, without
 trading: Polymarket US's full book with and without compression, its
 best prices only feed, and its trade feed, and Kalshi's order book on its
 old host and on `external-api`, each with and without compression.
-
-`src/tools/event_probe/` is phase 0 of a second idea, trading on plays: a
-play can settle a contract before the game ends, a player's second hit
-settling "over 1.5 hits", and any order still selling it below the settled
-price is there to buy. Unlike the arbitrage nothing is locked in, since a
-play can be overturned, and it pays only if we see the play before the
-venues' prices move. The probe only listens, to measure that. `probe.py`
-follows MLB and NHL games through the leagues' free public feeds, MLB's
-Stats API and NHL's play-by-play, read once a second, and at the same time
-the books of every cataloged contract on those games, on connections of
-its own, and keeps both in `data/event_probe.sqlite`, apart from the bot's
-database. A read that takes a count past a contract's line, ends the game,
-or takes a pitcher out, whose pitching counts are then final, settles the
-contract's bet, see `markets.py`, and the read is an event. `report.py`
-sets each event against the contract's books: had the price already moved
-when the feed showed the play, and what was left at 0.97$ or less when an
-order sent then would have landed, after fees. For MLB, whose feed times
-each pitch, it also shows how long after the pitch itself the venue moved
-and our read came, the delay any faster feed would have to beat. Both
-feeds sit behind web caches, which before games said their content may be
-10 seconds old for MLB and 19 for NHL, so they are expected to be too slow;
-the probe is there to confirm it. Nothing outside the folder imports it, so
-if the idea is dropped, deleting the folder, `tests/tools/event_probe/`,
-`data/event_probe.sqlite`, and `data/event_probe.log` removes it.
 
 ## Deployment
 
@@ -1418,6 +1395,25 @@ none. `fees.py` was fixed to match. Edges were always priced on the
 unrounded fee, so only what an order or a sale was expected to cost
 changed, by under a cent an order.
 
+**Trading on plays.** A second idea was to buy what a play settles, a
+player's second hit settling "over 1.5 hits", from any order still
+selling it below the settled price. On October 7 a probe that only
+listened read MLB's free Stats API feed once a second and kept the books
+of the game's 299 Kalshi and 377 Polymarket US contracts. In the first
+fifteen minutes of play in Cleveland at Chicago, plays settled 20
+contracts. 2 were already above 0.97$ before the play; 12 had no cheap
+offer left by the time the feed marked the play over, the makers having
+pulled their orders at the hit itself, 30 seconds after offering it at
+62 to 64 cents; 6 were still cheap then and gone 0.4 to 1.5 seconds
+later, the largest 259 contracts at 38 cents on Polymarket US. Our read
+showed each play 6.2 seconds after it ended, so none was cheap by then.
+The feed showed a pitch 10 to 13 seconds after it ended at the median, and
+8 seconds even past MLB's web cache with a query string it had not seen,
+so the delay is mostly MLB's own. A feed would have to beat the venues'
+own official data, Sportradar's and Genius's, by under half a second, so
+the idea was dropped and the probe removed. Its code is in the history
+from commit 147f2a3.
+
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.
 The paper edge is real. Whether it is reachable is a question of whether
@@ -1492,16 +1488,6 @@ To compare ways of following the books during a game, from `src/`:
 python3 -m tools.feed_check --seconds 300 --markets 100
 ```
 
-To follow MLB and NHL games beside the bot for the event probe, at a lower
-priority, read what it found, and stop it, from `src/`. `-u` has each log
-line reach the file at once, rather than when Python's buffer fills:
-
-```bash
-nohup nice -n 10 python3 -u -m tools.event_probe.probe >> ../data/event_probe.log 2>&1 &
-python3 -m tools.event_probe.report
-pkill -f tools.event_probe.probe
-```
-
 ## Layout
 
 ```
@@ -1518,7 +1504,6 @@ src/
       money/     balances (what paper and live share), paper, live, settle
     helper/      config (the settings a run is tuned by), game (when a game is played and when its bets pay out), pricing, fees
   tools/      summary report, live_check, kalshi_shards, repair_fills, latency_report, feed_check, in_play_test
-    event_probe/  phase 0 of trading on plays: leagues' feeds, the contracts they settle, the probe, its store, its report
 tests/        mirrors src, run with pytest, configured in pyproject.toml
   support/    helpers the tests share, and the streams and refreshes a child process can run
 commands.txt  operating the AWS instance, gitignored, kept locally
@@ -1546,7 +1531,6 @@ Where to look to change something:
 | when live trading halts | `engine/components/trading/brakes.py` |
 | the email alerts | `engine/components/trading/notify.py` |
 | how far behind the feeds run | `tools/latency_report.py`, `tools/feed_check.py` |
-| whether the leagues' free feeds see a play before the venues' prices move | `tools/event_probe/` |
 | how the processes are wired | `engine/run.py` |
 | the report on the database | `tools/summary.py` |
 | live trading games in play, Polymarket US first | `trading/executor.py` (`fill_legs`), `trading/live.py`, `trading/footprints.py` |
