@@ -245,22 +245,22 @@ def print_market_opportunities(conn, since, hours, sports, market):
     of a level, is one no trade could take. That is a tenth of a contract
     over the whole window, though live opened whole contracts until
     2026-10-07, so days before then show episodes it could not take. Live
-    takes an edge at once, and its own fill empties the levels it takes, so what stayed
-    fillable through the stretch at config.MIN_EDGE, which these were
-    counted by until 2026-10-05, left out the very episodes it traded.
-    Episodes from before the scanner kept what one order could have had
-    have none and are left out, as are ones still open, which are stored only
-    once they end. On a database the live process has not yet brought up to
-    it, the market says so. Capital is what buying those contracts would
-    have cost with fees, and profit what they lock in. The annual rates
-    weight each episode by its capital, over the days until it pays. How
-    long the edge stayed at config.MIN_EDGE or more is the longest unbroken
-    stretch of each episode, in seconds to the thousandth. An episode whose
-    peak came while a leg's venue was in its weekly maintenance, see
-    common/venues.py, is left out, as no order could trade it: the scanner
-    stopped keeping those on 2026-10-08, after Kalshi's books froze that
-    morning while a tennis match moved on Polymarket US, and 70 in-play
-    episodes showed 7,630$ to be locked in.
+    takes an edge in one order, and its own fill empties the levels it
+    takes, so what stayed fillable through the stretch at config.MIN_EDGE,
+    which these were counted by until 2026-10-05, left out the very episodes
+    it traded. Episodes from before the scanner kept what one order could
+    have had have none and are left out, as are ones still open, which are
+    stored only once they end. On a database the live process has not yet
+    brought up to it, the market says so. Capital is what buying those
+    contracts would have cost with fees, and profit what they lock in. The
+    annual rates weight each episode by its capital, over the days until it
+    pays. How long the edge stayed at config.MIN_EDGE or more is the longest
+    unbroken stretch of each episode, in seconds to the thousandth. An
+    episode whose peak came while a leg's venue was in its weekly
+    maintenance, see common/venues.py, is left out, as no order could trade
+    it: the scanner stopped keeping those on 2026-10-08, after Kalshi's
+    books froze that morning while a tennis match moved on Polymarket US,
+    and 70 in-play episodes showed 7,630$ to be locked in.
     """
     cents = f"{100 * config.MIN_EDGE:.0f}c"
     where, params = in_sports(sports)

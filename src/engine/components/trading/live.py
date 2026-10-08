@@ -20,10 +20,10 @@ Both venues fill orders in hundredths of a contract, so fills, holdings,
 and the orders that flatten are all counted to the hundredth, and from
 2026-10-07 a trade opens in hundredths too, with as little as
 config.LIVE_MIN_CONTRACTS, where before it opened whole contracts, at
-least one. Every config.LIVE_POSITION_SECONDS the
-live executor reads each venue's positions and logs any contract the
-venue holds more or less of than the live trades say, which would mean
-the records are wrong, see check_positions().
+least one. Every config.LIVE_POSITION_SECONDS the live executor reads each
+venue's positions and logs any contract the venue holds more or less of
+than the live trades say, which would mean the records are wrong, see
+check_positions().
 
 Live trades the futures, see executor.py, and with run.py --live-in-play
 also the games, matches, races, and windows under way that pay within

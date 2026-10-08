@@ -165,7 +165,7 @@ def test_market_states_say_why_each_market_is_not_trading_in_batches(monkeypatch
         return {"markets": [{"ticker": t, "status": statuses[t]} for t in params["tickers"].split(",")]}
 
     monkeypatch.setattr(kalshi, "get_json", fake_get_json)
-    monkeypatch.setattr(kalshi, "RESULTS_BATCH", 3)
+    monkeypatch.setattr(kalshi, "MARKETS_BATCH", 3)
     monkeypatch.setattr(kalshi, "SLEEP", 0)
     assert kalshi.market_states(["E", "D", "C", "B", "A"]) == {"A": None, "B": "paused", "C": "closed", "D": "decided", "E": "unopened"}
     assert calls == ["A,B,C", "D,E"]
@@ -191,7 +191,7 @@ def test_results_are_looked_up_in_batches_and_only_finalized_markets_count(monke
         return {"markets": markets}
 
     monkeypatch.setattr(kalshi, "get_json", fake_get_json)
-    monkeypatch.setattr(kalshi, "RESULTS_BATCH", 2)
+    monkeypatch.setattr(kalshi, "MARKETS_BATCH", 2)
     monkeypatch.setattr(kalshi.time, "sleep", lambda s: None)
     out = kalshi.results(["c", "a", "b", "a"])
     assert calls == ["a,b", "c"]                                         # Sorted, deduplicated, two per call.

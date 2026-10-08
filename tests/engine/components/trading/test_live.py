@@ -658,6 +658,7 @@ def test_a_futures_trade_that_matched_gives_its_episode_back_once_done_and_no_ot
     assert [t["status"] for t in stored(conn)] == ["filled", "filled", "failed", "partial"] and list(ex.exposed) == [4]
     assert given == [(FUTURE["id"], UNDER_WAY, UNDER_WAY)]
 
+
 @pytest.mark.full_share
 def test_polymarket_us_first_sends_kalshi_only_what_it_filled_and_nothing_when_it_missed(tmp_path):
     venues = Venues(polymarket_us=[fills(3), fills(0)], kalshi=[fills()])
