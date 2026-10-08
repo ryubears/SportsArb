@@ -455,6 +455,29 @@ def test_edge_books_keeps_when_each_book_had_changed_as_the_edge_reached_live_s_
                     {k: epoch(at % 4), pm: epoch(at % 1)}]
 
 
+def test_a_desk_given_an_episode_back_is_offered_it_again_and_waits_from_then(tmp_path):
+    conn = make_db(tmp_path, [member("kalshi", "k"), member("polymarket_us", "pm")], future=True)
+    at = "2026-09-19T12:00:%02d+00:00"
+    latest = {("kalshi", "k"): book("kalshi", "k", T0, 0.53, 0.54)}
+    s = scan.Scanner(conn, ("nfl",), lambda m: None)
+    offered = []
+    s.on_signals.append(lambda pair, yes, no, edge, size, fee_infos, now: offered.append(now) or True)     # Takes every edge.
+
+    def change(second, ask=0.41):
+        latest[("polymarket_us", "pm")] = book("polymarket_us", "pm", at % second, 0.40, ask)
+        s.on_book("polymarket_us", "pm", latest, at % second)
+    pair_id = next(iter(s.pairs))
+    change(1)                                       # A 12c edge, taken.
+    change(2, 0.42)                                 # Still 11c, but the desk took a trade on it, so it is not offered.
+    assert offered == [at % 1]
+    s.offer_again(0, pair_id, at % 1, at % 3)       # The trade is done and matched, so the desk gives the episode back.
+    assert s.edge_since(pair_id) == at % 3          # Its wait counts from then, not from the edge's start.
+    change(4)
+    assert offered == [at % 1, at % 4]
+    s.offer_again(0, pair_id, T0, at % 5)           # A trade signalled before this episode began, on an earlier one, gives none back.
+    change(6, 0.42)
+    assert offered == [at % 1, at % 4] and s.edge_since(pair_id) == at % 3
+
 def test_a_pair_a_desk_waits_on_is_priced_again_once_the_wait_ends(tmp_path):
     later = "2099-09-29T12:00:00+00:00"           # Priced again at the clock's now, so the future closes after it.
     conn = make_db(tmp_path, [member("kalshi", "k", close_time=later), member("polymarket_us", "pm", close_time=later)], future=True)

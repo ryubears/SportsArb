@@ -39,7 +39,9 @@ venues, trading/ makes the trades, and money/ keeps the cash.
   once it has lasted LIVE_HOLD_SECONDS, the scanner offering a held edge
   again once it has lasted, through Scanner.edge_since() and recheck(),
   and counts a leg's wait for its book to catch up from the other's change
-  as the edge began, through Scanner.edge_books(). When paper runs too it
+  as the edge began, through Scanner.edge_books(). A future's edge lasting
+  past a trade that matched is offered again, through
+  Scanner.offer_again(). When paper runs too it
   trades the same games, given back what our live orders took from the
   books, see trading/footprints.py.
   - Paper: trading/paper.py fills against the same books with the paper
@@ -83,6 +85,7 @@ For a long run on a laptop, stop the Mac from sleeping while it runs:
 
 import argparse
 import asyncio
+import functools
 import subprocess
 import sys
 import time
@@ -286,9 +289,10 @@ class Session:
         self.scanner = scan.Scanner(conn, sports, log, [d.signal for d in self.desks], books=lambda: self.recorder.books) if with_scanner else None
         self.recorder = Recorder(conn, self.scanner, self.tapes, log)
         self.exchange = ExchangeStatus(log) if self.desks else None
-        for desk in self.desks:
+        for position, desk in enumerate(self.desks):
             ex = desk.executor
             ex.recheck, ex.edge_since, ex.edge_books = self.scanner.recheck, self.scanner.edge_since, self.scanner.edge_books
+            ex.offer_again = functools.partial(self.scanner.offer_again, position)
             ex.venue_trading, ex.market_closed = self.exchange.trading, self.recorder.refuse
         self.streams = Streams(self.recorder)
         self.last_status = self.last_summary = time.time()

@@ -610,8 +610,12 @@ contracts the recorded depth would have filled at the peak, and the return
 on the capital tied up, annualized as if held until the bet pays out. While
 an episode is open the scanner offers it to each executor on every update
 until that executor takes a trade, and then not again, so one mispricing
-makes one trade. The live executor is offered it first. The edge coming
-back after it has gone is a new episode. An episode also keeps its longest
+makes one trade, on a game. On a future, from 2026-10-08, a trade that
+matched something and left nothing to flatten gives the episode back once
+it is done (`Executor.again`, `Scanner.offer_again`), so an edge that
+lasts past the trade is traded again; one that matched nothing, its quote
+likely gone, ends it as before. The live executor is offered it first.
+The edge coming back after it has gone is a new episode. An episode also keeps its longest
 stretch at `MIN_EDGE` or more, and the contracts that stayed fillable
 through all of it, which is what an order sent any time in the stretch
 could have had. From 2026-10-05 it keeps too what one order could have had
@@ -863,7 +867,9 @@ leaves the edge at two cents or more does not start the wait again, as
 until 2026-10-07 it did. So an edge Polymarket US's change opened is taken
 at a tenth of a second, and one Kalshi's opened at 0.3. A future's edge
 waits the same from 2026-10-07, at the rate a year rather than two cents,
-taken at once until then. A trade asks
+taken at once until then, and from 2026-10-08 a future's edge offered
+again after a trade waits as long again from when the trade was done. A
+trade asks
 for no more than 50 contracts (`LIVE_IN_PLAY_CONTRACTS`), 10 until
 2026-10-08, its limits going
 no deeper than the levels that hold them, and a whole one or more, with no
@@ -1454,6 +1460,27 @@ episodes on its match and first set winners at 26 to 51 cents on about
 then, as it does in either venue's window; from that day the scanner
 leaves a member out while its venue is in maintenance, and the summary
 leaves out the episodes kept in the windows before.
+
+**A future's edge, traded again.** Until October 8 an episode made one
+trade a desk, however long its edge lasted past it. Of the 134 live
+futures trades from October 5 15:47 UTC to October 8 whose episodes the
+scanner had stored, most edges ended with the trade, the median lasting
+no time past it, as live's order emptied the levels it priced; 50 lasted
+a second or more past it, 24 a minute, 12 ten minutes, and 5 an hour. 14
+filled trades' episodes had offered more at their best moment than the
+trade took, 77 contracts and 21.37$ more, but most of those ended with
+the trade, the rest held back by cash or by whole contracts, and only 4
+lasted a minute or more past it, the largest the Jaguars reaching the
+conference final, 7 contracts taken of 47.86 offered, its edge lasting
+457 seconds past the trade, up to about 12$ more. An edge that went away
+and came back was already a new episode: 21 pairs had made 74 trades so.
+So from October 8, at the user's asking, a future's trade that matched
+something and left nothing to flatten gives its episode back once done,
+and the edge is traded again once it has lasted a tenth of a second from
+then. A trade that matched nothing ends the episode, so a quote that is
+gone costs one order, not one an update, and a game's episode still makes
+one trade: its edges last a fraction of a second, and its larger orders
+mostly failed.
 
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.

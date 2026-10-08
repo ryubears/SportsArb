@@ -204,6 +204,9 @@ def test_live_in_play_is_offered_games_too_alone_or_beside_paper_which_gets_back
     s, offered, results = asyncio.run(scenario(("live",)))
     # Live alone is offered the games and the futures. Whether a game is under way its executor judges, see live.py.
     assert s.desks[0].markets is None and s.desks[0].executor.in_play and s.desks[0].executor.footprints is None
+    # A future's trade gives its episode back to this desk, the scanner's first, once done, see Executor.again().
+    again = s.desks[0].executor.offer_again
+    assert again.func == s.scanner.offer_again and again.args == (0,)
     assert offered == [("live", "2026-10-11"), ("live", None)] and results == [True, True]
     assert ("live also trades the games, matches, races, and windows under way of every sport that pay within 24h, an edge of 0.02$ "
             "or more once it has lasted 0.1s at 0.02$ or more, at most 50 contracts a trade, "

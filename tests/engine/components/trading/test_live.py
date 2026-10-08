@@ -640,6 +640,24 @@ def test_in_play_a_future_is_traded_as_ever_polymarket_us_first(tmp_path):
     assert venues.orders == [("polymarket_us", "buy", "yes", 10, 0.45), ("kalshi", "buy", "no", 10, 0.47)]
 
 
+def test_a_futures_trade_that_matched_gives_its_episode_back_once_done_and_no_other_does(tmp_path):
+    venues = Venues(polymarket_us=[fills(), fills(), fills(0), fills(), fills(0)], kalshi=[fills(), fills(), fills(3)])
+    conn, ex = in_play(tmp_path, venues, books())
+    given = []
+    ex.offer_again = lambda pair_id, signal_ts, now: given.append((pair_id, signal_ts, now))
+
+    async def first():
+        assert ex.signal(FUTURE, *SURE, 0.08, 100, FEES, UNDER_WAY) and given == []      # Not while its orders are out.
+        while ex.tasks:
+            await asyncio.gather(*ex.tasks)
+    asyncio.run(first())
+    assert given == [(FUTURE["id"], UNDER_WAY, UNDER_WAY)]
+    assert signal(ex, {**GAME, "id": 2})                                # A game's trade matched, but a game's episode makes one trade.
+    assert signal(ex, {**FUTURE, "id": 3}, SURE)                        # Polymarket US filled nothing, its quote likely gone.
+    assert signal(ex, {**FUTURE, "id": 4}, SURE)                        # Matched 3, but 7 are left to flatten.
+    assert [t["status"] for t in stored(conn)] == ["filled", "filled", "failed", "partial"] and list(ex.exposed) == [4]
+    assert given == [(FUTURE["id"], UNDER_WAY, UNDER_WAY)]
+
 @pytest.mark.full_share
 def test_polymarket_us_first_sends_kalshi_only_what_it_filled_and_nothing_when_it_missed(tmp_path):
     venues = Venues(polymarket_us=[fills(3), fills(0)], kalshi=[fills()])

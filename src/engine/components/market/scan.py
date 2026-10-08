@@ -84,6 +84,8 @@ class Episode:
     pm_changed: bool = False        # Whether that moment came with a change of the Polymarket US leg's book.
     take_rank: tuple | None = None  # How good that moment was, see Scanner.weigh_take(), or None before any.
     taken: set = field(default_factory=set)     # Which of the scanner's on_signals took a trade on it, by position.
+    again_ts: str | None = None         # When a desk last gave it back after a future's trade on it was done, see
+                                        # Scanner.offer_again(), or None.
     worth_since: str | None = None      # When the current stretch at config.MIN_EDGE or more began, or None outside one.
     worth_least: tuple = (0.0, 0.0)     # The fewest contracts fillable at that edge so far in the stretch, and their profit.
     worth_best: tuple | None = None     # The longest stretch so far, as (seconds, contracts, profit), a moment's included.
@@ -182,7 +184,9 @@ class Scanner:
     from the database and are reloaded after each catalog refresh. Every
     finished episode is stored at once, and the big ones are logged. Each
     of on_signals, one per executor, is offered every moment of an episode
-    until it takes a trade, and then not again, see trading/executor.py.
+    until it takes a trade, and then not again, see trading/executor.py,
+    unless its executor gives the episode back once a future's trade on it
+    is done, see offer_again().
     """
 
     def __init__(self, conn, sports, log=print, on_signals=(), books=None, is_maintenance=is_maintenance):
@@ -306,10 +310,34 @@ class Scanner:
         When the pair's open episode last reached live's least edge, by our
         clock, see live_floor(), if it has stayed there since, or None. A
         desk that trades an edge only once it has lasted asks, see
-        Executor.hold().
+        Executor.hold(). Once a desk has given the episode back, see
+        offer_again(), it counts from then, so the edge must last as long
+        again after the trade.
         """
         episode = self.episodes.get(pair_id)
-        return episode.live_since if episode else None
+        if episode is None or episode.live_since is None:
+            return None
+        if episode.again_ts is not None and seconds_between(episode.live_since, episode.again_ts) > 0:
+            return episode.again_ts
+        return episode.live_since
+
+    def offer_again(self, desk, pair_id, signal_ts, now):
+        """
+        Offer the desk at position desk the pair's episode again: its
+        trade on it, signalled at signal_ts, is done at now, see
+        Executor.again(). An edge lasting past a future's trade is traded
+        again from 2026-10-08, at the user's asking, where before an
+        episode made one trade a desk. Nothing changes when the episode
+        has ended since, a later one being its own. The edge counts from
+        now for the desk's wait, see edge_since(), and the pair is priced
+        again once that is over, as no book may change to bring it.
+        """
+        episode = self.episodes.get(pair_id)
+        if episode is None or seconds_between(episode.start_ts, signal_ts) < 0:
+            return
+        episode.taken.discard(desk)
+        episode.again_ts = now
+        self.recheck(pair_id, config.LIVE_HOLD_SECONDS)
 
     def edge_books(self, pair_id):
         """
