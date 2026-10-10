@@ -89,3 +89,10 @@ def fee_per_contract(venue, price, fee_info):
     single contract's fee to the cent would overstate it by up to a cent.
     """
     return RATES[venue](fee_info) * price * (1 - price)
+
+
+def cost_per_contract(venue, price, fee_info):
+    """
+    What each contract bought at price costs, its fee per contract added, see fee_per_contract().
+    """
+    return price + fee_per_contract(venue, price, fee_info)

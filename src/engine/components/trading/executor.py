@@ -623,8 +623,8 @@ class Executor:
         paying = {}                 # The legs each venue's cash pays for, its shard's where it has them.
         for leg in legs:
             paying.setdefault((leg.venue, shard(leg)), []).append(leg)
-        affordable = min(self.cash.spendable(*part) / sum(leg.limit + fees.fee_per_contract(leg.venue, leg.limit, leg.fee_info)
-                                                          for leg in group) for part, group in paying.items())
+        affordable = min(self.cash.spendable(*part) / sum(fees.cost_per_contract(leg.venue, leg.limit, leg.fee_info) for leg in group)
+                         for part, group in paying.items())
         quantity = in_steps(min(available * config.FILL_SHARE, affordable, math.inf if most is None else most), self.step)
         # A fee rounded up, or Polymarket US's to the cent, can take the cost past the cash by a step or two.
         while quantity > 0 and any(sum(order_cost(leg, quantity) for leg in group) > self.cash.spendable(*part) + 1e-9
