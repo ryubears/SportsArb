@@ -39,10 +39,10 @@ Live takes a future's edge when it returns config.MIN_ANNUAL_PCT a year
 until it pays, its orders sweeping only the levels that return that, not
 every level down to config.MIN_EDGE, see min_edge(). On a game under way
 it takes an edge of config.LIVE_IN_PLAY_MIN_EDGE or more, two cents, and
-asks for no more than config.LIVE_IN_PLAY_CONTRACTS a trade, a hundred, with no
-limit on how many such trades. Either only once the edge has stayed at
-that least edge or more for config.LIVE_HOLD_SECONDS, a tenth of a
-second, by the scanner's episode: one that ends sooner is never traded,
+asks for no more than config.LIVE_IN_PLAY_CONTRACTS a trade, a hundred,
+with no limit on how many such trades. Either only once the edge has
+stayed at that least edge or more for config.LIVE_HOLD_SECONDS, a tenth of
+a second, by the scanner's episode: one that ends sooner is never traded,
 and one still there when the time is up is priced again then and traded,
 see hold(). A Polymarket US leg's book must still be current, counted
 from the Kalshi leg's change as of when the edge began, see opened(). All

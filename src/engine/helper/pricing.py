@@ -223,7 +223,7 @@ def cheapest(members, books, side, fee_infos):
         levels = ladder(books[(m["venue"], m["contract_id"])], m["polarity"], side)
         if not levels:
             continue
-        cost = levels[0][0] + fees.fee_per_contract(m["venue"], levels[0][0], fee_infos[(m["venue"], m["contract_id"])])
+        cost = fees.cost_per_contract(m["venue"], levels[0][0], fee_infos[(m["venue"], m["contract_id"])])
         if best_cost is None or cost < best_cost:
             best, best_cost = m, cost
     return best, best_cost

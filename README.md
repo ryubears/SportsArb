@@ -679,14 +679,13 @@ below. Until 2026-10-10 the fees were left out, so a trade the cash sized
 could be refused for its fee: Kalshi turned away trade 4003's 48.14
 contracts at 53 cents on a shard holding about their 25.51$, for the 0.84$
 fee, after Polymarket US's leg had filled, which was sold back for 2.09$
-less. No cash is
-held back: trades may spend all that is free. Since 2026-10-05 live's
-orders on a future sweep only the levels that themselves return
-`MIN_ANNUAL_PCT` a year until it pays, as the top must, not every level
-down to `MIN_EDGE`: for a future four months out that stops at about 14
-cents (`LiveExecutor.min_edge`, `pricing.edge_for_annual`). The two cents
-never decided whether a future was traded, since every one pays 27 days or
-more out, where 100% a year needs 6.9 cents, and 50% needed 3.6.
+less. No cash is held back: trades may spend all that is free. Since
+2026-10-05 live's orders on a future sweep only the levels that themselves
+return `MIN_ANNUAL_PCT` a year until it pays, as the top must, not every
+level down to `MIN_EDGE`: for a future four months out that stops at about
+14 cents (`LiveExecutor.min_edge`, `pricing.edge_for_annual`). The two
+cents never decided whether a future was traded, since every one pays 27
+days or more out, where 100% a year needs 6.9 cents, and 50% needed 3.6.
 
 In **paper.py** each order goes the way a live one does. It takes a trip
 to its venue and a trip back, each drawn from a lognormal with the median
@@ -881,10 +880,9 @@ again after a trade waits as long again from when the trade was done. A
 trade asks for no more than 100 contracts (`LIVE_IN_PLAY_CONTRACTS`), 50
 from 2026-10-08 and 10 before, its limits going no deeper than the levels
 that hold them, and a tenth of one or more, with no limit on how many such
-trades.
-Each trade says whether its game was under way at the signal (the trades
-table's `in_play`, null before 2026-10-05). Lasting does not make an edge
-real: the two Bitcoin window episodes of 2026-10-05 that showed $5,304
+trades. Each trade says whether its game was under way at the signal (the
+trades table's `in_play`, null before 2026-10-05). Lasting does not make an
+edge real: the two Bitcoin window episodes of 2026-10-05 that showed $5,304
 stayed at two cents or more for one and two minutes, likely a book left
 standing on a market no longer trading; when that book is Polymarket US's,
 its order going first fills nothing and no Kalshi order is sent.
@@ -1037,13 +1035,12 @@ run.
 `src/tools/kalshi_shards.py` splits the live Kalshi cash between the
 exchange shards live trading uses by the percents `LIVE_SHARDS` gives them,
 80% to shard 0 and 20% to shard 3, a shard left out, Bitcoin's 2, giving up
-all it has. It reads each shard's cash
-and says what it would move, and with `--apply` moves it, then sets
-Kalshi's own target split to the same shares, which Kalshi keeps every 10
-seconds, payouts included. It does not refill a shard whose cash orders
-spend: at 50/50 on 2026-10-01, shard 0 had spent down to $6.94 of $51.77.
-So run it again when one shard runs low. The money stays in the account,
-and nothing is traded.
+all it has. It reads each shard's cash and says what it would move, and
+with `--apply` moves it, then sets Kalshi's own target split to the same
+shares, which Kalshi keeps every 10 seconds, payouts included. It does not
+refill a shard whose cash orders spend: at 50/50 on 2026-10-01, shard 0
+had spent down to $6.94 of $51.77. So run it again when one shard runs
+low. The money stays in the account, and nothing is traded.
 
 `src/tools/repair_fills.py` repairs the live trades recorded under an
 older reading of Polymarket US fills: before fills were added up, when an
