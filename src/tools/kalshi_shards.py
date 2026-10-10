@@ -7,9 +7,11 @@ only its market's shard's: football, hockey, soccer, national teams'
 too, motorsport, UFC, darts, esports, and politics trade on shard 0,
 Bitcoin on 2, and baseball, basketball, and tennis on 3. Most of the
 cash goes to football's, 80%, as the football futures are where the
-long-lasting edges are, and 10% each to the other two. Until 2026-10-05
-it was 90 to 10 between 0 and 3, and with nothing on 2 live traded no
-Bitcoin market. This reads the cash on each shard, moves what is over a
+long-lasting edges are, and 20% to baseball's, basketball's, and
+tennis', with none on Bitcoin's, whose window trades filled nothing.
+Until 2026-10-05 it was 90 to 10 between 0 and 3, and with nothing on 2
+live traded no Bitcoin market, and from then until 2026-10-10 80/10/10
+with 2's tenth. This reads the cash on each shard, moves what is over a
 shard's share to the shards under theirs, and then sets Kalshi's own
 target split to the same shares, which Kalshi rebalances to every 10
 seconds, so payouts landing on one shard are shared out too. It does

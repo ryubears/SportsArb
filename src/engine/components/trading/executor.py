@@ -95,7 +95,7 @@ from common.timeutil import epoch, hours_between, now_iso
 from common.venues import is_maintenance
 from db import database
 from db.models import Ledger, Leg, Trade
-from engine.helper import config, game
+from engine.helper import config, fees, game
 from engine.helper.pricing import annual_pct, changed_at, depth, fresh, in_steps, ladder, reach, sell_ladder, sweep, trade_words
 
 
@@ -104,6 +104,15 @@ def shard(leg):
     The exchange shard a leg's market trades on, whose cash is its own, as the catalog gave it, or None for a venue without shards.
     """
     return (leg.fee_info or {}).get("exchange_index")
+
+
+def order_cost(leg, quantity):
+    """
+    The most quantity contracts of a leg can cost at its limit, its venue's fee included, as the venue checks the cash for
+    an order before taking it. A level below the limit costs less, fee and all, as the fee never changes faster than the
+    price.
+    """
+    return quantity * leg.limit + fees.fee(leg.venue, leg.limit, quantity, leg.fee_info)
 
 
 @dataclass
@@ -343,7 +352,7 @@ class Executor:
         """
         Fill both legs, see fill_legs(), flatten any mismatch as soon as both answers are in, and record the result.
         """
-        reserved = [leg.quantity * leg.limit for leg in legs]
+        reserved = [order_cost(leg, leg.quantity) for leg in legs]
         fills = await self.fill_legs(trade, legs)
         answered = max((fill.ts for fill in fills if fill.ts), default=None)     # When the later answer came, which paper works out after.
         for leg, fill, cost in zip(legs, fills, reserved):
@@ -589,11 +598,16 @@ class Executor:
         edge of least, see min_edge(), each limit set at the deepest level
         reached. The quantity is config.FILL_SHARE of what those levels
         show, the share we expect to get, so an unchanged book fills in
-        full, and no more than the cash free pays for, both legs' at once
-        where they share a venue's cash. Given most, it is no more than
-        that, and the walk stops at the levels that hold it, so no limit
-        goes deeper than those. It is cut to whole steps, see step: whole
-        contracts on paper, hundredths live.
+        full, and no more than the cash free pays for, fees included, see
+        order_cost(), both legs' at once where they share a venue's cash.
+        Until 2026-10-10 the fees were left out, so a trade the cash sized
+        was turned away for them: Kalshi refused trade 4003's 48.14
+        contracts at 53 cents, 25.51$, on a shard holding about that, for
+        the 0.84$ fee, and Polymarket US's leg, filled first, was sold back
+        for 2.09$ less. Given most, it is no more than that, and the walk
+        stops at the levels that hold it, so no limit goes deeper than
+        those. It is cut to whole steps, see step: whole contracts on
+        paper, hundredths live.
         """
         yes_leg, no_leg = legs
         yes_book, no_book = self.book(yes_leg.key), self.book(no_leg.key)
@@ -606,12 +620,17 @@ class Executor:
                                                        None if most is None else most / config.FILL_SHARE)
         if not available:
             return 0
-        per_contract = {}           # What one contract of both legs costs from each venue's cash, its shard's where it has them.
+        paying = {}                 # The legs each venue's cash pays for, its shard's where it has them.
         for leg in legs:
-            per_contract[(leg.venue, shard(leg))] = per_contract.get((leg.venue, shard(leg)), 0.0) + leg.limit
-        affordable = min(self.cash.spendable(venue, part) / cost for (venue, part), cost in per_contract.items())
-        quantity = min(available * config.FILL_SHARE, affordable, math.inf if most is None else most)
-        return order_size(in_steps(quantity, self.step))
+            paying.setdefault((leg.venue, shard(leg)), []).append(leg)
+        affordable = min(self.cash.spendable(*part) / sum(leg.limit + fees.fee_per_contract(leg.venue, leg.limit, leg.fee_info)
+                                                          for leg in group) for part, group in paying.items())
+        quantity = in_steps(min(available * config.FILL_SHARE, affordable, math.inf if most is None else most), self.step)
+        # A fee rounded up, or Polymarket US's to the cent, can take the cost past the cash by a step or two.
+        while quantity > 0 and any(sum(order_cost(leg, quantity) for leg in group) > self.cash.spendable(*part) + 1e-9
+                                   for part, group in paying.items()):
+            quantity = round(quantity - self.step, 2)
+        return order_size(quantity)
 
     def again(self, trade, done):
         """
@@ -670,7 +689,7 @@ class Executor:
             return False
         for leg in legs:
             leg.quantity = quantity
-            self.cash.reserve(leg.venue, quantity * leg.limit, shard(leg))
+            self.cash.reserve(leg.venue, order_cost(leg, quantity), shard(leg))
         yes_leg, no_leg = legs
         trade = Trade(mode=self.mode, pair_id=pair["id"], label=pair["label"], trade=trade_words(yes, no), signal_ts=now, edge=edge,
                       quantity=quantity, pays_at=pays_at, in_play=int(under_way),

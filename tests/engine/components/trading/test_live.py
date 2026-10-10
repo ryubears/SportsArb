@@ -427,6 +427,28 @@ def test_a_kalshi_leg_trades_only_with_the_cash_on_its_markets_shard(tmp_path):
     assert cash.available("kalshi", 3) == pytest.approx(1.42 - 3.02 * 0.47) and cash.available("kalshi", 0) == 1000.0
 
 
+def test_a_trade_the_cash_sizes_leaves_room_for_the_fees(tmp_path):
+    shards = {0: 1000.0, 3: 10.0}                       # Ten dollars on baseball's shard, where the books show 50 to take.
+    cash = LiveBalances(lambda m: None, {"kalshi": lambda: (sum(shards.values()), dict(shards)), "polymarket_us": lambda: (1000.0, {})})
+    asyncio.run(cash.refresh(NOW))
+    venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
+    conn = database.connect(tmp_path / "t.sqlite")
+    ex = LiveExecutor(conn, cash, lambda: books(size=100), lambda m: None, clock=lambda: NOW, place=venues.place())
+    charged = {("polymarket_us", "pm"): {"feeCoefficient": 0.0695},
+               ("kalshi", "k"): {"fee_type": "quadratic", "fee_multiplier": 1, "exchange_index": 3}}
+
+    async def scenario():
+        sent = ex.signal(dict(PAIR, sport="mlb"), YES, NO, 1 - 0.45 - 0.47, 100, charged, NOW)
+        await asyncio.gather(*ex.tasks)
+        return sent
+    assert asyncio.run(scenario()) is True
+    # 21.27 contracts at 0.47 cost 9.9969$, but Kalshi's fee on them, 0.3709$, takes the order past the 10 dollars, and
+    # Kalshi turns it away. 20.51 cost 9.6397$ and a 0.3577$ fee, 9.9974$, and 20.52 would cost 10.0023$.
+    assert sorted(venues.orders) == [("kalshi", "buy", "no", 20.51, 0.47), ("polymarket_us", "buy", "yes", 20.51, 0.45)]
+    # What was held back for the fee is given back once the order answers, its fill charging none here.
+    assert cash.available("kalshi", 3) == pytest.approx(10.0 - 20.51 * 0.47)
+
+
 def test_a_leg_filled_in_hundredths_is_flattened_to_the_hundredth(tmp_path):
     venues = Venues(polymarket_us=[fills(), fills()], kalshi=[fills(6.42)])
     conn, cash, ex = executor(tmp_path, venues)
@@ -603,17 +625,17 @@ def signal(ex, pair=GAME, members=(YES, NO), now=UNDER_WAY, edge=0.08):
 
 
 @pytest.mark.full_share
-def test_live_trades_a_game_under_way_at_most_fifty_contracts_polymarket_us_first(tmp_path):
+def test_live_trades_a_game_under_way_at_most_a_hundred_contracts_polymarket_us_first(tmp_path):
     venues = Venues(polymarket_us=[fills()], kalshi=[fills()])
-    latest = books(size=100)
-    latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [[0.44, 20]], [[0.45, 3], [0.46, 60], [0.48, 60]])
+    latest = books(size=200)
+    latest[("polymarket_us", "pm")] = Book("polymarket_us", "pm", NOW, [[0.44, 20]], [[0.45, 3], [0.46, 120], [0.48, 120]])
     conn, ex = in_play(tmp_path, venues, latest)
     assert signal(ex)
     t = stored(conn)[0]
-    # Fifty contracts need the second level, so the limit goes no deeper, though the third keeps two cents too.
-    assert (t["quantity"], t["yes_limit"], t["no_limit"], t["status"], t["in_play"]) == (50, 0.46, 0.47, "filled", 1)
+    # A hundred contracts need the second level, so the limit goes no deeper, though the third keeps two cents too.
+    assert (t["quantity"], t["yes_limit"], t["no_limit"], t["status"], t["in_play"]) == (100, 0.46, 0.47, "filled", 1)
     # Polymarket US's order goes first, and Kalshi's once it has answered, for what it filled.
-    assert venues.orders == [("polymarket_us", "buy", "yes", 50, 0.46), ("kalshi", "buy", "no", 50, 0.47)]
+    assert venues.orders == [("polymarket_us", "buy", "yes", 100, 0.46), ("kalshi", "buy", "no", 100, 0.47)]
 
 
 def test_in_play_a_game_not_yet_under_way_and_one_paying_too_late_are_not_traded(tmp_path):
@@ -665,12 +687,12 @@ def test_polymarket_us_first_sends_kalshi_only_what_it_filled_and_nothing_when_i
     conn, ex = in_play(tmp_path, venues, books(size=100))
     assert signal(ex)
     t = stored(conn)[0]
-    assert venues.orders == [("polymarket_us", "buy", "yes", 50, 0.45), ("kalshi", "buy", "no", 3, 0.47)]
-    assert (t["quantity"], t["yes_filled"], t["no_filled"], t["matched"], t["status"]) == (50, 3, 3, 3, "partial")
+    assert venues.orders == [("polymarket_us", "buy", "yes", 100, 0.45), ("kalshi", "buy", "no", 3, 0.47)]
+    assert (t["quantity"], t["yes_filled"], t["no_filled"], t["matched"], t["status"]) == (100, 3, 3, 3, "partial")
     assert signal(ex, {**GAME, "id": 2})
     t = stored(conn)[1]
     # Polymarket US filled nothing, so Kalshi was never sent and nothing is held: there is nothing to sell back.
-    assert venues.orders[2:] == [("polymarket_us", "buy", "yes", 50, 0.45)]
+    assert venues.orders[2:] == [("polymarket_us", "buy", "yes", 100, 0.45)]
     assert (t["yes_filled"], t["no_filled"], t["yes_held"], t["no_held"], t["status"]) == (0, 0, 0, 0, "failed")
     assert t["hedge"] == "no leg not sent, as polymarket_us filled nothing first"
     assert ex.cash.reserved == {} or not any(ex.cash.reserved.values())
@@ -695,7 +717,7 @@ def test_live_trades_a_future_by_its_return_a_year_and_sweeps_only_the_levels_th
     assert [(t["quantity"], t["yes_limit"], t["in_play"]) for t in stored(conn)] == [(20, 0.515, 0), (20, 0.45, 0)]
 
 
-# IN PLAY RULES, live trading a game under way at two cents once it has lasted a tenth of a second, 50 contracts a trade
+# IN PLAY RULES, live trading a game under way at two cents once it has lasted a tenth of a second, 100 contracts a trade
 
 def test_in_play_live_takes_an_edge_of_two_cents_or_more(tmp_path):
     venues = Venues(polymarket_us=[fills()], kalshi=[fills()])

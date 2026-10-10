@@ -85,9 +85,11 @@ LIVE_HOLD_SECONDS = 0.1        # How long an edge must have stayed at live's lea
                                 # after that change, unless a newer Polymarket US book still shows it. From 2026-10-05 to 10-06
                                 # live took a game's edge only on the signal a change of the Polymarket US leg's book brought,
                                 # which in seven hours let one episode through.
-LIVE_IN_PLAY_CONTRACTS = 50     # The most contracts a live trade on a game under way asks for: 5 from 2026-10-05, for 200 trades,
-                                # 10 from 2026-10-06, for as many as come, and 50 from 2026-10-08, at the user's asking. At 10, the 4
-                                # of 46 capped trades that filled had 330 contracts on offer at two cents, by the scanner, for 40 taken.
+LIVE_IN_PLAY_CONTRACTS = 100    # The most contracts a live trade on a game under way asks for: 5 from 2026-10-05, for 200 trades,
+                                # 10 from 2026-10-06, for as many as come, 50 from 2026-10-08, and 100 from 2026-10-10, at the user's
+                                # asking. At 10, the 4 of 46 capped trades that filled had 330 contracts on offer at two cents, by
+                                # the scanner, for 40 taken. At 50, from 2026-10-08 05:55 to 10-10 05:55 UTC, 4 of 88 capped trades
+                                # filled in full, locking in 14.58$, and 2 filled only on Polymarket US, sold back for 6.48$ less.
 LIVE_MIN_CONTRACTS = 0.1        # The fewest contracts a live trade opens with, on a future or a game, in hundredths above it, which both
                                 # venues take orders and fill in. One whole contract until 2026-10-07, when the user asked for a tenth:
                                 # from 2026-10-05 to 10-07 the episodes offering under a contract at live's least edge would have added
@@ -98,14 +100,17 @@ LIVE_BALANCE_SECONDS = 15   # Between readings of the venues' balances. Under ht
                             # venue's kept connection open for the next order: one opened afresh took Polymarket US 11 ms longer.
 LIVE_LOW_CASH = 5.0         # Dollars on a live venue, or on one of its shards in LIVE_SHARDS, under which a human is emailed, once until
                             # it is back over. Trades there go on as far as the cash pays for.
-LIVE_SHARDS = {"kalshi": {0: 80, 2: 10, 3: 10}}     # The exchange shards a venue splits its cash by that live trading keeps
-                                                    # cash on, each with its own low cash email, and the whole percent of the
-                                                    # cash each keeps. Kalshi trades football, hockey, soccer, motorsport, UFC,
-                                                    # darts, esports, and politics on shard 0, Bitcoin on 2, and baseball,
-                                                    # basketball, and tennis on 3, and tools/kalshi_shards.py splits its cash
-                                                    # between them by these percents. 90 to 10 between 0 and 3 until 2026-10-05,
-                                                    # when the user gave Bitcoin's shard 10%: with none, live had traded no
-                                                    # Bitcoin market.
+LIVE_SHARDS = {"kalshi": {0: 80, 3: 20}}    # The exchange shards a venue splits its cash by that live trading keeps
+                                            # cash on, each with its own low cash email, and the whole percent of the
+                                            # cash each keeps. Kalshi trades football, hockey, soccer, motorsport, UFC,
+                                            # darts, esports, and politics on shard 0, Bitcoin on 2, and baseball,
+                                            # basketball, and tennis on 3, and tools/kalshi_shards.py splits its cash
+                                            # between them by these percents, a shard left out giving up all it has. 90
+                                            # to 10 between 0 and 3 until 2026-10-05, when the user gave Bitcoin's
+                                            # shard 10%: with none, live had traded no Bitcoin market. 80/10/10 until
+                                            # 2026-10-10, when the user left Bitcoin out again: its 31 window trades in
+                                            # the two days before filled nothing on Polymarket US, its futures are held
+                                            # out, and its shard sat at 54.09$ untouched while shard 3 ran dry.
 LIVE_POSITION_SECONDS = 300 # Between readings of the venues' positions, which are compared with what the live trades hold, so records
                             # gone wrong are logged, see LiveExecutor.check_positions().
 LIVE_ORDER_WINDOW = 20      # The newest orders the unknown outcome brake looks at.

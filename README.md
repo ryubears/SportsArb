@@ -27,7 +27,7 @@ and paper the bets on one event paying within a day, where faster traders
 may take the edges first, to see how they would do, its orders timed as
 live ones are. By default the orders are paper. With `--execute live` or
 `--execute both` it sends real ones, and with `--live-in-play` live trades
-the games under way too, an edge of two cents or more, at most 50
+the games under way too, an edge of two cents or more, at most 100
 contracts a trade. Polymarket US's order goes first, and live takes an
 edge, a game's or a future's, once it has lasted a tenth of a second.
 From October 4 to 5 the service on the instance
@@ -206,8 +206,9 @@ The status line counts the markets not trading, by venue and why.
    one, live on a game under way stopping at `LIVE_IN_PLAY_CONTRACTS`
    (`most`). It then asks for `FILL_SHARE` of what those levels show, but
    no more than the cash each venue can spend, on Kalshi the cash on the
-   market's shard, live as on paper. The cash is reserved and the trade is
-   stored before any order goes out.
+   market's shard, live as on paper, each leg's fee at its limit included
+   (`order_cost`). The cash is reserved, fees too, and the trade is stored
+   before any order goes out.
 2. **Fill** (`run_trade`). With a leg on each venue, live's Polymarket US
    order goes first and its Kalshi order only once that has answered, for
    what it filled, and not at all when it filled nothing (`fill_legs`,
@@ -672,8 +673,13 @@ walked together and each leg's limit is set at the deepest level that still
 leaves the minimum edge, so an order sweeps every level above the floor
 rather than only the top one. A trade asks for all of what those levels
 show (`FILL_SHARE`, half until 2026-10-04), as far as the cash free on each
-venue pays for, both legs from one venue's cash when they share it, live as
-on paper, with no cap on contracts but live's in play, below. No cash is
+venue pays for, fees included, both legs from one venue's cash when they
+share it, live as on paper, with no cap on contracts but live's in play,
+below. Until 2026-10-10 the fees were left out, so a trade the cash sized
+could be refused for its fee: Kalshi turned away trade 4003's 48.14
+contracts at 53 cents on a shard holding about their 25.51$, for the 0.84$
+fee, after Polymarket US's leg had filled, which was sold back for 2.09$
+less. No cash is
 held back: trades may spend all that is free. Since 2026-10-05 live's
 orders on a future sweep only the levels that themselves return
 `MIN_ANNUAL_PCT` a year until it pays, as the top must, not every level
@@ -780,12 +786,15 @@ hockey's, soccer's, the national teams' too, motorsport's, UFC's, darts',
 esports', and politics' on shard 0, Bitcoin's on 2, and baseball's,
 basketball's, and tennis' on 3. So
 `tools/kalshi_shards.py` splits the Kalshi cash between them, 80% to shard
-0, where the football futures with the long-lasting edges are, and 10% each
-to shards 2 and 3 (`LIVE_SHARDS`). Until 2026-10-05 it was 90% to shard 0
-and 10% to shard 3, with nothing on 2, so every Bitcoin trade, future or
-window, came to no contracts and live had made none. The live executor
-emails once when any of the three shards, or Polymarket US, falls under $5
-(`LIVE_LOW_CASH`), and again only after it has been back over.
+0, where the football futures with the long-lasting edges are, and 20% to
+shard 3, with nothing on Bitcoin's shard 2 (`LIVE_SHARDS`), so every
+Bitcoin trade comes to no contracts. Until 2026-10-05 it was 90% to shard 0
+and 10% to shard 3, with nothing on 2, and live had made no Bitcoin trade;
+from then until 2026-10-10 80/10/10, but in the two days before the
+change Bitcoin's 31 window trades filled nothing, its futures were held
+out, and its shard sat untouched at 54.09$ while shard 3 ran dry. The live
+executor emails once when a shard in the split, or Polymarket US, falls
+under $5 (`LIVE_LOW_CASH`), and again only after it has been back over.
 
 **Edges that last.** From 2026-10-05 04:07 UTC live traded an edge only
 once it had stayed at `MIN_EDGE` or more for half a second, unbroken, as
@@ -869,9 +878,10 @@ at a tenth of a second, and one Kalshi's opened at 0.3. A future's edge
 waits the same from 2026-10-07, at the rate a year rather than two cents,
 taken at once until then, and from 2026-10-08 a future's edge offered
 again after a trade waits as long again from when the trade was done. A
-trade asks for no more than 50 contracts (`LIVE_IN_PLAY_CONTRACTS`), 10
-until 2026-10-08, its limits going no deeper than the levels that hold
-them, and a tenth of one or more, with no limit on how many such trades.
+trade asks for no more than 100 contracts (`LIVE_IN_PLAY_CONTRACTS`), 50
+from 2026-10-08 and 10 before, its limits going no deeper than the levels
+that hold them, and a tenth of one or more, with no limit on how many such
+trades.
 Each trade says whether its game was under way at the signal (the trades
 table's `in_play`, null before 2026-10-05). Lasting does not make an edge
 real: the two Bitcoin window episodes of 2026-10-05 that showed $5,304
@@ -1026,7 +1036,8 @@ run.
 
 `src/tools/kalshi_shards.py` splits the live Kalshi cash between the
 exchange shards live trading uses by the percents `LIVE_SHARDS` gives them,
-80% to shard 0 and 10% each to shards 2 and 3. It reads each shard's cash
+80% to shard 0 and 20% to shard 3, a shard left out, Bitcoin's 2, giving up
+all it has. It reads each shard's cash
 and says what it would move, and with `--apply` moves it, then sets
 Kalshi's own target split to the same shares, which Kalshi keeps every 10
 seconds, payouts included. It does not refill a shard whose cash orders
@@ -1479,6 +1490,21 @@ then. A trade that matched nothing ends the episode, so a quote that is
 gone costs one order, not one an update, and a game's episode still makes
 one trade: its edges last a fraction of a second, and its larger orders
 mostly failed.
+
+**A hundred contracts in play.** From October 8 05:55 UTC to October 10
+05:55, with the cap at 50, live made 1,182 trades on games under way,
+locking in 31.80$, every balanced one settling to the cent at what it
+locked in. Polymarket US filled 71% of what trades asking under a contract
+asked, 35% between 1 and 9.99, 19% between 10 and 49.99, and 7% at the 50.
+Its leg filled and Kalshi's did not on 53 trades, sold back for 19.18$
+less, 16.38$ of it on the 159 asking 10 or more, which locked in 19.06$;
+those under 10 locked in 12.76$ for 2.80$. Of the 88 at the cap, 4 filled
+in full for 14.58$, 7.48$ of it one Counter-Strike match at over ten
+cents, and 2 filled only on Polymarket US, for 6.48$. Seven trades kept
+contracts nothing would buy back at half their cost, six long shots bought
+at one to five cents, 2.08$ lost, and a Dota 2 map's 25 of 50, which won
+10.57$. On the user's asking the cap became 100 from October 10, a trade
+sized by its cash leaving room for the fees from then too.
 
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.

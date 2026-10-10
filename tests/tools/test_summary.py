@@ -168,7 +168,7 @@ def test_live_money_shows_each_venue_read_now_with_the_kalshi_shards(capsys):
     summary.print_live_money(balances)
     # The shards live trading uses, and any other holding money.
     assert capsys.readouterr().out.splitlines()[1:] == [
-        "live money on the venues, read now", "  kalshi 92.00$ (shard 0 0.00$, shard 2 0.00$, shard 3 92.00$)", "  polymarket_us not read (401 unauthorized)"]
+        "live money on the venues, read now", "  kalshi 92.00$ (shard 0 0.00$, shard 3 92.00$)", "  polymarket_us not read (401 unauthorized)"]
 
 
 def open_trades(conn, mode="live", pair_id=1):
