@@ -149,7 +149,7 @@ def test_a_session_trading_both_modes_keeps_a_desk_for_each_and_offers_live_the_
         "LIVE TRADING with real money: a future's edge once it has lasted 0.1s returning 100% a year, its orders down to the levels "
         "returning that, a leg's book waiting only for the other's change before the edge began, balances read")
     assert out[2:6] == ["live trades the futures of nfl", f"no email settings in {tmp_path / 'email.json'}, alerts are only logged and stored",
-                        out[4], "paper trades the games, matches, races, and windows of every sport that pay within 24h, in play too"]
+                        out[4], "paper trades the games, matches, and races of every sport that pay within 24h, in play too"]
     assert out[4].startswith("paper rejects 0% of orders")
     assert s.desks[1].executor.tapes is s.tapes is s.recorder.tapes         # Paper's orders meet the books the recorder tapes.
     assert "live balances read: kalshi 800$, polymarket_us 600$" in out
@@ -165,23 +165,23 @@ def test_paper_trades_the_bets_on_one_event_and_live_the_futures_of_sports_not_h
         monkeypatch.setitem(streams.STREAMS, venue, fake_stream)
 
     async def scenario():
-        s = run.Session(database.connect(tmp_path / "test.sqlite"), ("nfl", "crypto"), executors=run.EXECUTE["both"], not_live=("crypto",))
+        s = run.Session(database.connect(tmp_path / "test.sqlite"), ("nfl", "darts"), executors=run.EXECUTE["both"], not_live=("darts",))
         s.start()
         offered = []
         for desk in s.desks:
             desk.executor.signal = lambda pair, *args, mode=desk.mode: offered.append((mode, pair["sport"], pair["game_date"])) or True
         pairs = [{"sport": "nfl", "game_date": "2026-10-11"}, {"sport": "nfl", "game_date": None},
-                 {"sport": "crypto", "game_date": "2026-10-04 05:30"}, {"sport": "crypto", "game_date": None}]
+                 {"sport": "darts", "game_date": "2026-10-04"}, {"sport": "darts", "game_date": None}]
         results = [desk.signal(pair, None, None, 0.1, 5, {}, "now") for pair in pairs for desk in s.desks]
         await s.close()
         return offered, results
     offered, results = asyncio.run(scenario())
     # Each desk trades apart, since on one signal live's real orders would take what paper's simulated ones look for. A
     # sport held out of live has its futures traded by neither, and its events by paper.
-    assert offered == [("paper", "nfl", "2026-10-11"), ("live", "nfl", None), ("paper", "crypto", "2026-10-04 05:30")]
+    assert offered == [("paper", "nfl", "2026-10-11"), ("live", "nfl", None), ("paper", "darts", "2026-10-04")]
     assert results == [False, True, True, False, False, True, False, False]
     out = capsys.readouterr().out
-    assert "live trades the futures of nfl, not of crypto" in out and "paper trades the games, matches, races, and windows" in out
+    assert "live trades the futures of nfl, not of darts" in out and "paper trades the games, matches, and races" in out
 
 
 def test_live_in_play_is_offered_games_too_alone_or_beside_paper_which_gets_back_what_it_took(tmp_path, monkeypatch, capsys, fake_stream):
@@ -208,7 +208,7 @@ def test_live_in_play_is_offered_games_too_alone_or_beside_paper_which_gets_back
     again = s.desks[0].executor.offer_again
     assert again.func == s.scanner.offer_again and again.args == (0,)
     assert offered == [("live", "2026-10-11"), ("live", None)] and results == [True, True]
-    assert ("live also trades the games, matches, races, and windows under way of every sport that pay within 24h, an edge of 0.02$ "
+    assert ("live also trades the games, matches, and races under way of every sport that pay within 24h, an edge of 0.02$ "
             "or more once it has lasted 0.1s at 0.02$ or more, at most 20 contracts a trade, "
             "Polymarket US's order first and Kalshi's for what it filled") in capsys.readouterr().out
     s, offered, results = asyncio.run(scenario(run.EXECUTE["both"]))
@@ -224,11 +224,3 @@ def test_live_in_play_needs_live_trading_on_the_command_line():
     done = subprocess.run([sys.executable, "-m", "engine.run", "--live-in-play", "--execute", "paper"], cwd=src, capture_output=True,
                           text=True, timeout=60)
     assert done.returncode == 2 and "--live-in-play needs --execute live or both, scanning and trading" in done.stderr
-
-
-def test_bitcoins_catalog_is_refreshed_once_a_window_has_opened_and_been_listed():
-    opened = 1791090900                         # A quarter hour, 2026-10-04 05:15 UTC.
-    assert not run.window_due(opened + 5, opened - 300)                 # Too soon for both venues to list it.
-    assert run.window_due(opened + run.WINDOW_REFRESH_SECONDS, opened - 300)
-    assert not run.window_due(opened + 400, opened + run.WINDOW_REFRESH_SECONDS + 1)      # Already refreshed for this window.
-    assert run.window_due(opened + 900 + 30, opened + run.WINDOW_REFRESH_SECONDS + 1)     # The next one.

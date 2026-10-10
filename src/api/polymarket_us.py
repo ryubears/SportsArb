@@ -115,14 +115,11 @@ def is_race(event):
     return bool(is_game(event) and start and end and days_between(start, end) <= RACE_DAYS)
 
 
-def start_time(event, m, future):
+def start_time(event, future):
     """
-    When a market's event starts, the kickoff of a game or the start of a race, or of a Bitcoin window, or None for a
-    future, whose event may carry a sports data id like a game's.
+    When a market's event starts, the kickoff of a game or the start of a race, or None for a future, whose event may
+    carry a sports data id like a game's.
     """
-    window = (m.get("assetPriceTerms") or {}).get("windowStart")
-    if window:
-        return iso(window)
     if is_game(event) and (not future or is_race(event)):
         return iso(event.get("startTime"))
     return None
@@ -157,7 +154,7 @@ def contracts(sport, tags):
                 market_type=m.get("sportsMarketType"),
                 line=float_or_none(m.get("line")),
                 rules=m.get("description"),
-                start_time=start_time(event, m, future),
+                start_time=start_time(event, future),
                 # A future's market stays open two weeks past its event in case the event moves. The event's end is when it
                 # is expected to settle, which the payout time and how long it is recorded go by.
                 close_time=iso((event.get("endDate") if future else None) or m.get("endDate")),

@@ -25,14 +25,14 @@ venues, trading/ makes the trades, and money/ keeps the cash.
 - A Desk for each mode the run trades in, with its own money, executor, and
   settler, and its trades stored with its mode, so paper and live never
   mix. They trade apart: the paper desk the bets on one event, a game, a
-  match, a race, or a Bitcoin window, before it and while it is played,
-  that pay within MAX_PAYOUT_HOURS, and the live desk the futures, which
-  pay MIN_PAYOUT_HOURS or more out, bar the sports given to --not-live.
+  match, or a race, before it and while it is played, that pay within
+  MAX_PAYOUT_HOURS, and the live desk the futures, which pay
+  MIN_PAYOUT_HOURS or more out, bar the sports given to --not-live.
   On the same signal live's real orders took the contracts paper's
   simulated ones looked for: from 2026-10-04, when live began asking for
   all it saw, paper twins of live trades failed 10 times in 13. Each desk
   still flattens and settles every trade it holds. With --live-in-play
-  live also trades the games, matches, races, and windows under way that
+  live also trades the games, matches, and races under way that
   pay within MAX_PAYOUT_HOURS, of every sport, Polymarket US's order
   first, an edge of LIVE_IN_PLAY_MIN_EDGE or more, at most
   LIVE_IN_PLAY_CONTRACTS a trade. Live takes a future's edge, as a game's,
@@ -59,17 +59,16 @@ One run trades every sport given to --sport, comma separated, or every
 sport the catalog knows with --sport all, since the money is one pool: a
 second process would spend the same dollars. The catalog holds both the
 bets on one event and the futures. A sport given to --not-live has its
-futures followed but not traded live, crypto by default, to see how they
-do before real money goes on them; --not-live none trades every sport's.
-Bitcoin's 15 minute windows open and close all day, so with crypto followed
-its catalog is also refreshed just after each window opens.
+futures followed but not traded live, to see how they do before real
+money goes on them; by default, or with --not-live none, live trades every
+sport's. Bitcoin was left out of the catalog from 2026-10-10.
 
 Run with:
     python3 -m engine.run --sport nfl
     python3 -m engine.run --sport nfl,ncaaf,mlb,nhl,nba
     python3 -m engine.run --sport all --execute live
     python3 -m engine.run --sport all --execute both
-    python3 -m engine.run --sport all --execute both --not-live crypto,politics
+    python3 -m engine.run --sport all --execute both --not-live politics
     python3 -m engine.run --sport all --execute live --live-in-play --not-live none
     python3 -m engine.run --sport nfl --seconds 120 --catalog-minutes 0
     python3 -m engine.run --sport nfl --skip-refresh
@@ -111,8 +110,6 @@ from engine.components.trading.paper import PaperExecutor
 from engine.helper import config
 
 CATALOG_MINUTES = 60    # How often the catalog is refreshed and subscriptions updated. Zero disables it.
-WINDOW_SECONDS = 15 * 60        # How often a Bitcoin window opens, on the quarter hour.
-WINDOW_REFRESH_SECONDS = 20     # How long after a window opens its catalog is refreshed, once both venues list it.
 EXECUTE = {"paper": ("paper",), "live": ("live",), "both": ("live", "paper")}     # What --execute trades in. Live first, so its orders go out first.
 
 
@@ -127,7 +124,7 @@ class RunOptions:
     refresh_at_start: bool = True                   # Refresh the catalog before streaming, when refreshes are on.
     scan: bool = True                               # Price the books and store episodes.
     executors: tuple = ("paper",)                   # The modes that trade the scanner's signals, 'paper' and 'live', when scanning.
-    not_live: tuple = ("crypto",)                   # Sports whose futures the live desk leaves alone.
+    not_live: tuple = ()                            # Sports whose futures the live desk leaves alone.
     live_in_play: bool = False                      # Whether live also trades games under way.
 
 
@@ -200,7 +197,7 @@ class Desk:
     One mode of trading, paper or live: its executor, the money it trades,
     and the settler that pays its trades out. books is a function returning
     the recorder's newest books. markets are the bets it trades, 'events',
-    those on one game, match, race, or window, or 'futures', or None for
+    those on one game, match, or race, or 'futures', or None for
     both, and held_out the sports whose futures it leaves alone. tapes are
     the recorder's tapes, which paper orders meet the venues' books on, see
     market/tape.py. in_play has live trade games under way too, and
@@ -267,7 +264,7 @@ class Session:
     and with live_in_play the events under way too.
     """
 
-    def __init__(self, conn, sports, with_scanner=True, executors=("paper",), not_live=("crypto",), live_in_play=False):
+    def __init__(self, conn, sports, with_scanner=True, executors=("paper",), not_live=(), live_in_play=False):
         if live_in_play and "live" not in executors:
             raise ValueError("live trading in play needs the live desk")
         self.conn = conn
@@ -309,13 +306,13 @@ class Session:
             log(f"live trades the futures of {', '.join(live) or 'no sport'}"
                 + (f", not of {', '.join(self.not_live)}" if self.not_live else ""))
             if self.live_in_play:
-                log(f"live also trades the games, matches, races, and windows under way of every sport that pay within "
+                log(f"live also trades the games, matches, and races under way of every sport that pay within "
                     f"{config.MAX_PAYOUT_HOURS}h, {in_play_settings()}, Polymarket US's order first and Kalshi's for what it filled")
             if not notify.EMAIL_FILE.exists():
                 log(f"no email settings in {notify.EMAIL_FILE}, alerts are only logged and stored")
         if any(d.mode == "paper" for d in self.desks):
             log(paper_settings())
-            log(f"paper trades the games, matches, races, and windows of every sport that pay within {config.MAX_PAYOUT_HOURS}h, "
+            log(f"paper trades the games, matches, and races of every sport that pay within {config.MAX_PAYOUT_HOURS}h, "
                 f"in play too")
         targets = load_targets(self.conn, self.sports)
         log("recording " + ", ".join(f"{len(ids)} {venue}" for venue, ids in targets.items()) + " contracts")
@@ -436,22 +433,12 @@ async def refresh_in_child(sports, refresh=refresh_catalog):
         await asyncio.to_thread(child.join)
 
 
-def window_due(now, last):
-    """
-    Whether Bitcoin's catalog is due a refresh at now, in seconds since 1970: a window has opened since the refresh at
-    last, and WINDOW_REFRESH_SECONDS have passed for both venues to list it.
-    """
-    opened = (now - WINDOW_REFRESH_SECONDS) // WINDOW_SECONDS * WINDOW_SECONDS
-    return last < opened + WINDOW_REFRESH_SECONDS <= now
-
-
 async def run(conn, options):
     """
     Refresh the catalog, start a Session, tick it every config.TICK_SECONDS,
     and keep the catalog fresh on a timer, as the RunOptions say, each
-    refresh in a child process, Bitcoin's also just after each 15 minute
-    window opens. A refresh that fails is logged and tried again at the next
-    interval, so a bad fetch never stops the recording.
+    refresh in a child process. A refresh that fails is logged and tried
+    again at the next interval, so a bad fetch never stops the recording.
     """
     sports, seconds, catalog_seconds = options.sports, options.seconds, options.catalog_seconds
     log(f"starting {', '.join(sports)}, code {code_version()}")
@@ -463,17 +450,14 @@ async def run(conn, options):
             log(with_traceback(f"catalog refresh failed ({e!r}), starting with the stored catalog", e))
     session = Session(conn, sports, options.scan, options.executors, options.not_live, options.live_in_play)
     session.start()
-    started = last_catalog = last_window = time.time()
-    refresh = None      # The background catalog refresh while one is running, of every sport or of Bitcoin's windows.
-    windows = catalog_seconds and "crypto" in sports
+    started = last_catalog = time.time()
+    refresh = None      # The background catalog refresh while one is running.
     try:
         while not seconds or time.time() - started < seconds:
             await asyncio.sleep(config.TICK_SECONDS)
             session.tick()
             if catalog_seconds and refresh is None and time.time() - last_catalog >= catalog_seconds:
                 refresh, last_catalog = asyncio.create_task(refresh_in_child(sports)), time.time()
-            elif windows and refresh is None and window_due(time.time(), last_window):
-                refresh, last_window = asyncio.create_task(refresh_in_child(("crypto",))), time.time()
             if refresh is not None and refresh.done():
                 if refresh.exception():
                     log(with_traceback(f"catalog refresh failed ({refresh.exception()!r}), keeping current subscriptions", refresh.exception()))
@@ -498,8 +482,8 @@ if __name__ == "__main__":
     ap.add_argument("--skip-refresh", action="store_true",
                     help="start streaming at once from the stored catalog instead of refreshing first")
     ap.add_argument("--no-scan", action="store_true", help="stream the books only, without the scanner, to check the connections")
-    ap.add_argument("--not-live", default="crypto",
-                    help="sports whose futures live leaves alone, comma separated, crypto by default, or none")
+    ap.add_argument("--not-live", default="none",
+                    help="sports whose futures live leaves alone, comma separated, or none, the default")
     ap.add_argument("--no-trade", action="store_true", help="scan without trading")
     ap.add_argument("--live-in-play", action="store_true",
                     help="with --execute live or both, live also trades games under way, Polymarket US's order first")

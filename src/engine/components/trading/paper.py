@@ -37,7 +37,7 @@ taken ours too. It learns that when it next looks at the newest book, so
 a level gone and back between two looks still has ours taken off, never
 more.
 
-Paper trades the games, matches, races, and windows that pay within
+Paper trades the games, matches, and races that pay within
 config.MAX_PAYOUT_HOURS, in play too. Everything else, the sizing, the
 flattening, the order its legs go in, and storing each trade, is the
 shared Executor's, and the money is the PaperBalances from money/paper.py.
@@ -69,7 +69,7 @@ class PaperExecutor(Executor):
     """
 
     mode = "paper"
-    in_play = True      # Paper trades games, matches, races, and Bitcoin's windows, before and while they are played.
+    in_play = True      # Paper trades games, matches, and races, before and while they are played.
 
     def __init__(self, conn, cash, books, log=print, rng=None, clock=now_iso, is_maintenance=is_maintenance, tapes=None, footprints=None):
         super().__init__(conn, cash, books, log, clock, is_maintenance)

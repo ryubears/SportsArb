@@ -1,7 +1,7 @@
 """
-The bets on one event, a game, a match, a race, or a Bitcoin window, read alike from both venues: each case is a real
-Kalshi contract and the real Polymarket US contract on the same bet, and the two classifiers must agree on its identity
-and on which side each contract holds.
+The bets on one event, a game, a match, or a race, read alike from both venues: each case is a real Kalshi contract and
+the real Polymarket US contract on the same bet, and the two classifiers must agree on its identity and on which side
+each contract holds.
 """
 
 from catalog import match
@@ -205,25 +205,3 @@ def test_a_darts_match_and_races_read_alike():
          pm_bet("nascar-sp4-2026-10-04-w", "tec-nascar-sp4-2026-10-04-w-denham", "nascar", "futures", title="Denny Hamlin"))
     # A race's winners are typed as futures, but the drivers' title stays a future.
     assert pm_bet("f1-dc-2026-12-06-w", "tec-f1-dc-2026-12-06-w-oscpia", "f1", "futures", title="Oscar Piastri").kind == "drivers_champion"
-
-
-def test_bitcoins_window_price_targets_and_year_end_bands_read_alike():
-    assert same(kalshi_bet("KXBTC15M", "KXBTC15M-26OCT040145", "KXBTC15M-26OCT040145-45", "crypto", close_time="2026-10-04T05:45:00+00:00"),
-                pm_bet("btc-updown-15m-2026-10-04-0530z", "cpc-btc-updown-15m-2026-10-04-0530z", "crypto")) == (
-        "updown_15m", 2026, "2026-10-04 05:30", None, None, "BTC", None)
-    # Kalshi's 'by Dec 31, 2026 at 11:59PM ET' and Polymarket US's 'before 12:00 AM ET on January 1, 2027' both end December 31.
-    same(kalshi_bet("KXBTCMAX150", "KXBTCMAX150-25", "KXBTCMAX150-25-26DEC31-149999.99", "crypto", line=149999.99,
-                    rules="If the price of Bitcoin is above || price || by Dec 31, 2026 at 11:59PM ET, then the market resolves to Yes."),
-         pm_bet("btc-150k", "cpc-btc-150k-12-31-2026", "crypto", rules="This market will settle to Yes if the price of Bitcoin is "
-                "above $149,999.99 at any point before 12:00 AM ET on January 1, 2027."))
-    assert same(kalshi_bet("KXBTCMINY", "KXBTCMINY-27JAN01", "KXBTCMINY-27JAN01-55000.00", "crypto", line=55000,
-                           rules="If the Bitcoin spot price according to the CF Bitcoin Real-Time Index is below $55000.00 starting "
-                                 "Feb 5, 2026 and before Jan 1, 2027 at 12:00am ET, then the market resolves to Yes."),
-                pm_bet("btc-hitprice-low-yr-12-31-2026", "cpc-btc-hitprice-low-yr-12-31-2026-55k", "crypto", title="Below $55,000.00",
-                       rules="This market will settle to Yes if the price of Bitcoin is below $55,000.00 at any point from the creation "
-                             "of this market until 12:00 AM ET on January 1, 2027.")) == (
-        "dip_before", 2026, None, None, None, "2026-12-31", 55000.0)
-    same(kalshi_bet("KXBTCY", "KXBTCY-27JAN0100", "KXBTCY-27JAN0100-B147500", "crypto", outcome="145,000 to 149,999.99",
-                    close_time="2027-01-01T05:00:00+00:00"),
-         pm_bet("btc-pricerange-yr-12-31-2026", "cpc-btc-pricerange-yr-12-31-2026-147500", "crypto", title="145,000 to 149,999.99",
-                rules="This market will settle to Yes if the price of Bitcoin is 145,000 to 149,999.99 at 12:00 AM ET on January 1, 2027."))

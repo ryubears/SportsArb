@@ -129,17 +129,6 @@ def written_date(text):
     return None
 
 
-def last_day(day, hour=None, minute=None, half=None):
-    """
-    The last day, YYYY-MM-DD, that a deadline on day at hour:minute, AM or
-    PM as half says, leaves whole: the day before at 12:00 AM, when the day
-    has not begun, and the day itself at any other time or with none, as in
-    'before Sep 1, 2026 at 12:00 AM ET' and 'by Dec 31, 2026 at 11:59 PM ET'.
-    """
-    midnight = hour is not None and int(hour) == 12 and int(minute) == 0 and half.upper() == "AM"
-    return shift(f"{day}T00:00:00+00:00", days=-1)[:10] if midnight else day
-
-
 CALENDAR_SEASONS = {"mlb"}  # Sports whose season ends in the year it starts.
 
 

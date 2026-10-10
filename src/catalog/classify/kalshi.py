@@ -1,25 +1,24 @@
 """
 Turn Kalshi contracts into Bets.
 
-Games, matches, races, and Bitcoin's 15 minute windows are bets on one
-event, which paper trades: the series says the kind, the event ticker the
-date and the two sides, and the market ticker or subtitle whom the market
-is on, see the tables below for each sport's layout. A game of teams keeps
-them away then home, as the venues list them, and a soccer match, an
-esports match, or a match between two people keeps its sides in order of
-their keys, so a market names whom it is on by its subject.
+Games, matches, and races are bets on one event: the series says the
+kind, the event ticker the date and the two sides, and the market ticker
+or subtitle whom the market is on, see the tables below for each sport's
+layout. A game of teams keeps them away then home, as the venues list
+them, and a soccer match, an esports match, or a match between two people
+keeps its sides in order of their keys, so a market names whom it is on
+by its subject.
 
-Futures are bets on a season, a title, an award, a season's leader, a price
-by a deadline, or an election, which live trades. Each kind has a series of
-its own, or an event of its own within a series, 'KXEPLTOP-27TOP4' the top
-four of the Premier League, which the event's key names once its year is
-taken out. A team future's market ticker ends in the team, 'KXSB-27-KC'. An
-award's, a leader's, or a title holder's names the person in its subtitle,
-'Aaron Judge'. A team's season total has one event per team,
-'KXNFLWINS-27ARI', and one market per line, and a player's has one event
-per line and one market per player. The venues number seasons differently,
-so a future's season is the one its settlement falls in, which both agree
-on.
+Futures are bets on a season, a title, an award, a season's leader, or an
+election. Each kind has a series of its own, or an event of its own
+within a series, 'KXEPLTOP-27TOP4' the top four of the Premier League,
+which the event's key names once its year is taken out. A team future's
+market ticker ends in the team, 'KXSB-27-KC'. An award's, a leader's, or
+a title holder's names the person in its subtitle, 'Aaron Judge'. A
+team's season total has one event per team, 'KXNFLWINS-27ARI', and one
+market per line, and a player's has one event per line and one market per
+player. The venues number seasons differently, so a future's season is
+the one its settlement falls in, which both agree on.
 
 Elections have a series per office and state, 'SENATEGA', one event per
 election year, '-26', and a market per party, D or R, or per candidate.
@@ -34,7 +33,7 @@ import re
 from catalog.classify.teams import (STATES, TOP_TWO_STATES, match_sides, person, player_key, race, side_key, team_from_code, team_key,
                                     team_sides)
 from collections import defaultdict
-from common.timeutil import last_day, season_from_date, shift, written_date
+from common.timeutil import season_from_date, written_date
 from datetime import datetime
 from db.models import Bet
 
@@ -122,17 +121,6 @@ ESPORTS_EVENT = re.compile(r"^(\d{2})([A-Z]{3})(\d{2})(\d{4})([A-Z0-9]+?)(?:-(\d
 # The date is the one the rules give the race, 'originally scheduled for October 4, 2026'.
 RACING_SERIES = {"KXF1RACE": "race_winner", "KXF1TOPCONSTRUCTOR": "race_constructor", "KXNASCARRACE": "race_winner"}
 SCHEDULED = re.compile(r"scheduled for ([A-Z][a-z]+\.? \d{1,2}, \d{4})")
-
-# CRYPTO, Bitcoin only, the one coin Polymarket US lists. A 15 minute window's event ticker gives its Eastern end,
-# 'KXBTC15M-26OCT040145', and the window is the 15 minutes before its close. A price future pays on the CF Bitcoin Real-Time
-# Index going above, or below, its strike before a deadline its rules give, 'before Sep 1, 2026 at 12:00 AM ET' being the
-# end of August 31, or on where it ends the year, in a band of $5,000.
-UPDOWN_SERIES = {"KXBTC15M": ("updown_15m", "BTC", 15)}
-HIT_SERIES = {"KXBTCMAXY": "hit_before", "KXBTCMAX150": "hit_before", "KXBTCMAX100": "hit_before", "KXBTC2026200": "hit_before",
-              "KXBTC2026250": "hit_before", "KXBTCMINY": "dip_before"}
-RANGE_SERIES = {"KXBTCY": "year_end_range"}
-DEADLINE = re.compile(r"(?:by|before) ([A-Z][a-z]+\.? \d{1,2},? \d{4})(?:,? at (\d{1,2}):(\d{2}) ?([AaPp][Mm]))?")
-CRYPTO_SERIES = {*UPDOWN_SERIES, *HIT_SERIES, *RANGE_SERIES}
 
 # TEAM FUTURES. The market ticker ends in the team, 'KXSB-27-KC'.
 CONFERENCES = ("AAC", "ACC", "B10", "B12", "CUSA", "MAC", "MWC", "PAC12", "SBELT")     # College conferences, bar the SEC, spelled alike.
@@ -533,49 +521,6 @@ def classify_race(row, series, market_tail, sport, base):
                polarity="yes", **base)
 
 
-def deadline(rules):
-    """
-    The last day a price future counts, from its rules: 'before Sep 1, 2026 at 12:00 AM ET' is August 31, and 'by Dec 31,
-    2026 at 11:59 PM ET' December 31. None when the rules give none.
-    """
-    found = DEADLINE.search(rules or "")
-    day = written_date(found.group(1)) if found else None
-    return last_day(day, *found.group(2, 3, 4)) if day else None
-
-
-def classify_crypto(row, series, base):
-    """
-    The Bet a Bitcoin contract describes, or None: a window's direction, the window being the 15 minutes before its
-    close, a price going above or below its strike by a deadline, or the band it ends the year in.
-    """
-    if series in UPDOWN_SERIES:
-        kind, coin, minutes = UPDOWN_SERIES[series]
-        if not row["close_time"]:
-            return None
-        start = shift(row["close_time"], hours=-minutes / 60)
-        return Bet(kind=kind, season=int(start[:4]), game_date=f"{start[:10]} {start[11:16]}", team_a=None, team_b=None, subject=coin,
-                   line=None, polarity="yes", **base)
-    if series in HIT_SERIES:
-        last = deadline(row["rules"])
-        if not last or row["line"] is None:
-            return None
-        return Bet(kind=HIT_SERIES[series], season=int(last[:4]), game_date=None, team_a=None, team_b=None, subject=last,
-                   line=row["line"], polarity="yes", **base)
-    band = row["outcome"] or ""
-    numbers = [float(n.replace(",", "")) for n in re.findall(r"\d[\d,]*(?:\.\d+)?", band)]
-    if "or below" in band and len(numbers) == 1:
-        subject = f"below {numbers[0] + 0.01:.0f}"
-    elif "or above" in band and len(numbers) == 1:
-        subject = f"from {numbers[0]:.0f}"
-    elif " to " in band and len(numbers) == 2:
-        subject = f"{numbers[0]:.0f} to {numbers[1] + 0.01:.0f}"
-    else:
-        return None
-    year = int(row["close_time"][:4]) - 1 if row["close_time"] and row["close_time"][5:10] == "01-01" else None
-    return Bet(kind=RANGE_SERIES[series], season=year, game_date=None, team_a=None, team_b=None, subject=subject, line=None,
-               polarity="yes", **base) if year else None
-
-
 def doubleheaders(rows):
     """
     The contracts on games the same teams play twice on one date, which a
@@ -632,8 +577,6 @@ def classify(row, outcomes=None):
         return classify_esports(row, series, event_tail, base)
     if series in RACING_SERIES:
         return classify_race(row, series, market_tail, sport, base)
-    if series in CRYPTO_SERIES:
-        return classify_crypto(row, series, base)
     if series in FUTURE_SERIES and row["close_time"]:
         return classify_future(row, series, event_tail, market_tail, sport, base)
     return None

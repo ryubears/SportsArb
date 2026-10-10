@@ -1,28 +1,27 @@
 """
 Turn Polymarket US contracts into Bets.
 
-Every contract is a market's long side. Games, matches, races, and
-Bitcoin's windows are bets on one event, which paper trades: the event
-slug names both sides and the date, the market's type its kind, and its
-slug or line whom it is on, see the tables below. Their sides are kept as
-the Kalshi classifier keeps them, so the same bet reads alike on both.
+Every contract is a market's long side. Games, matches, and races are bets
+on one event: the event slug names both sides and the date, the market's
+type its kind, and its slug or line whom it is on, see the tables below.
+Their sides are kept as the Kalshi classifier keeps them, so the same bet
+reads alike on both.
 
-Futures are bets on a season, a title, an award, a season's leader, a price
-by a deadline, or an election, which live trades. Futures are told apart by
-the shape of their event slug, with its sport's prefix taken off and its
-date written as D: 'nfl-afceast-D-w' is a division winner. A shape is
-looked up with its prefix first, 'ucl-D-lastplace', where two sports share
-one that means different things, then without it. A team future's market
-slug ends in the team, though not always in the code the venue's games
-used: the NFL's champions glue city and nickname, 'bufbil', and some events
-use Kalshi's codes, 'gsw'. Its market title names the team, 'Ohio St.',
-which settles which code it is. An award's, a leader's, or a title holder's
-market title is the person, and a season total's holds its line, 'Atlanta
-43+ wins', '2.5+ Wins', or '3,750.5+ Passing Yards', unless the shape does,
-'nhl-pts100-D'. A future's season is the one its date falls in, or its
-event's end when that is half a year later, since a slug can carry the
-wrong year: the Champions League's final is 'ucl-final-2026-06-05-w' for
-2027's.
+Futures are bets on a season, a title, an award, a season's leader, or an
+election. Futures are told apart by the shape of their event slug, with
+its sport's prefix taken off and its date written as D: 'nfl-afceast-D-w'
+is a division winner. A shape is looked up with its prefix first,
+'ucl-D-lastplace', where two sports share one that means different things,
+then without it. A team future's market slug ends in the team, though not
+always in the code the venue's games used: the NFL's champions glue city
+and nickname, 'bufbil', and some events use Kalshi's codes, 'gsw'. Its
+market title names the team, 'Ohio St.', which settles which code it is.
+An award's, a leader's, or a title holder's market title is the person,
+and a season total's holds its line, 'Atlanta 43+ wins', '2.5+ Wins', or
+'3,750.5+ Passing Yards', unless the shape does, 'nhl-pts100-D'. A
+future's season is the one its date falls in, or its event's end when that
+is half a year later, since a slug can carry the wrong year: the Champions
+League's final is 'ucl-final-2026-06-05-w' for 2027's.
 
 Elections, 'usse-ga-2026-11-03', have a market per party, its slug ending
 in -dem or -rep, or per candidate, and a race's season is its election
@@ -37,12 +36,11 @@ from catalog.classify.teams import (ALIASES, STATES, TOP_TWO_STATES, match_sides
                                     team_key, team_sides, venue_codes)
 from collections import defaultdict
 from common.sports import ESPORTS, MATCH_SPORTS, RACING, SOCCER, TEAM_SPORTS
-from common.timeutil import days_between, eastern_date, last_day, season_from_date, written_date
+from common.timeutil import days_between, eastern_date, season_from_date
 from common.venues import VENUES
 from db.models import Bet
 
-# How each sport's event slugs start. A sport can have several, the Champions League's and the Ballon d'Or's. Bitcoin's
-# have none, 'btc-updown-15m-2026-10-04-0530z'.
+# How each sport's event slugs start. A sport can have several, the Champions League's and the Ballon d'Or's.
 EVENT_PREFIX = {
     "nfl": ("nfl",), "ncaaf": ("cfb",), "mlb": ("mlb",), "nhl": ("nhl",), "nba": ("nba",), "wnba": ("wnba",), "ncaab": ("cbb",),
     "epl": ("epl",), "laliga": ("lal",), "seriea": ("sea",), "bundesliga": ("bun",), "ligue1": ("lg1",), "ligamx": ("lmx",),
@@ -50,7 +48,7 @@ EVENT_PREFIX = {
     "intl": ("intf", "unl", "cnl", "afcq"), "intlw": ("uwwcq",),
     **{title: (title,) for title in ESPORTS},
     "f1": ("f1",), "nascar": ("nascar",), "ufc": ("ufc",), "tennis": ("atp", "wta"), "darts": ("pdc", "pdcdarts"),
-    "politics": ("usho", "usse", "usgub", "ushr"), "crypto": (),
+    "politics": ("usho", "usse", "usgub", "ushr"),
 }
 
 # GAMES, MATCHES, AND RACES, whose event slug names both sides and the date, 'nfl-phi-ten-2026-09-20' or
@@ -109,15 +107,6 @@ ESPORTS_KINDS = {"esports_match_winner": "match_winner", "esports_series_total_m
                  **{f"esports_{part}_winner_{n}": "map_winner" for part in ("map", "game") for n in range(1, 6)}}
 MAP_TITLE = re.compile(r"^Will (.+?) win (?:Map|Game) (\d) vs ")
 RACING_EVENT = re.compile(r"^(f1|nascar)-([a-z0-9]+)-(\d{4}-\d{2}-\d{2})-(w|cons)$")     # 'f1-gabgpim-2026-10-04-w', a race's winner.
-
-# BITCOIN. A window's direction, 'btc-updown-15m-2026-10-04-0530z' its start in UTC, Yes being up. A price future's rules
-# give its strike and when it ends, 'above $149,999.99 at any point before 12:00 AM ET on January 1, 2027', and a band's
-# title its range, '145,000 to 149,999.99'.
-UPDOWN_EVENT = re.compile(r"^btc-updown-(15m|1h)-(\d{4}-\d{2}-\d{2})-(\d{2})(\d{2})z$")
-PRICE_RULE = re.compile(r"\b(above|below) (?:\$([\d,]+(?:\.\d+)?)|the price specified in the title)")
-RULE_END = re.compile(r"(\d{1,2}):(\d{2}) ?([AP]M) ET on ([A-Z][a-z]+ \d{1,2}, \d{4})")
-PRICE_TITLE = re.compile(r"\$([\d,]+(?:\.\d+)?)")
-RANGE_EVENT = "btc-pricerange-yr-"
 
 # TEAM FUTURES, by the shape of the event slug. The market slug ends in the team.
 DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -562,50 +551,6 @@ def classify_race(row, sport, base):
                polarity="yes", **base) if subject else None
 
 
-def rule_end(rules):
-    """
-    The last day a price rule counts, 'before 12:00 AM ET on January 1, 2027' being December 31, 2026, or None.
-    """
-    m = RULE_END.search(rules or "")
-    day = written_date(m.group(4)) if m else None
-    return last_day(day, *m.group(1, 2, 3)) if day else None
-
-
-def classify_crypto(row, base):
-    """
-    The Bet a Bitcoin contract describes, or None: a window's direction, a price going above or below its strike by a
-    deadline, or the band it ends the year in.
-    """
-    m = UPDOWN_EVENT.match(row["event_id"])
-    if m:
-        return Bet(kind=f"updown_{m.group(1)}", season=int(m.group(2)[:4]), game_date=f"{m.group(2)} {m.group(3)}:{m.group(4)}",
-                   team_a=None, team_b=None, subject="BTC", line=None, polarity="yes", **base)
-    last = rule_end(row["rules"])
-    if not last or not row["event_id"].startswith("btc-"):
-        return None
-    if row["event_id"].startswith(RANGE_EVENT):
-        band = (row["title"] or "").replace("$", "")
-        numbers = [float(n.replace(",", "")) for n in re.findall(r"\d[\d,]*(?:\.\d+)?", band)]
-        if "or above" in band and len(numbers) == 1:
-            subject = f"from {numbers[0]:.0f}"
-        elif ("or below" in band or band.lower().startswith("below")) and len(numbers) == 1:
-            subject = f"below {numbers[0] + (0.01 if 'or below' in band else 0):.0f}"
-        elif " to " in band and len(numbers) == 2:
-            subject = f"{numbers[0]:.0f} to {numbers[1] + 0.01:.0f}"
-        else:
-            return None
-        return Bet(kind="year_end_range", season=int(last[:4]), game_date=None, team_a=None, team_b=None, subject=subject, line=None,
-                   polarity="yes", **base)
-    m = PRICE_RULE.search(row["rules"] or "")
-    if not m:
-        return None
-    price = m.group(2) or next(iter(PRICE_TITLE.findall(row["title"] or "")), None)
-    if not price:
-        return None
-    return Bet(kind="hit_before" if m.group(1) == "above" else "dip_before", season=int(last[:4]), game_date=None, team_a=None,
-               team_b=None, subject=last, line=float(price.replace(",", "")), polarity="yes", **base)
-
-
 def doubleheaders(rows):
     """
     The contracts on games the same teams play twice on one date, which a
@@ -633,8 +578,6 @@ def classify(row, outcomes=None):
     sport = row["sport"]
     if sport == "politics":
         return classify_election(row, base)
-    if sport == "crypto":
-        return classify_crypto(row, base)
     if row["market_type"] == "futures":
         # Before a race, whose winner is typed a future too: 'f1-dc-2026-12-06-w' is the drivers' title.
         return classify_future(row, sport, base) or (classify_race(row, sport, base) if sport in RACING else None)

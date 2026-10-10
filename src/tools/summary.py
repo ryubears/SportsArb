@@ -2,8 +2,8 @@
 Print a short summary of the database: the pairs, the opportunities the
 executors' rules trade, and the trades.
 
-Everything is shown for the futures, then for the games, matches, races,
-and windows in play, each under a heading of its own, see MARKETS: its
+Everything is shown for the futures, then for the games, matches, and
+races in play, each under a heading of its own, see MARKETS: its
 opportunities, then its trades for each mode, paper then live, or one
 with --mode. Opportunities are shown as live takes them: an episode
 counts when one order could have had config.LIVE_MIN_CONTRACTS or more,
@@ -195,9 +195,9 @@ def seconds(value):
 
 def in_market(market):
     """
-    A SQL condition keeping one market's pairs: the futures, which have no game, or the games, matches, races, and
-    windows, which live trades once under way. Until 2026-10-05 paper traded them before they started too, and its
-    trades then count with the in-play ones.
+    A SQL condition keeping one market's pairs: the futures, which have no game, or the games, matches, and races,
+    which live trades once under way, and Bitcoin's 15 minute windows until 2026-10-10. Until 2026-10-05 paper traded
+    them before they started too, and its trades then count with the in-play ones.
     """
     return " AND p.game_date IS NULL" if market == "futures" else " AND p.game_date IS NOT NULL"
 
@@ -208,7 +208,7 @@ def opportunity_rules(market):
     episode, and its levels in words: the futures paying
     config.MIN_PAYOUT_HOURS or more out and returning config.MIN_ANNUAL_PCT
     a year at the peak, on the levels returning that, and the games,
-    matches, races, and windows under way at the peak paying within
+    matches, and races under way at the peak paying within
     config.MAX_PAYOUT_HOURS, on the levels at config.LIVE_IN_PLAY_MIN_EDGE
     or more, of which no return a year is asked, whose edge stayed at
     config.MIN_EDGE or more for config.LIVE_HOLD_SECONDS, as live waits for
@@ -234,7 +234,7 @@ def opportunity_rules(market):
                 f"paying {config.MIN_PAYOUT_HOURS}h+ out")
     return ("live = 1 AND days_held * 24 <= ? AND min_edge_seconds >= ?", (config.MAX_PAYOUT_HOURS, config.LIVE_HOLD_SECONDS),
             f"levels at {100 * config.LIVE_IN_PLAY_MIN_EDGE:.0f}c+ once the edge lasted {config.LIVE_HOLD_SECONDS:g}s, "
-            f"games, matches, races, and windows under way, paying within {config.MAX_PAYOUT_HOURS}h")
+            f"games, matches, and races under way, paying within {config.MAX_PAYOUT_HOURS}h")
 
 
 def print_market_opportunities(conn, since, hours, sports, market):

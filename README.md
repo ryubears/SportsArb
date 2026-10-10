@@ -2,20 +2,20 @@
 
 A bot that looks for cross-venue arbitrage between the two US prediction
 markets, Kalshi and Polymarket US, and trades what it finds, on paper, with
-real money, or both at once. It covers the NFL, college football, MLB, NHL,
-NBA, WNBA, and men's college basketball, the Premier League, La Liga, Serie
-A, the Bundesliga, Ligue 1, Liga MX, MLS, the Champions League and Europa
-League, national teams' soccer, men's and women's, Formula 1, NASCAR, UFC,
-tennis, darts, esports, Counter-Strike 2, League of Legends, Valorant, Dota
-2, Rainbow Six Siege, and Overwatch, the 2026 US elections, and Bitcoin. It
-follows two kinds of bet: futures, titles, awards, a season's leaders,
-season totals, election races, and Bitcoin's price by a date, which live
-trades, and the bets on one event, games, matches, fights, races, and
-Bitcoin's 15 minute windows, which live trades once they are under way and
-paper before and while they are played. When the cheapest way to hold *yes*
-on one venue and the cheapest way to hold *no* on the other add up to less
-than a dollar after fees, buying both locks in the difference whatever
-happens.
+real money, or both at once. It covers the NFL, college football, MLB,
+NHL, NBA, WNBA, and men's college basketball, the Premier League, La Liga,
+Serie A, the Bundesliga, Ligue 1, Liga MX, MLS, the Champions League and
+Europa League, national teams' soccer, men's and women's, Formula 1,
+NASCAR, UFC, tennis, darts, esports, Counter-Strike 2, League of Legends,
+Valorant, Dota 2, Rainbow Six Siege, and Overwatch, and the 2026 US
+elections; Bitcoin was covered too until October 10. It follows two kinds
+of bet: futures, titles, awards, a season's leaders, season totals, and
+election races, which live trades, and the bets on one event, games,
+matches, fights, and races, which live trades once they are under way and
+paper before and while they are played. When the cheapest way to hold
+*yes* on one venue and the cheapest way to hold *no* on the other add up
+to less than a dollar after fees, buying both locks in the difference
+whatever happens.
 
 The whole thing runs on an EC2 instance in us-east-1, as one process with
 each venue's feed in a child process of its own: it follows every order
@@ -33,8 +33,8 @@ edge, a game's or a future's, once it has lasted a tenth of a second.
 From October 4 to 5 the service on the instance
 traded every sport's futures and the elections live, with paper on every
 event beside it, and the in-play test below. From October 5 it is set to
-trade live alone: every sport's futures, Bitcoin's and the elections'
-included, and every game under way
+trade live alone: every sport's futures, the elections' included, and
+every game under way
 (`--execute live --live-in-play --not-live none`). On October 6 live
 traded the futures alone for a time, the games in play switched off
 (`--execute live --not-live none`), until the games came back under the
@@ -93,7 +93,7 @@ what.
   half an hour after its game's expected end, or a future's close.
 - **Shard**: Kalshi keeps each sport's markets on an exchange shard whose
   cash is its own, football and hockey on shard 0, baseball and basketball
-  on 3, Bitcoin on 2. An order spends only its market's shard's cash.
+  on 3, crypto on 2. An order spends only its market's shard's cash.
 - **Mode**: `paper` or `live`. Paper fills are simulated against the real
   books, live ones are real orders. Every trade is stored with its mode.
 - **Desk**: everything one mode needs: its money, its executor, and its
@@ -292,14 +292,15 @@ and writes.
 ### Catalog (`src/catalog`)
 
 **fetch.py** pulls a sport's open markets from both venues into the
-`contracts` table, its futures and its games, matches, races, or windows.
+`contracts` table, its futures and its games, matches, or races.
 Our sport keys are `nfl`, `ncaaf`, `mlb`, `nhl`, `nba`, `wnba`, `ncaab`,
 `epl`, `laliga`, `seriea`, `bundesliga`, `ligue1`, `ligamx`, `mls`, `ucl`,
 `uel`, `intl` and `intlw`, the men's and women's national teams, `f1`,
 `nascar`, `ufc`, `tennis`, `darts`, `cs2`, `lol`, `valorant`, `dota2`,
-`r6`, and `ow`, an esports title each, `politics`, and `crypto`, which is
-Bitcoin, the one coin Polymarket US lists. Of the thousands of
-series Kalshi lists it takes only those classified, by ticker, each sport's
+`r6`, and `ow`, an esports title each, and `politics`. `crypto`, Bitcoin's
+futures and 15 minute windows, was left out from October 10, its windows'
+trades having filled nothing on Polymarket US. Of the thousands of series
+Kalshi lists it takes only those classified, by ticker, each sport's
 futures listed in `SPORTS` and its event series added from the classifier's
 tables by their prefix, and for elections, which have a series per state or
 district, by the shapes the classifier reads, `SENATEGA` or `HOUSEAZ1`.
@@ -308,21 +309,18 @@ minutes, so a refresh of every sport reads it once. Kalshi is read through
 its public REST catalog, paged under the rate limit, and each series brings
 the exchange shard its markets trade on: shard 0 for football, hockey,
 soccer, national teams' too, motorsport, UFC, darts, esports, and
-elections, shard 3 for baseball, basketball, and tennis, shard 2 for
-Bitcoin. Polymarket US is read through
+elections, and shard 3 for baseball, basketball, and tennis, crypto
+being on shard 2. Polymarket US is read through
 its gateway, one call per tag, deduplicated across tags, baseball through
 the `mlb` tag, since `baseball` brings Korean and Japanese league games
 too, the men's national teams through `intf`, `unl`, `cnl`, and `afcq`,
 the friendlies, the UEFA and CONCACAF Nations Leagues, and the Africa Cup
 of Nations qualifiers, the women's through `uwwcq`, their World Cup
-qualifiers, each esports title through its own, and Bitcoin through
-`crypto` and `up-or-down`. A game's contract
+qualifiers, and each esports title through its own. A game's contract
 starts at its event's kickoff: an event is a game when it has a game id,
 the venue's own or Sportradar's, and a futures market on one is a race's
 when the event runs two days or less, and otherwise an award's, which has
-no start. A Bitcoin window starts at its `windowStart`. Polymarket US marks
-a window closed until it opens, so the catalog of Bitcoin is refreshed just
-after each one opens, see the engine.
+no start.
 
 **classify/** turns each contract into a `Bet`, a venue neutral statement
 of what the contract is about: kind, season, the game's date and its two
@@ -374,9 +372,6 @@ The bets on one event:
   them.
 - Races: F1's and NASCAR's winner and F1's top constructor, a race being
   its date, from Kalshi's rules and Polymarket US's slug.
-- Bitcoin's 15 minute windows, whether the CF Benchmarks index ends the
-  window at least where it began, the same rule on both venues, a window
-  named by its start in UTC.
 
 For a future, Kalshi gives each kind a series of its own, `KXSB` the Super
 Bowl, or an event of its own within one, `KXEPLTOP-27TOP4` the Premier
@@ -408,9 +403,6 @@ shape that means different things, `ucl-D-lastplace`. The kinds:
   party's win differently, Kalshi paying on any member of it taking the
   seat and Polymarket US on its nominee winning, so there only candidates
   are paired.
-- Bitcoin: its price going above, or below, a strike by a deadline, the
-  deadline being the last day it counts, *before Sep 1, 2026 at 12:00 AM
-  ET* being August 31, and the $5,000 band it ends 2026 in.
 
 Team aliases are resolved through `teams.py` and `aliases/`, which has a
 file for each sport, since leagues reuse codes (DAL is the Cowboys and the
@@ -454,9 +446,8 @@ venues list, and two dates one lists, stay matches of their own. Kinds with
 settlement rules that differ between venues carry a note from **notes.py**:
 how each venue treats a postponed game, overtime, a retired tennis player,
 a fight's draw, a darts walkover, a drawn esports match, which Polymarket
-US pays at 50 cents and Kalshi's rules leave unsaid, a driver who does not
-finish, and Bitcoin's index, Polymarket US reading a trimmed mean of its
-last minute where Kalshi reads the index itself; Polymarket US divides the
+US pays at 50 cents and Kalshi's rules leave unsaid, and a driver who does
+not finish; Polymarket US divides the
 dollar among players or teams that tie for an award, a lead, or a record,
 where Kalshi's rules do not always say; Kalshi reads a UFC title holder and
 a tennis ranking at noon Eastern on December 31 and Polymarket US at 11:59
@@ -466,8 +457,8 @@ is a warning to read, not a bar.
 
 **pipeline.py** runs fetch, classify, and match in one call. The live
 process runs it every hour in a child process, so new games and futures
-enter the pairs while it runs, and Bitcoin's alone just after each 15
-minute window opens. A refresh of every sport takes some eight minutes,
+enter the pairs while it runs. A refresh of every sport takes some eight
+minutes,
 the NFL's games and the elections the most of it. A dry run on October 4
 paired some 5,000 game and event bets, 3,400 of them the NFL's, and 4,700
 futures; 227 of the game pairs, every kind among them, were read against
@@ -547,7 +538,7 @@ money, and its settler. `--execute` picks the desks: `paper`, the default,
 `live`, or `both`, which runs a desk of each. The desks trade apart: the
 paper desk the bets on one event, a pair with a game date, and the live
 desk the futures, a pair without one, bar the sports given to `--not-live`,
-`crypto` by default, whose futures are followed but traded by neither. On
+none by default, whose futures are followed but traded by neither. On
 one signal the live desk's real orders would take the contracts the paper
 desk's simulated ones look for. Each desk still flattens and settles every
 trade it holds. With `--live-in-play`, which needs `--execute live` or
@@ -555,15 +546,13 @@ trade it holds. With `--live-in-play`, which needs `--execute live` or
 once under way, see **trading/** below; with paper running too, both take
 those signals, and paper is given back what live's orders took. The same
 loop starts the hourly catalog refresh in a child process and applies the
-result to the live connections, and with Bitcoin followed it refreshes
-Bitcoin's catalog alone 20 seconds after each 15 minute window opens, when
-both venues list it, so a window is traded for most of its 15 minutes. One
+result to the live connections. One
 run trades every sport given to `--sport`, comma separated as in
 `--sport nfl,ncaaf,mlb,nhl,nba`, or every one with `--sport all`, since the
 money is one pool and a second process would spend the same dollars. How
 long a game is expected to last is set for every sport in `GAME_HOURS`,
-measured for the first five and an allowance for the rest, a Bitcoin
-window's being its 15 minutes. The pieces it wires together are in
+measured for the first five and an allowance for the rest. The pieces it
+wires together are in
 `engine/components/`, in three folders by what they do: `market/` follows
 the venues, `trading/` makes the trades, and `money/` keeps the cash. What
 they share is in `engine/helper/`: the settings, game timing, pricing, and
@@ -653,7 +642,7 @@ on keeping episodes there.
 **trading/** trades the signal. **executor.py** holds what paper and live
 share, which is everything but how an order is filled. Live trades the
 futures, which pay out a day or more away, and with `--live-in-play` the
-games, matches, races, and windows once under way that pay within 24 hours
+games, matches, and races once under way that pay within 24 hours
 (`MAX_PAYOUT_HOURS`), below. Paper trades the bets on one event
 (`in_play`), before and while they are played, that pay within 24 hours
 (`MAX_PAYOUT_HOURS`), to see how they would do. A signal needs a net edge
@@ -782,18 +771,18 @@ minutes, or until its venue says it trades (`Recorder.refuse`). Until
 have halted live trading. Live trading takes every sport the run does. A
 Kalshi leg spends only the cash on its market's shard: football's,
 hockey's, soccer's, the national teams' too, motorsport's, UFC's, darts',
-esports', and politics' on shard 0, Bitcoin's on 2, and baseball's,
-basketball's, and tennis' on 3. So
-`tools/kalshi_shards.py` splits the Kalshi cash between them, 80% to shard
-0, where the football futures with the long-lasting edges are, and 20% to
-shard 3, with nothing on Bitcoin's shard 2 (`LIVE_SHARDS`), so every
-Bitcoin trade comes to no contracts. Until 2026-10-05 it was 90% to shard 0
-and 10% to shard 3, with nothing on 2, and live had made no Bitcoin trade;
-from then until 2026-10-10 80/10/10, but in the two days before the
-change Bitcoin's 31 window trades filled nothing, its futures were held
-out, and its shard sat untouched at 54.09$ while shard 3 ran dry. The live
-executor emails once when a shard in the split, or Polymarket US, falls
-under $5 (`LIVE_LOW_CASH`), and again only after it has been back over.
+esports', and politics' on shard 0, and baseball's, basketball's, and
+tennis' on 3, crypto being on 2. So `tools/kalshi_shards.py` splits the
+Kalshi cash between them, 80% to shard 0, where the football futures with
+the long-lasting edges are, and 20% to shard 3, with nothing on shard 2
+(`LIVE_SHARDS`). Until 2026-10-05 it was 90% to shard 0 and 10% to shard
+3, with nothing on 2, and live had made no Bitcoin trade; from then until
+2026-10-10 80/10/10, but in the two days before the change Bitcoin's 31
+window trades filled nothing, its futures were held out, and its shard sat
+untouched at 54.09$ while shard 3 ran dry; the same day Bitcoin left the
+catalog. The live executor emails once when a shard in the split, or
+Polymarket US, falls under $5 (`LIVE_LOW_CASH`), and again only after it
+has been back over.
 
 **Edges that last.** From 2026-10-05 04:07 UTC live traded an edge only
 once it had stayed at `MIN_EDGE` or more for half a second, unbroken, as
@@ -806,8 +795,8 @@ a second, for futures too, each at live's least edge on it, the rate a
 year on a future and two cents on a game, below.
 
 **Games in play.** With `--live-in-play` live also trades the games,
-matches, races, and windows under way, of every sport, Bitcoin's windows
-included: once the game has started by any member's kickoff, since a
+matches, and races under way, of every sport, Bitcoin's windows too until
+2026-10-10: once the game has started by any member's kickoff, since a
 Kalshi contract gives none, paying within 24 hours (`MAX_PAYOUT_HOURS`),
 sized as any trade, by the books and the cash. Its Polymarket US order
 goes first and its Kalshi order only once that has answered, for what it
@@ -983,7 +972,7 @@ counts when one order could have had `LIVE_MIN_CONTRACTS` or more, a
 tenth of a contract, on the levels at live's least edge or more, the levels
 returning `MIN_ANNUAL_PCT` a year on a future paying `MIN_PAYOUT_HOURS` or
 more out, and those at `LIVE_IN_PLAY_MIN_EDGE` or more on a game, match,
-race, or window under way paying within `MAX_PAYOUT_HOURS`, once the edge
+or race under way paying within `MAX_PAYOUT_HOURS`, once the edge
 has lasted `LIVE_HOLD_SECONDS` there, as live waits for it to, a future's
 from 2026-10-07, the moment being the scanner's (`Scanner.weigh_take`).
 Lasting does not make an edge real: two episodes of one Bitcoin window on
@@ -1543,15 +1532,14 @@ python3 -m catalog.pipeline --sport nfl
 python3 -m engine.run --sport nfl
 ```
 
-`--sport ncaaf`, `--sport epl`, `--sport politics`, `--sport crypto`, and
-the rest build or run one sport's markets, `--sport nfl,ncaaf,mlb` several
+`--sport ncaaf`, `--sport epl`, `--sport politics`, and the rest build or run one sport's markets, `--sport nfl,ncaaf,mlb` several
 from one pool of money, and `--sport all` every one, as the instance does
 with `--sport all --execute live --live-in-play --not-live none`.
 `--no-trade` scans without trading, `--no-scan` only records, and
 `--seconds 120` runs a short test. `--execute live` trades the futures with
 real money and `--execute both` runs both desks, paper trading the bets on
-one event. `--not-live crypto,politics` holds sports' futures out of live
-trading, `crypto` alone by default, and `--not-live none` holds none.
+one event. `--not-live politics` holds sports' futures out of live
+trading, none by default, as with `--not-live none`.
 `--live-in-play`, with `--execute live` or `both`, has live trade the games
 under way too. The settings a run is tuned by, such as the minimum edge,
 the annual return, and the starting balance, are in

@@ -48,7 +48,7 @@ def test_the_national_teams_are_soccer_and_the_womens_go_by_the_mens_codes():
 def test_the_kalshi_series_fetched_are_the_ones_the_kalshi_classifier_reads():
     fetched = [ticker for venues in fetch.SPORTS.values() for ticker in venues["kalshi"]["tickers"]]
     events = {*kalshi.GAME_SERIES, *kalshi.PLAYER_SERIES, *kalshi.SOCCER_SERIES, *kalshi.MATCH_SERIES, *kalshi.RACING_SERIES,
-              *kalshi.CRYPTO_SERIES, *kalshi.ESPORTS_SERIES}
+              *kalshi.ESPORTS_SERIES}
     assert sorted(fetched) == sorted({*kalshi.FUTURE_SERIES, *events})
     patterns = [p for venues in fetch.SPORTS.values() for p in venues["kalshi"].get("patterns", ())]
     assert sorted(p.pattern for p in patterns) == sorted(p.pattern for p in kalshi.SERIES_PATTERNS)

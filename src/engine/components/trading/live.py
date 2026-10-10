@@ -26,7 +26,7 @@ than the live trades say, which would mean the records are wrong, see
 check_positions().
 
 Live trades the futures, see executor.py, and with run.py --live-in-play
-also the games, matches, races, and windows under way that pay within
+also the games, matches, and races under way that pay within
 config.MAX_PAYOUT_HOURS, by its own rules below. With its legs on two
 venues, Polymarket US's order goes first and Kalshi's only once that has
 answered, for what it filled, see Executor.fill_legs(). From 2026-10-04 to
@@ -201,7 +201,7 @@ class LiveExecutor(Executor):
 
     def by_game_rules(self, pair):
         """
-        Whether live judges the pair by its rules for a game, match, race, or window, which it has only with in_play,
+        Whether live judges the pair by its rules for a game, match, or race, which it has only with in_play,
         rather than by the shared Executor's, as it does a future.
         """
         return self.in_play and pair.get("game_date") is not None
@@ -264,7 +264,7 @@ class LiveExecutor(Executor):
 
     def plays(self, pair, yes, no, now):
         """
-        A future, and with in_play a game, match, race, or window only once
+        A future, and with in_play a game, match, or race only once
         it is under way, judged by every member of the pair, since a Kalshi
         contract gives no kickoff. Otherwise as the shared Executor says:
         live's desk offers it only futures then, see run.py.

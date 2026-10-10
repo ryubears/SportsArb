@@ -150,9 +150,8 @@ def test_a_top_two_state_pairs_only_candidates():
     assert election("SENATEXX", "SENATEXX-26", "SENATEXX-26-D") is None      # No such state.
 
 
-def test_a_race_and_a_price_deadline_read_their_dates_with_the_month_in_full():
-    # 'September' was read as 'Sepember' until 2026-10-04, so a race or a deadline in September had no date.
+def test_a_race_reads_its_date_with_the_month_in_full():
+    # 'September' was read as 'Sepember' until 2026-10-04, so a race in September had no date.
     rules = "If Lando Norris finishes in first in the main race originally scheduled for September 6, 2026 at the 2026 Italian Grand Prix"
     race = kalshi.classify(row("KXF1RACE", "KXF1RACE-ITA26", "KXF1RACE-ITA26-NOR", sport="f1", outcome="Lando Norris", rules=rules))
     assert bet_fields(race) == ("race_winner", 2026, "2026-09-06", None, None, "lando norris", None, "yes")
-    assert kalshi.deadline("above $150,000 before September 1, 2027 at 12:00 AM ET") == "2027-08-31"

@@ -1,7 +1,6 @@
 """
-Fetch the open markets of each sport, of elections, and of Bitcoin from
-both venues into SQLite: the games, matches, races, and 15 minute windows
-paper trades, and the futures live trades.
+Fetch the open markets of each sport and of elections from both venues
+into SQLite: the games, matches, and races, and the futures.
 
 Run with:
     python3 -m catalog.fetch --sport nfl
@@ -11,7 +10,7 @@ Run with:
 import argparse
 import time
 from api import kalshi, polymarket_us
-from catalog.classify.kalshi import (CONFERENCES, CONTROL_SERIES, CRYPTO_SERIES, ESPORTS_SERIES, ESPORTS_TITLES, GAME_SERIES,
+from catalog.classify.kalshi import (CONFERENCES, CONTROL_SERIES, ESPORTS_SERIES, ESPORTS_TITLES, GAME_SERIES,
                                     HOUSE_RACE_SERIES, MATCH_SERIES, NFL_DIVISIONS, NHL_DIVISIONS, PLAYER_SERIES, RACING_SERIES,
                                     SERIES_PATTERNS, SOCCER_LEAGUES, SOCCER_SERIES, TITLE_FUTURES)
 from common.timeutil import now_iso
@@ -96,17 +95,16 @@ SPORTS = {
         "kalshi": {"tickers": [*CONTROL_SERIES, HOUSE_RACE_SERIES], "patterns": SERIES_PATTERNS},
         "polymarket_us": {"tags": ["politics"]},
     },
-    "crypto": {"kalshi": {"tickers": []}, "polymarket_us": {"tags": ["crypto", "up-or-down"]}},   # Bitcoin's futures, then its windows.
     # Esports matches, one sport a title. Its tournaments' winners are not read yet, nothing in their tickers or slugs naming
     # the same tournament on both venues.
     **{title: {"kalshi": {"tickers": []}, "polymarket_us": {"tags": [title]}} for title in ESPORTS_TITLES},
 }
-# Each sport's Kalshi series on one game, match, race, or window, by the prefix of their tickers.
+# Each sport's Kalshi series on one game, match, or race, by the prefix of their tickers.
 GAME_PREFIXES = {"nfl": ("KXNFL",), "ncaaf": ("KXNCAAF",), "mlb": ("KXMLB",), "nhl": ("KXNHL",), "nba": ("KXNBA",), "wnba": ("KXWNBA",),
                  "ncaab": ("KXNCAAMB",), **{sport: tuple(f"KX{code}" for code in codes) for sport, codes in SOCCER_LEAGUES.items()},
                  "tennis": ("KXATP", "KXWTA"), "ufc": ("KXUFC",), "darts": ("KXDARTS",), "f1": ("KXF1",), "nascar": ("KXNASCAR",),
-                 "crypto": ("KXBTC",), **{sport: (f"KX{code}",) for sport, code in ESPORTS_TITLES.items()}}
-EVENT_SERIES = {*GAME_SERIES, *PLAYER_SERIES, *SOCCER_SERIES, *MATCH_SERIES, *RACING_SERIES, *CRYPTO_SERIES, *ESPORTS_SERIES}
+                 **{sport: (f"KX{code}",) for sport, code in ESPORTS_TITLES.items()}}
+EVENT_SERIES = {*GAME_SERIES, *PLAYER_SERIES, *SOCCER_SERIES, *MATCH_SERIES, *RACING_SERIES, *ESPORTS_SERIES}
 for _sport, _prefixes in GAME_PREFIXES.items():
     SPORTS[_sport]["kalshi"]["tickers"] = [*SPORTS[_sport]["kalshi"]["tickers"], *sorted(s for s in EVENT_SERIES if s.startswith(_prefixes))]
 

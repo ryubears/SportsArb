@@ -56,22 +56,11 @@ ESPORTS_NOTES = {
 }
 RACING_NOTE = ("A driver who retires or is not classified loses on both venues. Kalshi pays on the FIA's final classification and "
                "settles at a fair price if the race does not start within 48 hours; Polymarket US waits up to two weeks for it.")
-# Bitcoin, as of 2026-10: both settle on CF Benchmarks' Bitcoin Real-Time Index, but read it apart.
-CROSSING_NOTE = ("Kalshi pays on the index itself crossing the price, Polymarket US on a 60 second trimmed mean of it, without the "
-                 "top and bottom fifth, crossing it, so a brief spike can settle them apart.")
-CRYPTO_NOTES = {
-    "updown_15m": "Both venues compare the simple averages of the index's last 60 seconds before the window's end and its start, "
-                  "rounded to the cent, Up on equal.",
-    "hit_before": CROSSING_NOTE,
-    "dip_before": CROSSING_NOTE,
-    "year_end_range": "Kalshi reads the simple average of the index's last 60 seconds of 2026, Polymarket US a trimmed mean of "
-                      "them, without the top and bottom fifth.",
-}
 KIND_NOTES = {"nfl": FOOTBALL_NOTES, "ncaaf": FOOTBALL_NOTES, "mlb": BASEBALL_NOTES, "nhl": HOCKEY_NOTES, "nba": BASKETBALL_NOTES,
               "wnba": BASKETBALL_NOTES, "ncaab": BASKETBALL_NOTES,
               **{league: SOCCER_NOTES for league in SOCCER},
               **MATCH_NOTES, "f1": {"race_winner": RACING_NOTE, "race_constructor": RACING_NOTE}, "nascar": {"race_winner": RACING_NOTE},
-              "crypto": CRYPTO_NOTES, **{title: ESPORTS_NOTES for title in ESPORTS}}
+              **{title: ESPORTS_NOTES for title in ESPORTS}}
 FOOTBALL_PLAYER_NOTE = ("Both venues settle to the pre-game fair price if the player never takes a snap and count overtime. Polymarket US "
                         "ignores stat corrections made after the game.")
 BASKETBALL_PLAYER_NOTE = ("Both venues count overtime, and Polymarket US ignores stat corrections made after the game. A player who is "

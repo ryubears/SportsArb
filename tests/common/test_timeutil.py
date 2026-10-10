@@ -52,14 +52,6 @@ def test_written_date_reads_the_month_in_full_or_short():
     assert timeutil.written_date("Noon 4, 2026") is None
 
 
-def test_last_day_of_a_deadline_at_midnight_is_the_day_before():
-    assert timeutil.last_day("2026-09-01", "12", "00", "AM") == "2026-08-31"       # 'before Sep 1, 2026 at 12:00 AM ET'.
-    assert timeutil.last_day("2027-01-01", "12", "00", "am") == "2026-12-31"
-    assert timeutil.last_day("2026-12-31", "11", "59", "PM") == "2026-12-31"
-    assert timeutil.last_day("2026-12-31", "12", "00", "PM") == "2026-12-31"       # Noon leaves the afternoon.
-    assert timeutil.last_day("2026-12-31") == "2026-12-31"                         # 'by Dec 31, 2026', no time given.
-
-
 def test_season_from_date_splits_in_august():
     assert timeutil.season_from_date("2026-09-20") == 2027
     assert timeutil.season_from_date("2027-01-10") == 2027
