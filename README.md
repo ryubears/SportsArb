@@ -27,7 +27,7 @@ and paper the bets on one event paying within a day, where faster traders
 may take the edges first, to see how they would do, its orders timed as
 live ones are. By default the orders are paper. With `--execute live` or
 `--execute both` it sends real ones, and with `--live-in-play` live trades
-the games under way too, an edge of two cents or more, at most 100
+the games under way too, an edge of two cents or more, at most 20
 contracts a trade. Polymarket US's order goes first, and live takes an
 edge, a game's or a future's, once it has lasted a tenth of a second.
 From October 4 to 5 the service on the instance
@@ -877,8 +877,9 @@ at a tenth of a second, and one Kalshi's opened at 0.3. A future's edge
 waits the same from 2026-10-07, at the rate a year rather than two cents,
 taken at once until then, and from 2026-10-08 a future's edge offered
 again after a trade waits as long again from when the trade was done. A
-trade asks for no more than 100 contracts (`LIVE_IN_PLAY_CONTRACTS`), 50
-from 2026-10-08 and 10 before, its limits going no deeper than the levels
+trade asks for no more than 20 contracts (`LIVE_IN_PLAY_CONTRACTS`), 100
+from 2026-10-10 13:01 UTC to that evening, 50 from 2026-10-08, and 10
+before, its limits going no deeper than the levels
 that hold them, and a tenth of one or more, with no limit on how many such
 trades. Each trade says whether its game was under way at the signal (the
 trades table's `in_play`, null before 2026-10-05). Lasting does not make an
@@ -1502,6 +1503,22 @@ contracts nothing would buy back at half their cost, six long shots bought
 at one to five cents, 2.08$ lost, and a Dota 2 map's 25 of 50, which won
 10.57$. On the user's asking the cap became 100 from October 10, a trade
 sized by its cash leaving room for the fees from then too.
+
+**Twenty contracts in play.** From October 6 15:34 UTC to October 10
+17:55, at caps of 10, 50, and 100, live made 2,343 trades on games under
+way for 26.67$. A cap of 10 throughout would have made some 22$, taking
+each trade's first 10 contracts Polymarket US filled and Kalshi's fill up
+to them, the locked-in profit and the hedges scaling with the contracts:
+the 25 larger trades that matched locked in 34.28$ where 10 contracts
+would have locked in some 10.5$, and the 14 Kalshi missed lost 23.90$
+where 10 would have lost some 4.9$. The cap seldom held a trade back.
+Of the 162 trades asking the cap, 10 matched it in full, and Polymarket
+US filled nothing on 101 of the 115 asking 50, though the scanner showed
+more than 50 contracts at two cents for nearly all of them. The two
+largest results were one trade each: a Counter-Strike match matching 50
+at 15 cents for 7.48$, and a Dota 2 map at 100 that Polymarket US filled
+and Kalshi did not, sold back for 7.82$ less. On the user's asking the
+cap became 20 from that evening.
 
 The honest reading is that after fees the two venues are tightly priced
 before kickoff and briefly, sharply mispriced after every scoring play.

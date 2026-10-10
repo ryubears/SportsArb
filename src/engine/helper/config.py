@@ -85,11 +85,14 @@ LIVE_HOLD_SECONDS = 0.1        # How long an edge must have stayed at live's lea
                                 # after that change, unless a newer Polymarket US book still shows it. From 2026-10-05 to 10-06
                                 # live took a game's edge only on the signal a change of the Polymarket US leg's book brought,
                                 # which in seven hours let one episode through.
-LIVE_IN_PLAY_CONTRACTS = 100    # The most contracts a live trade on a game under way asks for: 5 from 2026-10-05, for 200 trades,
-                                # 10 from 2026-10-06, for as many as come, 50 from 2026-10-08, and 100 from 2026-10-10, at the user's
-                                # asking. At 10, the 4 of 46 capped trades that filled had 330 contracts on offer at two cents, by
-                                # the scanner, for 40 taken. At 50, from 2026-10-08 05:55 to 10-10 05:55 UTC, 4 of 88 capped trades
-                                # filled in full, locking in 14.58$, and 2 filled only on Polymarket US, sold back for 6.48$ less.
+LIVE_IN_PLAY_CONTRACTS = 20     # The most contracts a live trade on a game under way asks for: 5 from 2026-10-05, for 200 trades,
+                                # 10 from 2026-10-06, for as many as come, 50 from 2026-10-08, 100 from 2026-10-10 13:01 UTC, and 20
+                                # from that evening, at the user's asking. At 10, the 4 of 46 capped trades that filled had 330
+                                # contracts on offer at two cents, by the scanner, for 40 taken. At 50, from 2026-10-08 05:55 to 10-10
+                                # 05:55 UTC, 4 of 88 capped trades filled in full, locking in 14.58$, and 2 filled only on Polymarket
+                                # US, sold back for 6.48$ less. From 2026-10-06 15:34 to 10-10 17:55 UTC live made 26.67$ in play,
+                                # where a cap of 10 throughout would have made some 22$: of the 162 trades asking the cap, 10 matched
+                                # it in full, and one at 100 lost 7.82$ when Kalshi filled none of Polymarket US's 100.
 LIVE_MIN_CONTRACTS = 0.1        # The fewest contracts a live trade opens with, on a future or a game, in hundredths above it, which both
                                 # venues take orders and fill in. One whole contract until 2026-10-07, when the user asked for a tenth:
                                 # from 2026-10-05 to 10-07 the episodes offering under a contract at live's least edge would have added

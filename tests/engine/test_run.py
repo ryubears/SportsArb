@@ -209,7 +209,7 @@ def test_live_in_play_is_offered_games_too_alone_or_beside_paper_which_gets_back
     assert again.func == s.scanner.offer_again and again.args == (0,)
     assert offered == [("live", "2026-10-11"), ("live", None)] and results == [True, True]
     assert ("live also trades the games, matches, races, and windows under way of every sport that pay within 24h, an edge of 0.02$ "
-            "or more once it has lasted 0.1s at 0.02$ or more, at most 100 contracts a trade, "
+            "or more once it has lasted 0.1s at 0.02$ or more, at most 20 contracts a trade, "
             "Polymarket US's order first and Kalshi's for what it filled") in capsys.readouterr().out
     s, offered, results = asyncio.run(scenario(run.EXECUTE["both"]))
     # Beside paper both take the game, live first, and paper is given back what live's orders took.
